@@ -96,37 +96,57 @@ python scripts/bilingual_detect.py --target-dir ./target/ --config bilingual_con
 
 ---
 
-## 3. Name 字段映射
+## 3. Name 字段映射 + 多语言审查
 
 ### 检测
 ```bash
-# 先扫描所有 Name 值
+# 基本扫描（列出所有 Name 值）
+python scripts/names_detect.py --target-dir ./target/
+
+# 打印映射模板（含语言分类标记）
 python scripts/names_detect.py --target-dir ./target/ --scan
 
-# 或输出 JSON
-python scripts/names_detect.py --target-dir ./target/ > names.json
+# 语言分类检测（推荐）
+python scripts/names_detect.py --target-dir ./target/ --lang-check > names_lang.json
 ```
 
-### 检测输出（片段）
+### 检测输出（--lang-check 模式，片段）
 ```json
 {
-  "names": ["Abe", "Gumi", "Poppy", "Sally"],
-  "by_file": {"Episode 001.ass": ["Abe", "Sally"], "Episode 002.ass": ["Abe", "Gumi"]}
+  "total_names": 180,
+  "target_language_names": 16,
+  "non_target_names": 164,
+  "non_target_by_language": {
+    "cyrillic": 140,
+    "latin": 20,
+    "japanese_kana": 4
+  },
+  "non_target_names_detail": [
+    {
+      "name": "Мама Осаму",
+      "primary_language": "cyrillic",
+      "non_target_languages": ["cyrillic"],
+      "non_target_chars": ["а", "а", "М", "м", "О", "с"],
+      "occurrences": 49,
+      "files": ["Mahou Tsukai Sally 056.ass", ...],
+      "file_count": 8
+    }
+  ]
 }
 ```
 
 ### 对应 fixes.json
 
-Claude 对照参考字幕建立映射后：
+Claude 审查后建立映射：
 ```json
 [
-  {"action": "replace_global", "original": ",Abe,", "replacement": ",阿部,", "note": "Name字段：角色名"},
-  {"action": "replace_global", "original": ",Gumi,", "replacement": ",古美,", "note": "Name字段：角色名"},
-  {"action": "replace_global", "original": ",Poppy,", "replacement": ",波比,", "note": "Name字段：宠物名"}
+  {"action": "replace_global", "original": ",Мама Осаму,", "replacement": ",修的母亲,", "note": "Name字段：俄→中"},
+  {"action": "replace_global", "original": ",サリー,", "replacement": ",莎莉,", "note": "Name字段：日→中"},
+  {"action": "replace_global", "original": ",Sally,", "replacement": ",莎莉,", "note": "Name字段：英→中"}
 ]
 ```
 
-> ⚠️ Name 字段替换建议用前后逗号限定（`,Name,`），避免替换到对话文本中的同名普通词汇。
+> ⚠️ Name 字段替换必须用前后逗号限定（`,Name,`），避免替换到对话文本中的同名普通词汇。建议优先使用 `replace_global`（而非逐行 `replace_name`），因为同一角色名会在多行多集中出现。
 
 ---
 
@@ -418,14 +438,21 @@ Claude 选定标准后统一：
 
 ---
 
-## 12. 源语言字符残留
+## 12. 源语言字符残留（多语言版）
 
 ### 检测
 ```bash
-python scripts/source_char_detect.py --target-dir ./target/ --config source_char_config.json > char_scan.json
+# 多语言模式（推荐）
+python scripts/source_char_detect.py --target-dir ./target/ --langs en,jp,ru > char_scan.json
+
+# 仅检测 Name 字段
+python scripts/source_char_detect.py --target-dir ./target/ --langs en,jp,ru --mode names > name_scan.json
+
+# 单语言模式（向后兼容旧版 config）
+python scripts/source_char_detect.py --target-dir ./target/ --config source_char_config.json
 ```
 
-### 配置 (source_char_config.json)
+### 配置 (source_char_config.json) — 旧版单语言模式
 ```json
 {
   "dialogue_styles": ["Default", "DefaultTop", "Episode"],
@@ -433,19 +460,48 @@ python scripts/source_char_detect.py --target-dir ./target/ --config source_char
 }
 ```
 
-### 检测输出（片段）
+### 内建语言预设
+| 代码 | 语言 | 模式 |
+|------|------|------|
+| `en` | 英语 | `[A-Za-z]{2,}` (2+连续拉丁字母) |
+| `jp` | 日语假名 | 平假名+片假名范围 |
+| `ru` | 俄语西里尔 | `[А-Яа-яЁё]` |
+| `cjk` | 中日韩汉字 | 用于确认目标语言覆盖率 |
+
+### 检测输出（--langs en,jp,ru 多语言模式，片段）
 ```json
-[
-  {"file": "Ep 015.ass", "line": 89, "timecode": "0:06:30.10", "visible": "我们走吧Давай", "source_chars_found": ["Д", "а", "в", "а", "й"], "count": 5}
-]
+{
+  "by_language": {
+    "en": {
+      "name": "English",
+      "findings": [
+        {"file": "Ep 003.ass", "line": 78, "field": "text", "visible": "I'm sorry.", "matches": ["I'm", "sorry"]}
+      ],
+      "summary": {"total_findings": 45, "affected_files": 12, "top_matches": {"come": 30, "sorry": 15}}
+    },
+    "ru": {
+      "name": "Russian Cyrillic",
+      "findings": [
+        {"file": "Ep 015.ass", "line": 89, "field": "text", "visible": "我们走吧Давай", "matches": ["Давай"]},
+        {"file": "Ep 056.ass", "line": 292, "field": "name", "name": "Мужик", "name_match": true}
+      ],
+      "summary": {"total_findings": 200, "affected_files": 50, "name_values": {"Мужик": 20, "Мама Осаму": 49}}
+    }
+  },
+  "total_findings": 300,
+  "mode": "all"
+}
 ```
 
 ### 对应 fixes.json
 
-Claude 判断是删除残留还是翻译：
+Claude 按语言逐条审查。Name 字段用 `replace_global`：
+
 ```json
 [
-  {"action": "replace_global_regex", "pattern": "我们走吧Давай", "replacement": "我们走吧！", "note": "删除俄语残留"}
+  {"action": "replace_global", "original": "Давай", "replacement": "走吧", "note": "俄语残留"},
+  {"action": "replace_global_regex", "pattern": "我们走吧Давай", "replacement": "我们走吧！", "note": "删除俄语残留"},
+  {"action": "replace_global", "original": ",Мужик,", "replacement": ",男子,", "note": "Name字段：俄→中"}
 ]
 ```
 
@@ -508,7 +564,53 @@ if conflicts:
 
 ---
 
-## 快速参考：什么时候用哪个 action
+## 14. 繁体中文 → 简体中文 检测与转换
+
+### 检测
+```bash
+# 检测模式（输出 JSON 供 Claude 审查）
+python scripts/trad_to_simp_detect.py --target-dir ./target/ > trad_findings.json
+
+# 自动转换（推荐 — 繁→简映射为确定性规则，无需逐条审查）
+python scripts/trad_to_simp_detect.py --target-dir ./target/ --auto
+
+# 预览自动转换（不写入）
+python scripts/trad_to_simp_detect.py --target-dir ./target/ --auto --dry-run
+```
+
+### 检测输出（片段）
+```json
+{
+  "findings": [
+    {
+      "file": "Ep 003.ass",
+      "line": 325,
+      "timecode": "0:13:24.32",
+      "style": "Default",
+      "visible": "哦，對不起！给你",
+      "trad_chars": ["對"],
+      "suggested_fixes": {"對": "对"}
+    }
+  ],
+  "char_stats": {"對": 45, "沒": 38, "會": 30, "說": 25, "時": 20},
+  "affected_files": ["Ep 003.ass", "Ep 014.ass", ...],
+  "total_occurrences": 3358
+}
+```
+
+### 对应 fixes.json（检测模式）
+
+繁→简为确定性映射，通常直接 `--auto` 自动转换。如需保留检测步骤：
+
+```json
+[
+  {"action": "replace_global", "original": "對", "replacement": "对", "note": "繁体→简体"},
+  {"action": "replace_global", "original": "沒", "replacement": "没", "note": "繁体→简体"},
+  {"action": "replace_global", "original": "會", "replacement": "会", "note": "繁体→简体"}
+]
+```
+
+> ⚠️ **重要**：`--auto` 模式仅在对话样式行中执行转换，自动跳过 Display、Title、Opening 等特效层。如果某个繁体字恰好也是某个专有名词的标准写法（极少见），需手动检查 `char_stats` 后决定是否保留。
 
 | 场景 | action | 示例 |
 |------|--------|------|
