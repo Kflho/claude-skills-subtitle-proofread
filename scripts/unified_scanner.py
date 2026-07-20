@@ -253,6 +253,10 @@ def write_issues(output, issues_dir):
     """将 per-episode issues 写入独立 JSON 文件。"""
     os.makedirs(issues_dir, exist_ok=True)
     for ep, issues in output['per_episode_issues'].items():
+        # 跳过无法识别集号的条目
+        if ep == '???' or not ep.startswith('EP'):
+            print(f'  跳过无效集号: {ep} ({len(issues)} issues)', file=sys.stderr)
+            continue
         path = os.path.join(issues_dir, f'issues_{ep}.json')
         data = {
             'episode': ep,
