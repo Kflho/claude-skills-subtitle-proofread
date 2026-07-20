@@ -53,6 +53,8 @@ if _SCRIPT_DIR not in sys.path:
 if _ROOT_DIR not in sys.path:
     sys.path.insert(0, _ROOT_DIR)
 
+from lib.whisper_utils import to_seconds
+
 
 # ═══════════════════════════════════════════════════════════════
 # Collect unfixable items
@@ -139,15 +141,6 @@ def collect_from_noun_check(noun_path):
 # ═══════════════════════════════════════════════════════════════
 # Video clip extraction
 # ═══════════════════════════════════════════════════════════════
-
-def to_seconds(ts):
-    """Convert SRT timestamp to seconds. Handles both ',' and '.' as ms separator."""
-    ts = ts.replace(',', '.').strip()
-    parts = ts.split(':')
-    if len(parts) == 3:
-        return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
-    return 0.0
-
 
 def find_video(episode, video_dir):
     """Find the video file for an episode."""

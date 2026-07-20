@@ -276,6 +276,72 @@ def step_clean(project_dir):
                 project_dir, desc='clean')
 
 
+def step_deliver(project_dir, lang):
+    """Layer 6: extract review clips for human delivery.
+
+    Collects unfixable items from:
+      - Whisper fixes (confidence=none) in temp/scans/*_fixes.json
+      - Report layer 6 entries in reports/问题解决报告.md
+      - Noun checker unresolved items in temp/scans/noun_check.json
+    """
+    report_path = os.path.join(project_dir, 'reports', '问题解决报告.md')
+    fixes_dir = os.path.join(project_dir, 'temp', 'scans')
+    noun_check = os.path.join(project_dir, 'temp', 'scans', 'noun_check.json')
+    srt_dir = os.path.join(project_dir, 'AI审查后')
+    output_dir = os.path.join(project_dir, 'reports', 'manual-review')
+    extractor = os.path.join(_SCRIPT_DIR, 'utils', 'extract_review_clips.py')
+
+    # Auto-detect video directory
+    video_dir = _detect_video_dir(project_dir)
+
+    cmd = [
+        'python', extractor,
+        '--srt-dir', f'"{srt_dir}"',
+        '--output', f'"{output_dir}"',
+    ]
+
+    # Add report if it exists and has Layer 6 content
+    if os.path.exists(report_path):
+        cmd.extend(['--report', f'"{report_path}"', '--step', '6'])
+
+    # Add noun check if it exists
+    if os.path.exists(noun_check):
+        cmd.extend(['--noun-check', f'"{noun_check}"'])
+
+    # Collect fixes JSONs — pass all at once (nargs='*' needs single --fixes occurrence)
+    if os.path.isdir(fixes_dir):
+        fix_files = [os.path.join(fixes_dir, f) for f in os.listdir(fixes_dir)
+                     if f.endswith('_fixes.json')]
+        if fix_files:
+            cmd.append('--fixes')
+            for ff in fix_files:
+                cmd.append(f'"{ff}"')
+
+    if video_dir:
+        cmd.extend(['--video-dir', f'"{video_dir}"'])
+    else:
+        print('[deliver] ⚠ No video directory found — clips cannot be extracted.',
+              file=sys.stderr)
+        print('[deliver] Pass --video-dir or set up video path detection.',
+              file=sys.stderr)
+        return False
+
+    return _run(cmd, project_dir, timeout=1800, desc='deliver')
+
+
+def _detect_video_dir(project_dir):
+    """Auto-detect video directory from common locations."""
+    candidates = [
+        os.path.join(project_dir, 'video'),
+        os.path.join(project_dir, 'videos'),
+        r'E:\Animation\TV\[Anonymoose] 鉄腕アトム (DVD, 10bit)',
+    ]
+    for d in candidates:
+        if os.path.isdir(d):
+            return d
+    return None
+
+
 # ── AI Review flagging ──
 
 def print_ai_review_notice(noun_results, project_dir, lang):
@@ -373,20 +439,20 @@ Examples:
     # ── Layer 1: Scan ──
     if not args.resume:
         print(f'\n{"─"*40}', file=sys.stderr)
-        print('  Layer 1/5: Character scan', file=sys.stderr)
+        print('  Layer 1/6: Character scan', file=sys.stderr)
         print(f'{"─"*40}', file=sys.stderr)
         step_scan(project_dir, args.lang)
 
     # ── Layer 2: Fix episodes ──
     print(f'\n{"─"*40}', file=sys.stderr)
-    print('  Layer 2/5: Semantic fix (translate/Whisper)', file=sys.stderr)
+    print('  Layer 2/6: Semantic fix (translate/Whisper)', file=sys.stderr)
     print(f'{"─"*40}', file=sys.stderr)
     step_fix_episodes(project_dir, args.lang, mode, skip_whisper=args.skip_whisper,
                       episodes=episodes, limit=args.limit, start_from=args.start_from)
 
     # ── Layer 3: Proper nouns ──
     print(f'\n{"─"*40}', file=sys.stderr)
-    print('  Layer 3/5: Proper noun unification', file=sys.stderr)
+    print('  Layer 3/6: Proper noun unification', file=sys.stderr)
     print(f'{"─"*40}', file=sys.stderr)
     noun_results = step_nouns(project_dir, args.lang)
 
@@ -395,15 +461,21 @@ Examples:
 
     # ── Layer 4: Apply fixes ──
     print(f'\n{"─"*40}', file=sys.stderr)
-    print('  Layer 4/5: Apply fixes', file=sys.stderr)
+    print('  Layer 4/6: Apply fixes', file=sys.stderr)
     print(f'{"─"*40}', file=sys.stderr)
     step_apply_all(project_dir, args.lang)
 
     # ── Layer 5: ASS repair ──
     print(f'\n{"─"*40}', file=sys.stderr)
-    print('  Layer 5/5: Format repair', file=sys.stderr)
+    print('  Layer 5/6: Format repair', file=sys.stderr)
     print(f'{"─"*40}', file=sys.stderr)
     step_ass_repair(project_dir)
+
+    # ── Layer 6: Human review delivery ──
+    print(f'\n{"─"*40}', file=sys.stderr)
+    print('  Layer 6/6: Human review delivery', file=sys.stderr)
+    print(f'{"─"*40}', file=sys.stderr)
+    step_deliver(project_dir, args.lang)
 
     # ── Clean ──
     step_clean(project_dir)

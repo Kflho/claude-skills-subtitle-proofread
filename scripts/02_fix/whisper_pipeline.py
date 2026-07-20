@@ -160,39 +160,7 @@ def cue_overlaps_speech(cue, speech_segs, min_overlap_s=0.0):
     return False
 
 
-# ── Content-based non-dialogue markers ──
-# These are editorial markers (sound effects, music cues, audience reactions)
-# that should ALWAYS be deleted regardless of speech overlap.
-# They are NOT dialogue — they're production notes for dubbing/editing.
-NON_DIALOGUE_PATTERNS = [
-    r'^\[音楽\]$',      # music
-    r'^\[拍手\]$',       # applause
-    r'^\[笑い\]$',       # laughter
-    r'^\[歓声\]$',       # cheers
-    r'^\[悲鳴\]$',       # scream
-    r'^\[鳴き声\]$',     # animal cry
-    r'^\[足音\]$',       # footsteps
-    r'^\[効果音\]$',     # sound effect
-    r'^\[鐘\]$',         # bell
-    r'^\[笛\]$',         # whistle
-    r'^\[雷\]$',         # thunder
-    r'^\[風\]$',         # wind
-    r'^\[波\]$',         # waves
-    r'^\[雨\]$',         # rain
-    r'^\[爆発\]$',       # explosion
-    r'^\[銃声\]$',       # gunshot
-    r'^\[車\]$',         # car
-    r'^\[飛行機\]$',     # airplane
-    r'^\[電話\]$',       # telephone
-    r'^\[ベル\]$',       # bell (en)
-    r'^\[チャイム\]$',   # chime
-    r'^\[ノック\]$',     # knock
-    r'^\[ドア\]$',       # door
-    r'^\[SE\]$',         # sound effect (en)
-    r'^\[BGM\]$',        # background music (en)
-    r'^\[ざわめき\]$',   # murmur
-    r'^\[どよめき\]$',   # stir
-]
+from lib.japanese_utils import NON_DIALOGUE_PATTERNS
 NON_DIALOGUE_RE = re.compile('|'.join(NON_DIALOGUE_PATTERNS))
 
 

@@ -17,6 +17,12 @@ import re
 import sys
 from difflib import SequenceMatcher
 
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT_DIR = os.path.dirname(_SCRIPT_DIR)  # scripts/
+sys.path.insert(0, _ROOT_DIR)
+
+from lib.whisper_utils import to_seconds as _to_seconds
+
 
 # ═══════════════════════════════════════════════════════════════
 # SRT parsing
@@ -47,12 +53,6 @@ def parse_srt(path):
         })
 
     return cues
-
-
-def _to_seconds(ts):
-    """Convert 'HH:MM:SS.mmm' to float seconds."""
-    parts = ts.replace(',', '.').split(':')
-    return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
 
 
 # ═══════════════════════════════════════════════════════════════
