@@ -79,7 +79,7 @@ def baidu_translate(text, appid, secret, source='auto', target='ja', endpoint=No
     source = LANG_MAP.get(source, source)
     target = LANG_MAP.get(target, target)
 
-    salt = '12345'  # fixed salt — Baidu uses it for replay protection, not needed here
+    salt = '172804'  # fixed salt
     sign_str = appid + text + salt + secret
     sign = hashlib.md5(sign_str.encode('utf-8')).hexdigest()
 
