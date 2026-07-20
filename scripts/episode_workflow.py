@@ -153,10 +153,14 @@ def find_original_srt(project_dir, episode):
 
 def step_scan(project_dir, episode):
     """Extract and display garbled cues for a single episode (v4.0)."""
-    findings = load_json(os.path.join(project_dir, 'findings.json'))
+    findings_path = os.path.join(project_dir, 'temp', 'scans', 'findings.json')
+    findings = load_json(findings_path)
 
     if not findings:
-        print('No findings.json found. Run unified_scanner.py first.')
+        print(f'No {findings_path} found. Run unified_scanner.py first:')
+        print(f'  python scripts/unified_scanner.py --target-dir AI审查后/ \\')
+        print(f'    --output-findings temp/scans/findings.json \\')
+        print(f'    --output-issues temp/scans/issues/')
         return None
 
     # Gather issues from per_episode_issues
