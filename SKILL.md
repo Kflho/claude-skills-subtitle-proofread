@@ -75,8 +75,8 @@ argument-hint: [目标目录] [参考字幕目录]
 
 | 模式 | 触发条件 | 流水线 | 核心原则 |
 |------|---------|--------|---------|
-| **audio** | 无 `参考字幕/` 目录 | `scan → audio → apply → diff` | 音频是唯一真相来源 |
-| **text** | `参考字幕/` 有文件 | `scan → audio → translate → compare → apply → diff` | 翻译对照验证 |
+| **audio** | 无 `参考字幕/` 目录 | `scan → audio → review → apply → diff → clean` | 音频是唯一真相来源 |
+| **text** | `参考字幕/` 有文件 | `scan → audio → review → translate → compare → apply → diff → clean` | 翻译对照验证 |
 
 `episode_workflow.py` 默认 `--mode auto`，自动检测 `参考字幕/` 目录。
 
@@ -97,18 +97,38 @@ temp/
 
 | 脚本 | 用途 | 模式 |
 |------|------|------|
-| `unified_scanner.py` | 统一字符扫描 — 检测 garbled cue | 通用 |
-| `episode_workflow.py` | 单集一键校对 — 自动检测模式 | 通用 |
+| `unified_scanner.py` | 统一扫描 — garbled+repeat+术语收集 | 通用 |
+| `episode_workflow.py` | 单集校对编排 — 自动检测模式 | 通用 |
+| `noun_checker.py` | 名词一致性审查 — 语境感知+模糊匹配 | 通用 |
+| `build_glossary.py` | 术语表自动生成 — 从语料提取高频词 | 通用 |
 | `whisper_transcribe.py` | Tier 1 — 集群切片→whisper重转录 | 通用 |
 | `whisper_full_episode.py` | Tier 2 — 整集转录+SRT对齐 | 通用 |
 | `whisper_deep_fix.py` | Tier 3 — silencedetect拆分修复 | 通用 |
-| `translate_srt.py` | **[新]** 百度翻译 API 批量翻译 SRT | text |
-| `compare_srt.py` | **[新]** SRT 对照验证（Whisper vs 翻译） | text |
+| `translate_srt.py` | 百度翻译 API 批量翻译 SRT | text |
+| `compare_srt.py` | SRT 对照验证（Whisper vs 翻译参考） | text |
 | `apply_review_fixes.py` | 审查清单→VAD打轴→SRT | 通用 |
 | `apply_fixes.py` | fixes.json 批量应用 | 通用 |
 | `check_progress.py` | 一键快速进度统计 | 通用 |
-| `update_report.py` | 报告查询（用 `--summary`，禁止直接 cat） | 通用 |
+| `update_report.py` | 报告查询（用 `--summary`） | 通用 |
 | `clean_empty_cues.py` | 清理空白 cue | 通用 |
+
+### 检测脚本（按项目特征自动选用）
+
+| 脚本 | 检测类型 | 适用条件 |
+|------|---------|---------|
+| `unified_scanner.py` | 字符层统一扫描 | **所有项目** |
+| `repeat_detect.py` | 卡死重复序列 | 所有项目（功能已合并到 unified_scanner） |
+| `oped_timecode_detect.py` | OP/ED 时间码 | 所有项目 |
+| `trad_to_simp_detect.py` | 繁体→简体 | 中文目标语言 |
+| `garbled_detect.py` | 机翻幻觉（语义层） | 中文目标语言 |
+| `interjection_detect.py` | 感叹词残留 | 翻译项目 |
+| `format_detect.py` | 固定格式变体 | 翻译项目 |
+| `proper_noun_detect.py` | 专名变体对照 | 有参考字幕 |
+| `names_detect.py` | Name 字段扫描 | ASS only |
+| `styles_detect.py` | 样式异常 | ASS only |
+| `drawing_detect.py` | 绘图指令误译 | ASS only |
+| `comment_detect.py` | Comment 行残留 | ASS only |
+| `oped_detect.py` | OP/ED 多样式异常 | ASS + 多样式 |
 
 ## 专有名词表（著名作品可预搜索）
 
@@ -180,10 +200,12 @@ C2. compare_srt.py AI审查后/EP001.srt temp/translations/EP001.srt
 C3. 人工审查 flagged mismatches → apply_fixes.py
 ```
 
-### 分支 D: ASS 专用
+### 分支 D: ASS 专用（目录含 .ass 文件时启用）
 
-ASS 专用脚本已删除（SRT 项目为主）。如需 ASS 支持，从 git 历史恢复：
-`git checkout HEAD~1 -- scripts/names_detect.py scripts/styles_detect.py scripts/drawing_detect.py scripts/comment_detect.py scripts/oped_detect.py`
+```
+D1. names_detect.py / styles_detect.py / drawing_detect.py
+D2. comment_detect.py / oped_detect.py
+```
 
 ## 报告
 
