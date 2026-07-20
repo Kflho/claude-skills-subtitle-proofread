@@ -290,6 +290,8 @@ def main():
     parser.add_argument('--target-dir', required=True, help='目标字幕目录')
     parser.add_argument('--fixes', required=True, help='Claude 审查后的 fixes.json')
     parser.add_argument('--dry-run', action='store_true', help='仅预览，不实际写入')
+    parser.add_argument('--log-to-report', help='统一问题解决报告路径（追加修复记录）')
+    parser.add_argument('--step', type=int, default=0, help='报告步骤编号（1-16），配合 --log-to-report 使用')
     args = parser.parse_args()
 
     with open(args.fixes, 'r', encoding='utf-8') as f:
@@ -313,6 +315,12 @@ def main():
 
     total_applied = 0
     total_skipped = 0
+    report_entries = []  # 用于 --log-to-report
+
+    # 辅助：从文件名提取集数
+    def _extract_ep(fname):
+        m = re.search(r'(?:EP)?(\d{3})', fname)
+        return f'EP{m.group(1)}' if m else fname[:20]
 
     # 1. 全局替换（先执行，不依赖行号）
     if global_fixes:
@@ -361,8 +369,23 @@ def main():
             lines = read_ass_file(fpath)
             file_fixes = sorted(per_file_fixes[fname], key=lambda f: f.get('line', 0))
 
+            # 预解析 SRT cues（用于获取时间码）
+            srt_cues_cache = None
+            if _is_srt(fpath):
+                srt_cues_cache = _parse_srt_cues(lines)
+
             applied = 0
+            ep_tag = _extract_ep(fname)
             for fix in file_fixes:
+                # 记录修复前信息（用于报告日志）
+                pre_time = ''
+                pre_text = ''
+                if srt_cues_cache:
+                    cue = _find_srt_cue_by_line(srt_cues_cache, fix.get('line', 0))
+                    if cue:
+                        pre_time = cue.get('start', '')
+                        pre_text = cue.get('text', '')[:120]
+
                 action = fix['action']
                 if action == 'replace_text':
                     ok, msg = apply_replace_text(lines, fix)
@@ -377,6 +400,35 @@ def main():
 
                 if ok:
                     applied += 1
+                    if args.log_to_report and args.step:
+                        if action == 'replace_text':
+                            report_entries.append({
+                                'ep': ep_tag, 'time': pre_time,
+                                'original': pre_text,
+                                'corrected': fix.get('replacement', '')[:120],
+                                'status': '✅',
+                            })
+                        elif action == 'delete_line':
+                            report_entries.append({
+                                'ep': ep_tag, 'time': pre_time,
+                                'original': pre_text,
+                                'corrected': '(已删除)',
+                                'status': '🗑️',
+                            })
+                        elif action == 'merge_cues':
+                            report_entries.append({
+                                'ep': ep_tag, 'time': pre_time,
+                                'original': pre_text,
+                                'corrected': f'合并 {fix.get("count", 2)} 个 cues',
+                                'status': '✅',
+                            })
+                        elif action == 'replace_name':
+                            report_entries.append({
+                                'ep': ep_tag, 'time': pre_time,
+                                'original': f'Name: {pre_text}',
+                                'corrected': f'Name: {fix.get("replacement", "")}',
+                                'status': '✅',
+                            })
                 else:
                     total_skipped += 1
                     print(f"  ✗ {fname}:{fix.get('line', '?')} - {msg}")
@@ -391,6 +443,12 @@ def main():
                         write_ass_file(fpath, lines)
                 total_applied += applied
                 print(f"  {fname}: {applied} 处修复")
+
+    # ── 报告日志 ──
+    if args.log_to_report and args.step and report_entries:
+        from update_report import upsert_entries as _upsert
+        _upsert(args.log_to_report, step=args.step, entries=report_entries)
+        print(f'\n📋 已记录 {len(report_entries)} 条到问题解决报告步骤{args.step}')
 
     print(f"\n{'[DRY-RUN] ' if args.dry_run else ''}共应用 {total_applied} 项修复，跳过 {total_skipped} 项")
 

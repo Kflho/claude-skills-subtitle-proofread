@@ -88,11 +88,8 @@ def is_romaji_only(text: str) -> bool:
     return bool(re.fullmatch(r'[a-zA-Z\s\-\']+', text.strip()))
 
 
-def generate_fixes(bilingual_findings_path: str) -> list[dict]:
-    """Generate fixes.json from bilingual detection findings."""
-    with open(bilingual_findings_path, 'r', encoding='utf-8') as f:
-        findings = json.load(f)
-
+def generate_fixes_from_data(findings: list[dict]) -> list[dict]:
+    """Generate fixes.json from parsed bilingual detection data."""
     fixes = []
     seen_global = set()
     seen_replace_text = set()
@@ -280,10 +277,21 @@ def generate_fixes(bilingual_findings_path: str) -> list[dict]:
     return fixes
 
 
+def generate_fixes(bilingual_findings_path: str) -> list[dict]:
+    """Generate fixes from a JSON file path (convenience wrapper)."""
+    with open(bilingual_findings_path, 'r', encoding='utf-8') as f:
+        return generate_fixes_from_data(json.load(f))
+
+
 if __name__ == '__main__':
     if len(sys.argv) < 2:
         print("Usage: python generate_romaji_fixes.py <bilingual_findings.json>")
+        print("       python bilingual_detect.py ... | python generate_romaji_fixes.py --stdin")
         sys.exit(1)
 
-    fixes = generate_fixes(sys.argv[1])
+    if sys.argv[1] == '--stdin':
+        data = json.load(sys.stdin)
+        fixes = generate_fixes_from_data(data)
+    else:
+        fixes = generate_fixes(sys.argv[1])
     json.dump(fixes, sys.stdout, ensure_ascii=False, indent=2)

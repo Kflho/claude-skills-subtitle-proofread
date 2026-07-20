@@ -2,6 +2,22 @@
 
 > 每次校对结束后，经人工审核确认后追加一条。
 > 此文件独立于 SKILL.md，仅在需要回顾历史时读取，不占用 skill 加载上下文。
+>
+> **记录规则**：只记架构/流程/接口级变更（新增/删除/重命名脚本、工作流顺序调整、报告格式变更）。不记修 bug、调参数、加 flag 等正常开发活动。
+
+## 2026-07-20 — Whisper 集成 + 架构重构
+
+### 架构变更
+- SKILL.md 精简到 ~180 行，可选步骤拆为 4 个独立 md（setup-guide / full-mode / ai-asr-fix / whisper-stage）
+- 报告改为 `reports/` 下两份持续更新文件（proper-nouns.md + whisper-pending.md）
+- 启动流程增加路径确认清单
+
+### 新增脚本
+- `whisper_transcribe.py`：调用 whisper.cpp CLI 重转录乱码段
+- `issue_tracker.py`：扫描 SRT 生成每集问题清单，自动匹配视频
+
+### 修改脚本
+- `generate_romaji_fixes.py`：支持 `--stdin` 管道输入
 
 ---
 

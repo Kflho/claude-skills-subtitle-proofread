@@ -298,6 +298,58 @@ def iter_dialogue_lines(lines: list[str], styles: Optional[set] = None):
             yield i, d
 
 
+def parse_comment_line(line: str) -> Optional[dict]:
+    """解析 ASS Comment 行。
+
+    Comment 行的格式与 Dialogue 相同，只是前缀为 "Comment:"。
+    此函数专门处理 Comment 行（parse_dialogue 只处理 Dialogue 行）。
+
+    Args:
+        line: ASS 文件中的一行
+
+    Returns:
+        包含各字段的字典，非 Comment 行返回 None
+    """
+    if not line.startswith('Comment:'):
+        return None
+    parts = line.strip().split(',', 9)
+    if len(parts) < 10:
+        return {
+            'layer': '0', 'start': '', 'end': '', 'style': '',
+            'name': '', 'text': '', 'is_empty': True,
+            '_format': 'ass',
+        }
+    return {
+        'format': parts[0],
+        'layer': parts[0].split(': ', 1)[1] if ': ' in parts[0] else '0',
+        'start': parts[1], 'end': parts[2],
+        'style': parts[3], 'name': parts[4],
+        'margin_l': parts[5], 'margin_r': parts[6], 'margin_v': parts[7],
+        'effect': parts[8], 'text': parts[9],
+        'is_empty': False,
+        '_raw_parts': parts,
+        '_format': 'ass',
+    }
+
+
+def iter_comment_lines(lines: list[str]):
+    """遍历 ASS 文件的 Comment 行。
+
+    注意：对话检测脚本（iter_dialogue_lines）只扫描 Dialogue: 行，
+    此函数专门用于扫描 Comment: 行中的外语残留。
+
+    Args:
+        lines: ASS 文件行列表（含换行符）
+
+    Yields:
+        (line_index, parsed_dict) 元组
+    """
+    for i, line in enumerate(lines):
+        c = parse_comment_line(line)
+        if c is not None:
+            yield i, c
+
+
 def _detect_srt_format(lines: list[str]) -> bool:
     """检测行列表是 SRT 还是 ASS 格式。
 
