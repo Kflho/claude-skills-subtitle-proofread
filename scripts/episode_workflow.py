@@ -82,11 +82,14 @@ def detect_mode(project_dir):
     """Auto-detect workflow mode based on project resources.
 
     Returns:
-        'text'  — 原始字幕/ 目录有文件（有准确参考字幕可对照）
-        'audio' — 无参考字幕，只能靠 VAD + Whisper
+        'text'  — 参考字幕/ 目录有文件（有准确参考字幕可对照校对）
+        'audio' — 无参考字幕，只能靠 VAD + Whisper（不猜）
+
+    注意：原始字幕/ 是备份目录，不是参考字幕。参考字幕是外部准确字幕
+    （如官方翻译、人工校对版等），存放在 参考字幕/ 目录。
     """
-    orig_dir = os.path.join(project_dir, '原始字幕')
-    if os.path.isdir(orig_dir) and os.listdir(orig_dir):
+    ref_dir = os.path.join(project_dir, '参考字幕')
+    if os.path.isdir(ref_dir) and os.listdir(ref_dir):
         return 'text'
     return 'audio'
 

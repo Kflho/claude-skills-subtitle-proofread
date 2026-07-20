@@ -35,12 +35,12 @@ Skill 自动检测项目资源，选择修复策略：
 
 | 模式 | 触发条件 | 修复策略 | 核心原则 |
 |------|---------|---------|---------|
-| **text** | `原始字幕/` 目录有文件（有参考字幕） | 词典对照 + romaji_fixer + AI 审查 | 改错也能对照参考字幕验证 |
+| **text** | `参考字幕/` 目录有文件（有准确参考字幕可对照） | 词典对照 + romaji_fixer + AI 审查 | 改错也能对照参考字幕验证 |
 | **audio** | 无参考字幕，只有视频+音频 | VAD + Whisper 重录 or 删除 | **只看音频，不猜不填词表** |
 
-`episode_workflow.py` 默认 `--mode auto`，自动检测 `原始字幕/` 目录：
-- 有文件 → text 模式: `scan → fix → apply → diff`
-- 无文件 → audio 模式: `scan → audio → apply → diff`
+`episode_workflow.py` 默认 `--mode auto`，自动检测 `参考字幕/` 目录：
+- 有参考字幕 → text 模式: `scan → fix → apply → diff`
+- 无参考字幕 → audio 模式: `scan → audio → apply → diff`
 
 ### 临时文件规则
 

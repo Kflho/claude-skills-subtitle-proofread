@@ -100,6 +100,18 @@ def read_fixes_count(fixes_path):
     return len(data) if isinstance(data, list) else 0
 
 
+def detect_mode(project_dir):
+    """Detect workflow mode from project resources.
+
+    'text'  — 参考字幕/ directory has files (accurate reference subs exist)
+    'audio' — no reference subtitles, audio-only VAD+Whisper
+    """
+    ref_dir = os.path.join(project_dir, '参考字幕')
+    if os.path.isdir(ref_dir) and os.listdir(ref_dir):
+        return 'text'
+    return 'audio'
+
+
 def get_git_info(project_dir):
     """Get last commit and status from git.
     Uses utf-8 encoding explicitly to avoid GBK decode errors on CJK commit messages.
@@ -141,6 +153,11 @@ def main():
     print('=' * 60)
     print('  Astro Boy (1963) — Subtitle Progress')
     print('=' * 60)
+
+    # Mode detection
+    mode = detect_mode(project_dir)
+    mode_label = 'TEXT (reference subs)' if mode == 'text' else 'AUDIO (VAD+Whisper)'
+    print(f'\n  Mode: {mode_label}')
 
     # Git info
     last_commit, status_lines = get_git_info(project_dir)
