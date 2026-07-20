@@ -2,6 +2,8 @@
 
 > ⚠️ **适用条件**：有参考字幕 **且** 项目含 ASS 多样式文件。SRT-only 项目或日语原文项目不适用。
 > 加载条件：用户提供了参考字幕目录（路径 #2）。
+>
+> **2026-07 更新**：字符层扫描（双语混合/源语言/字符残留）推荐使用 `unified_scanner.py` 单次遍历替代。以下工作流中 `bilingual_detect.py` / `source_lang_detect.py` / `source_char_detect.py` 的调用可替换为从 `findings.json` 按 type 过滤。
 
 此模式可验证翻译正确性、统一专有名词、修复 OP/ED 歌词。所有 📎 标记的检测脚本可用。
 
@@ -76,11 +78,12 @@
 重新运行关键检测脚本，确保无遗漏：
 
 ```bash
+# 字符层统一扫描（替代旧的 bilingual/source_lang/source_char）
+python scripts/unified_scanner.py --target-dir ./target/ --output-findings check_findings.json
+
+# 语义层独立脚本
 python scripts/trad_to_simp_detect.py --target-dir ./target/ > check_trad.json
-python scripts/bilingual_detect.py --target-dir ./target/ --config config.json > check_bilingual.json
-python scripts/source_lang_detect.py --target-dir ./target/ --config config.json > check_source.json
 python scripts/repeat_detect.py --target-dir ./target/ > check_repeat.json
-python scripts/source_char_detect.py --target-dir ./target/ --langs en,jp,ru > check_chars.json
 python scripts/interjection_detect.py --target-dir ./target/ --config config.json > check_interjections.json
 python scripts/names_detect.py --target-dir ./target/ --lang-check > check_names.json
 python scripts/comment_detect.py --target-dir ./target/ --langs en,jp,ru > check_comments.json

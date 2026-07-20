@@ -13,6 +13,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from whisper_utils import setup_windows_utf8
 from ass_utils import read_ass_file, write_ass_file, iter_ass_files
 
 try:
@@ -67,6 +68,7 @@ def clean_ass(lines: list[str]) -> tuple[list[str], int]:
 
 
 def main():
+    setup_windows_utf8()
     parser = argparse.ArgumentParser(description='清理空字幕 cue')
     parser.add_argument('--target-dir', required=True, help='目标字幕目录')
     parser.add_argument('--dry-run', action='store_true', help='仅预览')

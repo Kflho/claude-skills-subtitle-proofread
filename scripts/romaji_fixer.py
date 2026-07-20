@@ -26,6 +26,8 @@ _script_dir = os.path.dirname(os.path.abspath(__file__))
 if _script_dir not in sys.path:
     sys.path.insert(0, _script_dir)
 
+from whisper_utils import setup_windows_utf8
+
 
 # ═══════════════════════════════════════════════════════════════
 # Romaji → Kana 词典（从 generate_romaji_fixes.py 迁移）
@@ -175,11 +177,12 @@ def is_romaji_only(text: str) -> bool:
 # 修复生成
 # ═══════════════════════════════════════════════════════════════
 
-def generate_dict_fixes(findings_by_type):
+def generate_dict_fixes(findings_by_type, project_dict=None):
     """从 pure_romaji 和 mixed_romaji 发现中生成词典修复。
 
     Args:
         findings_by_type: unified_scanner 输出的 findings dict (keyed by type)
+        project_dict: 项目词典 dict（含 auto 和 pending），可选
 
     Returns:
         list of fix dicts (兼容 apply_fixes.py)
@@ -188,19 +191,23 @@ def generate_dict_fixes(findings_by_type):
     seen_global = set()
     seen_per_file = set()
 
-    # ── Astro Boy 专有名词（硬编码，高频且安全） ──
-    astro_fixes = [
-        (r'\batom\b', 'アトム', 'Atom → アトム'),
-        (r'\batomu\b', 'アトム', 'Atomu → アトム'),
-        (r'\b[Oo]chanomizu\b', 'お茶の水', 'Ochanomizu → お茶の水'),
-    ]
-    for pattern, replacement, note in astro_fixes:
-        fixes.append({
-            'action': 'replace_global_regex',
-            'pattern': pattern,
-            'replacement': replacement,
-            'note': note,
-        })
+    # ── 合并词典：内置 + 项目词典 ──
+    merged_kana = dict(ROMAJI_TO_KANA)
+    merged_corrections = dict(ROMAJI_CORRECTIONS)
+
+    if project_dict:
+        # auto 条目：已确认的替换
+        for word, info in project_dict.get('auto', {}).items():
+            if isinstance(info, dict) and info.get('replacement'):
+                merged_corrections[word] = info['replacement']
+            elif isinstance(info, str):
+                merged_corrections[word] = info
+
+        # pending 条目中已填写的
+        for word, info in project_dict.get('pending', {}).items():
+            repl = info.get('replacement', '') if isinstance(info, dict) else ''
+            if repl:
+                merged_corrections[word] = repl
 
     # ── pure_romaji: 整行罗马字 → 词典修复或标记待 Whisper ──
     pure_items = findings_by_type.get('pure_romaji', [])
@@ -221,8 +228,8 @@ def generate_dict_fixes(findings_by_type):
             continue
 
         # 词典匹配 → 逐行 replace_text
-        if lower in ROMAJI_TO_KANA:
-            kana = ROMAJI_TO_KANA[lower]
+        if lower in merged_kana:
+            kana = merged_kana[lower]
             key = (item['file'], item['line'], 'dict_kana')
             if key not in seen_per_file:
                 seen_per_file.add(key)
@@ -235,8 +242,8 @@ def generate_dict_fixes(findings_by_type):
                 })
             continue
 
-        if lower in ROMAJI_CORRECTIONS:
-            katakana = ROMAJI_CORRECTIONS[lower]
+        if lower in merged_corrections:
+            katakana = merged_corrections[lower]
             key = (item['file'], item['line'], 'dict_katakana')
             if key not in seen_per_file:
                 seen_per_file.add(key)
@@ -264,11 +271,11 @@ def generate_dict_fixes(findings_by_type):
             lower = word.lower()
             if lower in ENGLISH_OK:
                 continue
-            if lower in ROMAJI_TO_KANA:
-                new_text = new_text.replace(word, ROMAJI_TO_KANA[lower])
+            if lower in merged_kana:
+                new_text = new_text.replace(word, merged_kana[lower])
                 changed = True
-            elif lower in ROMAJI_CORRECTIONS:
-                new_text = new_text.replace(word, ROMAJI_CORRECTIONS[lower])
+            elif lower in merged_corrections:
+                new_text = new_text.replace(word, merged_corrections[lower])
                 changed = True
 
         if changed and new_text != text:
@@ -329,12 +336,13 @@ def generate_delete_fixes(findings_by_type, delete_candidates=None):
     return fixes
 
 
-def generate_fixes(findings_data, mode='all'):
+def generate_fixes(findings_data, mode='all', project_dict=None):
     """从 unified_scanner 输出生成完整 fixes.json。
 
     Args:
         findings_data: unified_scanner.py 输出的完整 dict 或 findings JSON 文件路径
         mode: 'dict-only' | 'delete-only' | 'all'
+        project_dict: 项目词典 dict（含 auto 和 pending），可选
 
     Returns:
         list of fix dicts (兼容 apply_fixes.py)
@@ -351,7 +359,7 @@ def generate_fixes(findings_data, mode='all'):
     fixes = []
 
     if mode in ('dict-only', 'all'):
-        dict_fixes = generate_dict_fixes(findings_by_type)
+        dict_fixes = generate_dict_fixes(findings_by_type, project_dict=project_dict)
         fixes.extend(dict_fixes)
         print(f'  词典修复: {len(dict_fixes)} 条', file=sys.stderr)
 
@@ -368,6 +376,7 @@ def generate_fixes(findings_data, mode='all'):
 # ═══════════════════════════════════════════════════════════════
 
 def main():
+    setup_windows_utf8()
     parser = argparse.ArgumentParser(
         description='统一修复生成器 — 从 unified_scanner 输出生成 fixes.json',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -390,14 +399,33 @@ def main():
     parser.add_argument('--mode', choices=['dict-only', 'delete-only', 'all'],
                         default='all',
                         help='修复模式 (default: all)')
+    parser.add_argument('--project-dict',
+                        help='项目词典 JSON（build_project_dict.py 输出），'
+                             'auto 条目和已填写 pending 条目会合并到内置词典')
     args = parser.parse_args()
 
     if not os.path.exists(args.findings):
         print(f'错误: 文件不存在: {args.findings}', file=sys.stderr)
         sys.exit(1)
 
+    # 加载项目词典
+    project_dict = None
+    if args.project_dict:
+        if os.path.exists(args.project_dict):
+            with open(args.project_dict, 'r', encoding='utf-8') as f:
+                project_dict = json.load(f)
+            auto_count = len(project_dict.get('auto', {}))
+            pending_filled = sum(
+                1 for v in project_dict.get('pending', {}).values()
+                if isinstance(v, dict) and v.get('replacement', '').strip()
+            )
+            print(f'项目词典: {args.project_dict} '
+                  f'(auto={auto_count}, pending已填写={pending_filled})', file=sys.stderr)
+        else:
+            print(f'警告: 项目词典不存在: {args.project_dict}', file=sys.stderr)
+
     print(f'输入: {args.findings} | 模式: {args.mode}', file=sys.stderr)
-    fixes = generate_fixes(args.findings, mode=args.mode)
+    fixes = generate_fixes(args.findings, mode=args.mode, project_dict=project_dict)
 
     with open(args.output, 'w', encoding='utf-8') as f:
         json.dump(fixes, f, ensure_ascii=False, indent=2)

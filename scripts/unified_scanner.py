@@ -39,7 +39,7 @@ from ass_utils import (
     strip_ass_tags, iter_ass_files, iter_dialogue_lines,
     read_ass_file, contains_cjk,
 )
-from whisper_utils import classify_garbled_text, to_seconds, extract_ep_number
+from whisper_utils import classify_garbled_text, to_seconds, extract_ep_number, setup_windows_utf8
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -279,6 +279,7 @@ def write_delete_candidates(delete_list, path):
 # ═══════════════════════════════════════════════════════════════
 
 def main():
+    setup_windows_utf8()
     parser = argparse.ArgumentParser(
         description='统一字符扫描器 — 单次遍历检测所有源语言字符残留',
         formatter_class=argparse.RawDescriptionHelpFormatter,

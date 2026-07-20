@@ -61,6 +61,8 @@ from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from whisper_utils import setup_windows_utf8
+
 from ass_utils import (
     parse_dialogue, build_dialogue_line,
     read_ass_file, write_ass_file, iter_ass_files
@@ -286,6 +288,7 @@ def apply_delete_comment(lines, fix):
 
 
 def main():
+    setup_windows_utf8()
     parser = argparse.ArgumentParser(description='统一修复脚本 — 支持 ASS 和 SRT')
     parser.add_argument('--target-dir', required=True, help='目标字幕目录')
     parser.add_argument('--fixes', required=True, help='Claude 审查后的 fixes.json')
