@@ -32,7 +32,7 @@ argument-hint: [目标目录] [参考字幕目录]
 | +参考字幕 | +分支 C（对照验证翻译），加载 `references/full-mode.md` |
 | +视频 + whisper | +分支 B（音频重转录），加载 `references/whisper-pipeline.md` |
 | SRT only（无 .ass 文件） | 跳过 ASS 专用脚本 |
-| 日语源语言 | 跳过 trad_to_simp、garbled_detect、interjection_detect（已删除） |
+| 日语源语言 | 跳过 trad_to_simp、garbled_detect、interjection_detect |
 | 无参考字幕 | audio 模式：VAD+Whisper，不猜 |
 | 无 whisper | 加载 `setup-guide.md` |
 
