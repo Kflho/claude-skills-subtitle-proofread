@@ -80,7 +80,7 @@ ROMAJI_TO_KANA = {
     'tsukau': 'つかう', 'tsukuru': 'つくる',
     'motsu': 'もつ', 'toru': 'とる', 'ageru': 'あげる',
     'kureru': 'くれる', 'morau': 'もらう',
-    'ii': 'いい', 'yoi': 'よい', 'warui': 'わるい',
+    'yoi': 'よい', 'warui': 'わるい',
     'ookii': 'おおきい', 'chiisai': 'ちいさい',
     'hayai': 'はやい', 'osoi': 'おそい',
     'atsui': 'あつい', 'samui': 'さむい',
