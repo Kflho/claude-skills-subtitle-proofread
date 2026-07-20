@@ -28,6 +28,7 @@
 import argparse
 import json
 import os
+import re
 import sys
 from collections import defaultdict
 
@@ -62,6 +63,67 @@ def get_oped_boundaries(cues):
         return 95, 0
     max_end_s = max(c['end_s'] for c in cues)
     return 95, max_end_s - 120
+
+
+# ═══════════════════════════════════════════════════════════════
+# 卡死重复检测（合并自 repeat_detect.py）
+# ═══════════════════════════════════════════════════════════════
+
+# 排除：scat 拟声 / 动物叫声 / 情绪表达
+_EXCLUDED_SEQS = {
+    'pa', 'la', 'me', 'ta',
+    '汪', '喵', '哞', '咩', '咯', '咕', '嘎', '呱', '吱', '啾',
+    '嗷', '呜', '哼', '嘶', '喔', '啊', '哦', '嗯', '呃',
+    'woof', 'meow', 'moo', 'baa', 'quack', 'oink', 'cluck',
+    'chirp', 'buzz', 'ribbit', 'neigh', 'roar', 'howl',
+    'arf', 'bow', 'caw', 'coo', 'hoot', 'tweet',
+    'wo', 'me', 'mu', 'ba', 'ha', 'he', 'ho', 'hi', 'hu',
+}
+
+
+def _is_excluded_repeat(seq, full_match):
+    """综合判断是否应排除此重复序列。"""
+    seq_lower = seq.lower()
+    if seq_lower in _EXCLUDED_SEQS:
+        return True
+    # 整段仅 1-2 种字符 → 可能是情绪表达
+    stripped = re.sub(r'[!！?？\s\-~～]+', '', full_match)
+    if stripped:
+        unique = set(stripped.lower())
+        if len(unique) <= 2:
+            return True
+    return False
+
+
+def _find_repeats(text, min_repeats=8):
+    """在文本中查找 2-4 字符序列的连续重复。"""
+    results = []
+    for seq_len in [2, 3, 4]:
+        if len(text) < seq_len * min_repeats:
+            continue
+        i = 0
+        while i <= len(text) - seq_len * min_repeats:
+            seq = text[i:i + seq_len]
+            if re.search(r'[\s\-~～!！?？,，.。、；;：:]', seq):
+                i += 1
+                continue
+            count = 1
+            j = i + seq_len
+            while j + seq_len <= len(text) and text[j:j + seq_len] == seq:
+                count += 1
+                j += seq_len
+            if count >= min_repeats:
+                full = text[i:j]
+                if not _is_excluded_repeat(seq, full):
+                    results.append({
+                        'repeat_seq': seq,
+                        'repeat_count': count,
+                        'full_match': full,
+                    })
+                i = j
+            else:
+                i += 1
+    return results
 
 
 def scan_file(filepath, skip_oped=True):
@@ -119,13 +181,26 @@ def scan_file(filepath, skip_oped=True):
             'total_cues': 0,
         }
 
-    # 第二遍：分类每个 cue（v4.0: 只分 clean/garbled）
+    # 第二遍：分类每个 cue + 重复检测
     garbled_cues = []
     issues = []
+    repeats = []
 
     for c in cues:
         classification = classify_garbled_text(c['text'])
         gtype = classification['type']
+
+        # ── 重复检测（所有 cue，不止 garbled） ──
+        cue_repeats = _find_repeats(c['text'])
+        for r in cue_repeats:
+            repeats.append({
+                'file': fname,
+                'line': c['line'],
+                'timecode': c['start'],
+                'repeat_seq': r['repeat_seq'],
+                'repeat_count': r['repeat_count'],
+                'full_match': r['full_match'],
+            })
 
         if gtype == 'clean':
             continue
@@ -161,6 +236,7 @@ def scan_file(filepath, skip_oped=True):
         'filename': fname,
         'garbled_cues': garbled_cues,
         'issues': issues,
+        'repeats': repeats,
         'total_cues': len(cues),
     }
 
@@ -177,6 +253,7 @@ def scan_all(target_dir, skip_oped=True):
     """
     all_garbled = []
     all_issues = defaultdict(list)
+    all_repeats = []
     total_cues = 0
     files_scanned = 0
 
@@ -186,21 +263,24 @@ def scan_all(target_dir, skip_oped=True):
         total_cues += result['total_cues']
 
         all_garbled.extend(result['garbled_cues'])
+        all_repeats.extend(result.get('repeats', []))
 
         for issue in result['issues']:
             all_issues[issue['ep']].append(issue)
 
-    # 构建摘要 (v4.0 精简)
+    # 构建摘要 (v4.0)
     summary = {
         'files_scanned': files_scanned,
         'total_cues': total_cues,
         'garbled_count': len(all_garbled),
+        'repeat_count': len(all_repeats),
         'episodes_with_issues': len(all_issues),
     }
 
     return {
         'garbled_cues': all_garbled,
         'per_episode_issues': dict(all_issues),
+        'repeats': all_repeats,
         'summary': summary,
     }
 
@@ -284,7 +364,7 @@ def main():
     # 摘要输出到 stderr
     print(f'\n=== 扫描完成 ===', file=sys.stderr)
     print(f'文件: {s["files_scanned"]} | Cues: {s["total_cues"]} | '
-          f'Garbled: {s["garbled_count"]}',
+          f'Garbled: {s["garbled_count"]} | Repeats: {s.get("repeat_count", 0)}',
           file=sys.stderr)
     print(file=sys.stderr)
 

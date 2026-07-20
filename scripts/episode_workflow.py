@@ -302,6 +302,55 @@ def step_compare(project_dir, episode, scan_result, translated_path, dry_run=Fal
 
 
 # ═══════════════════════════════════════════════════════════════
+# Step: review — noun consistency check
+# ═══════════════════════════════════════════════════════════════
+
+def step_review(project_dir, episode, dry_run=False):
+    """Check proper noun consistency against proper-nouns.md."""
+    srt_name, srt_path = find_srt(project_dir, episode)
+    if not srt_path:
+        print('[review] SRT not found.')
+        return None
+
+    noun_table = os.path.join(project_dir, 'reports', 'proper-nouns.md')
+    if not os.path.exists(noun_table):
+        print('[review] No proper-nouns.md. Skip.')
+        return None
+
+    out_dir = os.path.join(project_dir, 'temp', 'reviews')
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f'{episode}_nouns.json')
+
+    cmd = ' '.join([
+        'python', os.path.join(_SCRIPT_DIR, 'noun_checker.py'),
+        f'"{srt_path}"',
+        f'--noun-table', f'"{noun_table}"',
+        f'--output', f'"{out_path}"',
+    ])
+
+    if dry_run:
+        print(f'[review] DRY RUN — {cmd}')
+        return None
+
+    print(f'[review] Noun check: {srt_name}')
+    try:
+        subprocess.run(cmd, cwd=project_dir, shell=True, timeout=300)
+    except Exception as e:
+        print(f'[review] Error: {e}')
+        return None
+
+    report = load_json(out_path)
+    if report:
+        stats = report.get('stats', {})
+        m = stats.get('mismatch', 0)
+        u = stats.get('unknown', 0) + stats.get('unknown_katakana', 0)
+        if m: print(f'[review] ⚠ {m} mismatches!')
+        if u: print(f'[review] ℹ {u} unknown nouns')
+        if not m and not u: print('[review] ✓ All clear.')
+    return report
+
+
+# ═══════════════════════════════════════════════════════════════
 # Step: audio — VAD + Whisper for audio-only mode (no reference subs)
 # ═══════════════════════════════════════════════════════════════
 
@@ -571,7 +620,7 @@ def main():
     parser.add_argument('--mode', choices=['text', 'audio', 'auto'], default='auto',
                         help='Workflow mode: text=reference subs, audio=VAD+Whisper, '
                              'auto=detect from project (default)')
-    parser.add_argument('--step', choices=['scan', 'audio', 'translate', 'compare', 'apply', 'diff'],
+    parser.add_argument('--step', choices=['scan', 'audio', 'review', 'translate', 'compare', 'apply', 'diff'],
                         help='Run a specific step only (default: all)')
     parser.add_argument('--dry-run', action='store_true',
                         help='Preview only, no file changes')
@@ -598,9 +647,9 @@ def main():
     # Default pipeline per mode
     if args.step is None:
         if mode == 'text':
-            steps = ['scan', 'audio', 'translate', 'compare', 'apply', 'diff']
+            steps = ['scan', 'audio', 'review', 'translate', 'compare', 'apply', 'diff']
         else:  # audio
-            steps = ['scan', 'audio', 'apply', 'diff']
+            steps = ['scan', 'audio', 'review', 'apply', 'diff']
     else:
         steps = [args.step]
 
@@ -616,6 +665,9 @@ def main():
 
         elif step == 'audio':
             fixes = step_audio(project_dir, episode, scan_result, dry_run=args.dry_run)
+
+        elif step == 'review':
+            step_review(project_dir, episode, dry_run=args.dry_run)
 
         elif step == 'translate':
             if mode == 'audio':

@@ -189,6 +189,7 @@ def main():
         print(format_kv('Files scanned:', summary.get('files_scanned', '?')))
         print(format_kv('Total cues:', summary.get('total_cues', '?')))
         print(format_kv('Garbled cues:', summary.get('garbled_count', '?')))
+        print(format_kv('Repeat patterns:', summary.get('repeat_count', '?')))
         print(format_kv('Episodes w/ issues:', summary.get('episodes_with_issues', '?')))
     else:
         print('  (no findings.json found)')

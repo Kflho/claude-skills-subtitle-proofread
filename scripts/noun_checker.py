@@ -173,10 +173,17 @@ _COMMON_LOANWORDS = frozenset({
 })
 
 # Name context patterns — words likely to be someone's name
-# Pattern 1: [Name] + suffix (さん/くん/博士/警部/etc.)
-_NAME_WITH_SUFFIX = re.compile(
-    r'([一-鿿぀-ゟ゠-ヿ]{1,6})'
-    r'(さん|くん|ちゃん|様|殿|博士|警部|殿下|先生|総統|団長|部長|署長|伯爵|社長|所長|船長)'
+# Pattern 1: [Name] + suffix
+# Two variants:
+#   a) Kanji name: 1-4 kanji before suffix (天馬博士, お茶の水博士)
+#   b) Katakana name: 2-6 katakana before suffix (アトムさん)
+_NAME_KANJI_SUFFIX = re.compile(
+    r'([一-鿿]{1,4})'
+    r'(博士|警部|殿下|先生|総統|団長|伯爵|署長|所長|船長|部長|社長)'
+)
+_NAME_KATAKANA_SUFFIX = re.compile(
+    r'([゠-ヿ]{2,6})'
+    r'(さん|くん|ちゃん|様|殿)'
 )
 
 # Pattern 2: calling pattern — 「おい、[Name]」or 「[Name]!」or 「[Name]〜」
@@ -212,19 +219,33 @@ def extract_candidates(cue_text, known_names_set=None):
 
     candidates = []
 
-    # ── Pattern 1: Name + suffix ──
-    for m in _NAME_WITH_SUFFIX.finditer(cue_text):
+    # ── Pattern 1a: Kanji name + formal suffix ──
+    for m in _NAME_KANJI_SUFFIX.finditer(cue_text):
         name = m.group(1)
         suffix = m.group(2)
-        full = name + suffix
-        # Only if name part contains kanji or katakana (not pure hiragana)
-        if not name.isascii() and name not in _COMMON_LOANWORDS:
+        # Verify: name should not be preceded by hiragana (false positive guard)
+        start = m.start()
+        if start > 0 and 'ぁ' <= cue_text[start - 1] <= 'ゟ':
+            continue  # preceded by hiragana → probably part of a longer word
+        candidates.append({
+            'text': name + suffix,
+            'name_part': name,
+            'start': start,
+            'type': 'name_kanji_suffix',
+            'context': f'{name}＋{suffix} (敬称)',
+        })
+
+    # ── Pattern 1b: Katakana name + casual suffix ──
+    for m in _NAME_KATAKANA_SUFFIX.finditer(cue_text):
+        name = m.group(1)
+        suffix = m.group(2)
+        if name not in _COMMON_LOANWORDS:
             candidates.append({
-                'text': full,
+                'text': name + suffix,
                 'name_part': name,
                 'start': m.start(),
-                'type': 'name_with_suffix',
-                'context': f'{name}＋{suffix} (敬称付き)',
+                'type': 'name_katakana_suffix',
+                'context': f'{name}＋{suffix} (敬称)',
             })
 
     # ── Pattern 2: Calling/interjection ──
