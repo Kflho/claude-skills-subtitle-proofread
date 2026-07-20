@@ -190,13 +190,9 @@ def build_glossary(term_freq, min_freq=_MIN_FREQ):
 # Output formatting
 # ═══════════════════════════════════════════════════════════════
 
-def format_glossary_markdown(glossary, existing_content=''):
-    """Format glossary as markdown tables."""
+def format_glossary_markdown(glossary):
+    """Format glossary as markdown tables (auto-generated only, no merge)."""
     lines = []
-
-    lines.append('# 鉄腕アトム (1963) 专有名词表\n')
-    lines.append(f'> 自动生成自 {glossary.get("_source", "findings.json")}')
-    lines.append('> 用途：Whisper 校对时对照验证专有名词是否写对\n')
 
     # ── Characters ──
     chars = glossary.get('characters', [])
@@ -234,17 +230,6 @@ def format_glossary_markdown(glossary, existing_content=''):
             lines.append(f'| {g["canonical"]} | {g["total_freq"]} | {variants_str} |')
         lines.append('')
 
-    # ── Preserve hand-curated entries ──
-    if existing_content:
-        lines.append('\n## 手动词条（保留）\n')
-        # Extract manual sections from existing file
-        manual_section = re.search(
-            r'(## (?:主要角色|地名|高频术语).*?)(?=\n## (?:汉字|角色名|其他|手动词条)|$)',
-            existing_content, re.DOTALL
-        )
-        if manual_section:
-            lines.append(manual_section.group(1))
-
     lines.append('\n## 使用方法\n')
     lines.append('校对时遇到疑似专名的词，优先对照此表：')
     lines.append('- 匹配 → 接受')
@@ -266,8 +251,6 @@ def main():
                         help='Path to findings.json (from unified_scanner)')
     parser.add_argument('--output', '-o', required=True,
                         help='Output path for proper-nouns.md')
-    parser.add_argument('--merge', default=None,
-                        help='Merge with existing proper-nouns.md (preserve manual entries)')
     parser.add_argument('--min-freq', type=int, default=_MIN_FREQ,
                         help=f'Minimum frequency to include (default: {_MIN_FREQ})')
     args = parser.parse_args()
@@ -295,15 +278,8 @@ def main():
     print(f'Characters: {char_count} | Kanji: {kanji_count} | Other: {other_count}',
           file=sys.stderr)
 
-    # Load existing content for merge
-    existing = ''
-    if args.merge and os.path.exists(args.merge):
-        with open(args.merge, 'r', encoding='utf-8') as f:
-            existing = f.read()
-        print(f'Merging with: {args.merge}', file=sys.stderr)
-
     # Format and write
-    md = format_glossary_markdown(glossary, existing)
+    md = format_glossary_markdown(glossary)
     os.makedirs(os.path.dirname(args.output) or '.', exist_ok=True)
     with open(args.output, 'w', encoding='utf-8') as f:
         f.write(md)
