@@ -20,7 +20,6 @@ import argparse
 import hashlib
 import json
 import os
-import random
 import re
 import sys
 import time
@@ -36,6 +35,7 @@ def load_credentials():
     """Load Baidu API credentials from ~/.baidu_translate or env vars."""
     appid = os.environ.get('BAIDU_APPID', '')
     secret = os.environ.get('BAIDU_SECRET', '')
+    endpoint = os.environ.get('BAIDU_API_ENDPOINT', '')
 
     config_path = os.path.expanduser('~/.baidu_translate')
     if os.path.exists(config_path):
@@ -46,8 +46,10 @@ def load_credentials():
                     appid = appid or line.split('=', 1)[1]
                 elif line.startswith('BAIDU_SECRET='):
                     secret = secret or line.split('=', 1)[1]
+                elif line.startswith('BAIDU_ENDPOINT='):
+                    endpoint = endpoint or line.split('=', 1)[1]
 
-    return appid, secret
+    return appid, secret, endpoint
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -56,13 +58,28 @@ def load_credentials():
 
 BAIDU_API = 'https://fanyi-api.baidu.com/api/trans/vip/translate'
 
+# Baidu language codes: zh=Chinese, en=English, jp=Japanese, kor=Korean, etc.
+LANG_MAP = {'ja': 'jp', 'jp': 'jp', 'zh': 'zh', 'en': 'en', 'auto': 'auto'}
 
-def baidu_translate(text, appid, secret, source='auto', target='ja'):
+
+def get_api_endpoint():
+    """Get API endpoint from env var or default."""
+    return os.environ.get('BAIDU_API_ENDPOINT', BAIDU_API)
+
+
+def baidu_translate(text, appid, secret, source='auto', target='ja', endpoint=None):
     """Translate a single text via Baidu API.
 
     Returns translated text string, or None on failure.
     """
-    salt = str(random.randint(10000, 99999))
+    if endpoint is None:
+        endpoint = get_api_endpoint()
+
+    # Map language codes to Baidu format (ja→jp)
+    source = LANG_MAP.get(source, source)
+    target = LANG_MAP.get(target, target)
+
+    salt = '12345'  # fixed salt — Baidu uses it for replay protection, not needed here
     sign_str = appid + text + salt + secret
     sign = hashlib.md5(sign_str.encode('utf-8')).hexdigest()
 
@@ -75,12 +92,20 @@ def baidu_translate(text, appid, secret, source='auto', target='ja'):
         'sign': sign,
     }
 
-    url = BAIDU_API + '?' + urllib.parse.urlencode(params)
+    url = endpoint + '?' + urllib.parse.urlencode(params)
 
     try:
+        # SSL: only needed for HTTPS endpoints (skip for HTTP proxy)
+        ctx = None
+        if endpoint.startswith('https') and endpoint != BAIDU_API:
+            import ssl
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+
         req = urllib.request.Request(url)
         req.add_header('User-Agent', 'Mozilla/5.0')
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=30, context=ctx) as resp:
             data = json.loads(resp.read().decode('utf-8'))
 
         if 'error_code' in data:
@@ -200,16 +225,23 @@ Examples:
                         help='Resume: skip already-translated cues in output file')
     parser.add_argument('--dry-run', action='store_true',
                         help='Count cues and estimate cost, no actual translation')
+    parser.add_argument('--endpoint', default=None,
+                        help=f'API endpoint override (default: {BAIDU_API}). '
+                             'Use http://127.0.0.1:8888/api/trans/vip/translate for proxy.')
     args = parser.parse_args()
 
     # Load credentials
-    appid, secret = load_credentials()
+    appid, secret, config_endpoint = load_credentials()
     if not appid or not secret:
         print('ERROR: Baidu API credentials not found.', file=sys.stderr)
         print('Create ~/.baidu_translate with BAIDU_APPID and BAIDU_SECRET,', file=sys.stderr)
         print('or set BAIDU_APPID and BAIDU_SECRET environment variables.', file=sys.stderr)
         print('Register at: https://fanyi-api.baidu.com/', file=sys.stderr)
         sys.exit(1)
+
+    # Endpoint: CLI arg > env var > config file > default
+    if args.endpoint is None:
+        args.endpoint = config_endpoint or BAIDU_API
 
     # Parse input
     cues = parse_srt_cues(args.input)
@@ -266,7 +298,8 @@ Examples:
                 results[cue['start']] = {**cue, 'text': ''}
                 continue
 
-            translated = baidu_translate(text, appid, secret, source=args.source, target=args.to)
+            translated = baidu_translate(text, appid, secret, source=args.source,
+                                          target=args.to, endpoint=args.endpoint)
 
             if translated is not None:
                 results[cue['start']] = {**cue, 'text': translated}
