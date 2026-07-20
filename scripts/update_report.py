@@ -55,6 +55,60 @@ STATUS_MAP = {
     '🗑️': '已删除',
 }
 
+# 步骤与项目特征的关联（用于动态筛选）
+# 每个步骤的适用条件：None=始终适用，dict=需要这些特征才适用
+_STEP_REQUIRES = {
+    2:  {'target_lang': 'zh'},          # 繁体→简体：中文目标语言
+    3:  {'is_translation': True},        # 双语混合：翻译项目
+    4:  {'is_translation': True},        # 纯源语言行：翻译项目
+    6:  {'is_translation': True},        # 感叹词残留：翻译项目
+    7:  {'format': 'ass'},              # Name字段：ASS only
+    8:  {'format': 'ass'},              # Comment行：ASS only
+    9:  {'format': 'ass'},              # 样式异常：ASS only
+    10: {'format': 'ass'},              # 绘图指令：ASS only
+    12: {'target_lang': 'zh'},          # 机翻幻觉：中文目标语言
+    13: {'format': 'ass'},              # OP/ED异常：ASS + 多样式
+    14: {'has_reference': True},         # 专有名词：有参考字幕
+}
+
+
+def get_relevant_steps(target_lang='ja', fmt='srt', has_reference=False,
+                       is_translation=False):
+    """根据项目特征返回适用的步骤列表。
+
+    默认值对应本项目（日语原文 + SRT only + 无参考字幕）→ 仅 5-6 个步骤。
+
+    Args:
+        target_lang: 目标语言代码 ('ja'=日语, 'zh'=中文, ...)
+        fmt: 字幕格式 ('srt' 或 'ass')
+        has_reference: 是否有参考字幕
+        is_translation: 是否为翻译项目（非原文转录）
+
+    Returns:
+        OrderedDict: {step_num: step_name} 仅包含适用步骤
+    """
+    from collections import OrderedDict as _OD
+
+    features = {
+        'target_lang': target_lang,
+        'format': fmt,
+        'has_reference': has_reference,
+        'is_translation': is_translation,
+    }
+
+    relevant = _OD()
+    for num, name in STEP_NAMES.items():
+        req = _STEP_REQUIRES.get(num)
+        if req is None:
+            relevant[num] = name
+            continue
+        # 检查所有条件是否满足
+        match = all(features.get(k) == v for k, v in req.items())
+        if match:
+            relevant[num] = name
+
+    return relevant
+
 # ═══════════════════════════════════════════════════════════════
 # 报告头模板
 # ═══════════════════════════════════════════════════════════════
@@ -278,8 +332,14 @@ def get_step_summary(data):
 if __name__ == '__main__':
     import sys
     if len(sys.argv) < 2:
-        print('用法: python update_report.py <报告路径> [--summary]')
-        print('      python update_report.py <报告路径> --init  # 初始化空报告')
+        print('用法: python update_report.py <报告路径> [--summary] [选项]')
+        print('      python update_report.py <报告路径> --init')
+        print()
+        print('--summary 选项（按项目特征过滤步骤）:')
+        print('  --target-lang ja|zh     目标语言 (default: ja)')
+        print('  --format srt|ass        字幕格式 (default: srt)')
+        print('  --has-reference         有参考字幕')
+        print('  --is-translation        翻译项目（非原文转录）')
         sys.exit(1)
 
     path = sys.argv[1]
@@ -288,15 +348,37 @@ if __name__ == '__main__':
         write_report(path, {})
         print(f'已初始化空报告: {path}')
     elif '--summary' in sys.argv:
+        # 解析项目特征参数
+        target_lang = 'ja'
+        fmt = 'srt'
+        has_reference = False
+        is_translation = False
+        for i, arg in enumerate(sys.argv):
+            if arg == '--target-lang' and i + 1 < len(sys.argv):
+                target_lang = sys.argv[i + 1]
+            elif arg == '--format' and i + 1 < len(sys.argv):
+                fmt = sys.argv[i + 1]
+            elif arg == '--has-reference':
+                has_reference = True
+            elif arg == '--is-translation':
+                is_translation = True
+
         data = read_report(path)
+        relevant_steps = get_relevant_steps(
+            target_lang=target_lang, fmt=fmt,
+            has_reference=has_reference, is_translation=is_translation
+        )
         summary = get_step_summary(data)
         total_f = total_p = total_d = total_all = 0
         for step_num, s in summary.items():
-            if s['total'] > 0:
-                name = STEP_NAMES[step_num]
-                print(f'步骤{step_num} {name}: {s["fixed"]}✅ {s["pending"]}⬜ {s["deleted"]}🗑️ (共{s["total"]}条)')
+            if step_num not in relevant_steps:
+                continue  # 跳过不适用步骤
+            name = relevant_steps[step_num]
+            marker = '' if s['total'] > 0 else ' (空)'
+            print(f'步骤{step_num} {name}: {s["fixed"]}✅ {s["pending"]}⬜ {s["deleted"]}🗑️ (共{s["total"]}条){marker}')
             total_f += s['fixed']; total_p += s['pending']; total_d += s['deleted']; total_all += s['total']
-        print(f'\n总计: {total_f}✅ {total_p}⬜ {total_d}🗑️ (共{total_all}条)')
+        print(f'\n总计（仅适用步骤）: {total_f}✅ {total_p}⬜ {total_d}🗑️ (共{total_all}条)')
+        print(f'已过滤: {len(STEP_NAMES) - len(relevant_steps)} 个不适用步骤')
     else:
         data = read_report(path)
         print(f'步骤数: {len(data)}')
