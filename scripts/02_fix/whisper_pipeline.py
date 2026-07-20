@@ -257,7 +257,128 @@ def vad_delete_nonspeech(audio_path, cues, srt_path):
     else:
         print('[VAD] All cues kept — nothing to delete.', file=sys.stderr)
 
-    return kept, deleted
+    return kept, deleted, speech_segs
+
+
+# ═══════════════════════════════════════════════════════════════
+# VAD → missing subtitle detection
+# ═══════════════════════════════════════════════════════════════
+
+# Placeholder text that triggers garbled classification (contains Latin chars)
+MISSING_SPEECH_MARKER = '⚠SPEECH'
+
+
+def find_missing_subtitle_gaps(speech_segs, cues, min_gap=3.0):
+    """Find speech segments not covered by any subtitle cue.
+
+    Only flags gaps BETWEEN two existing cues (not before first cue or after last).
+    This avoids false positives from OP/ED music with vocal elements.
+
+    Args:
+        speech_segs: [(start_s, end_s), ...] from WebRTC VAD
+        cues: list of cue dicts (remaining after non-speech deletion)
+        min_gap: minimum gap duration in seconds to create a placeholder
+
+    Returns:
+        [(start_s, end_s, duration), ...] gaps needing placeholder cues
+    """
+    if not cues or not speech_segs:
+        return []
+
+    # Build covered intervals from cues, sorted by start time
+    covered = sorted([(c['start_s'], c['end_s']) for c in cues])
+    # Merge overlapping/nearby intervals (2s tolerance — dialogue pacing)
+    merged = []
+    for ss, es in covered:
+        if merged and ss <= merged[-1][1] + 2.0:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], es))
+        else:
+            merged.append((ss, es))
+
+    # Only consider gaps BETWEEN cues (inter-cue gaps).
+    # Speech before the first cue or after the last cue is usually OP/ED music.
+    first_cue_s = merged[0][0] if merged else 0
+    last_cue_e = merged[-1][1] if merged else 0
+
+    # Find speech segments not covered by any merged interval
+    gaps = []
+    for ss, es in speech_segs:
+        # Skip speech entirely outside the subtitle range
+        if es <= first_cue_s or ss >= last_cue_e:
+            continue
+
+        # Find uncovered portion of this speech segment
+        uncovered_start = max(ss, first_cue_s)
+        for cs, ce in merged:
+            if ce <= uncovered_start:
+                continue
+            if cs > uncovered_start:
+                # Gap from uncovered_start to cs
+                capped_end = min(cs, last_cue_e)
+                gap_dur = capped_end - uncovered_start
+                if gap_dur >= min_gap:
+                    gaps.append((uncovered_start, capped_end, gap_dur))
+            uncovered_start = max(uncovered_start, ce)
+            if uncovered_start >= es:
+                break
+        # Remaining tail (only if within subtitle range)
+        if uncovered_start < min(es, last_cue_e):
+            gap_dur = min(es, last_cue_e) - uncovered_start
+            if gap_dur >= min_gap:
+                gaps.append((uncovered_start, min(es, last_cue_e), gap_dur))
+
+    return gaps
+
+
+def add_placeholder_cues(gaps, cues, srt_path):
+    """Add placeholder cues for missing dialogue. Modifies SRT in-place.
+
+    Placeholder text '⚠SPEECH' contains Latin chars → classified as garbled
+    → automatically enters Whisper Tier 1/2 for transcription.
+
+    Args:
+        gaps: [(start_s, end_s, dur), ...] from find_missing_subtitle_gaps
+        cues: current cue list (to append to)
+        srt_path: SRT file to write
+
+    Returns:
+        updated cues list with placeholders inserted
+    """
+    if not gaps:
+        return cues
+
+    # Create placeholder cues
+    placeholders = []
+    for ss, es, dur in gaps:
+        # Format timestamps as SRT timecodes
+        start_ts = f'{int(ss//3600):02d}:{int((ss%3600)//60):02d}:{ss%60:06.3f}'.replace('.', ',')
+        end_ts = f'{int(es//3600):02d}:{int((es%3600)//60):02d}:{es%60:06.3f}'.replace('.', ',')
+        placeholders.append({
+            'start': start_ts,
+            'end': end_ts,
+            'start_s': ss,
+            'end_s': es,
+            'text': MISSING_SPEECH_MARKER,
+            'line': None,
+            'is_garbled': True,
+            'garbled_type': 'garbled',
+            'is_placeholder': True,
+        })
+
+    # Insert and sort by start time
+    all_cues = cues + placeholders
+    all_cues.sort(key=lambda c: c['start_s'])
+
+    # Write updated SRT
+    write_srt(srt_path, all_cues)
+
+    print(f'[VAD] +{len(placeholders)} placeholder cues for missing dialogue:',
+          file=sys.stderr)
+    for p in placeholders:
+        print(f'  [{p["start"]}] ⚠SPEECH ({p["end_s"]-p["start_s"]:.1f}s)',
+              file=sys.stderr)
+
+    return all_cues
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -503,6 +624,10 @@ def main():
                         help='Skip Tier 1, go directly to full-episode')
     parser.add_argument('--no-vad-clean', action='store_true',
                         help='Skip VAD pre-scan (keep all cues)')
+    parser.add_argument('--detect-missing-dialogue', action='store_true',
+                        help='Detect speech without subtitles and add placeholder cues')
+    parser.add_argument('--missing-dialogue-min-gap', type=float, default=3.0,
+                        help='Min gap (seconds) for missing dialogue detection (default: 3.0)')
     parser.add_argument('--vad-aggressiveness', type=int, default=2,
                         help='WebRTC VAD aggressiveness 0-3 (default: 2)')
     args = parser.parse_args()
@@ -518,8 +643,13 @@ def main():
             print('[VAD] Extracting full audio for speech detection ...', file=sys.stderr)
             vad_audio = os.path.join(tmpdir, 'vad_full.wav')
             extract_audio_wav(args.video, vad_audio)
-            cues, deleted = vad_delete_nonspeech(vad_audio, cues, args.srt)
+            cues, deleted, speech_segs = vad_delete_nonspeech(vad_audio, cues, args.srt)
             deleted_count = len(deleted)
+            # Optional: detect speech without subtitles → placeholder cues
+            if args.detect_missing_dialogue:
+                gaps = find_missing_subtitle_gaps(speech_segs, cues,
+                                                   min_gap=args.missing_dialogue_min_gap)
+                cues = add_placeholder_cues(gaps, cues, args.srt)
         else:
             print('[VAD] --no-vad-clean: skipping speech detection', file=sys.stderr)
 
