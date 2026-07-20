@@ -144,7 +144,7 @@ ROMAJI_TO_KANA = {
     'ii': 'いい', 'uu': 'うう', 'ee': 'ええ', 'oo': 'おお',
 }
 
-ROMAJI_TO_KATAKANA = {
+ROMAJI_CORRECTIONS = {
     # 阿童木专有名词
     'atom': 'アトム', 'atomu': 'アトム',
     'wan': 'ワン',
@@ -235,8 +235,8 @@ def generate_dict_fixes(findings_by_type):
                 })
             continue
 
-        if lower in ROMAJI_TO_KATAKANA:
-            katakana = ROMAJI_TO_KATAKANA[lower]
+        if lower in ROMAJI_CORRECTIONS:
+            katakana = ROMAJI_CORRECTIONS[lower]
             key = (item['file'], item['line'], 'dict_katakana')
             if key not in seen_per_file:
                 seen_per_file.add(key)
@@ -267,8 +267,8 @@ def generate_dict_fixes(findings_by_type):
             if lower in ROMAJI_TO_KANA:
                 new_text = new_text.replace(word, ROMAJI_TO_KANA[lower])
                 changed = True
-            elif lower in ROMAJI_TO_KATAKANA:
-                new_text = new_text.replace(word, ROMAJI_TO_KATAKANA[lower])
+            elif lower in ROMAJI_CORRECTIONS:
+                new_text = new_text.replace(word, ROMAJI_CORRECTIONS[lower])
                 changed = True
 
         if changed and new_text != text:

@@ -295,8 +295,8 @@ def run_whisper(audio_path, whisper_cli, model_path, language='ja',
             'text': text,
             # 置信度指标（whisper.cpp JSON 输出字段）
             'no_speech_prob': seg.get('no_speech_prob', -1.0),
-            'avg_logprob': seg.get('avg_logprob', 0.0),
-            'compression_ratio': seg.get('compression_ratio', 0.0),
+            'avg_logprob': seg.get('avg_logprob', None),
+            'compression_ratio': seg.get('compression_ratio', None),
         })
     return segs
 
@@ -311,14 +311,14 @@ def filter_low_confidence(segs, no_speech_threshold=0.6, min_avg_logprob=-1.5,
     kept, discarded = [], []
     for seg in segs:
         nsp = seg.get('no_speech_prob', -1.0)
-        alp = seg.get('avg_logprob', 0.0)
-        cr = seg.get('compression_ratio', 0.0)
+        alp = seg.get('avg_logprob', None)
+        cr = seg.get('compression_ratio', None)
 
         if nsp >= 0 and nsp > no_speech_threshold:
             discarded.append({**seg, 'discard_reason': f'no_speech_prob={nsp:.2f}'})
-        elif alp < min_avg_logprob:
+        elif alp is not None and alp < min_avg_logprob:
             discarded.append({**seg, 'discard_reason': f'avg_logprob={alp:.2f}'})
-        elif cr > max_compression_ratio:
+        elif cr is not None and cr > max_compression_ratio:
             discarded.append({**seg, 'discard_reason': f'compression_ratio={cr:.1f}'})
         else:
             kept.append(seg)
@@ -417,8 +417,7 @@ def vad_filter_audio(input_audio, output_audio, silence_db=-30, min_silence=0.8,
                 'ffmpeg', '-y', '-ss', str(ss), '-t', str(es - ss),
                 '-i', input_audio, '-c', 'copy', seg_path
             ], capture_output=True, check=True)
-            f.write(f"file '{seg_path}'
-")
+            f.write(f"file '{seg_path}'\n")
 
     subprocess.run([
         'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
@@ -454,7 +453,7 @@ def get_audio_duration(audio_path):
         ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration',
          '-of', 'csv=p=0', audio_path],
         capture_output=True, text=True)
-    return float(probe.stdout.strip()) if probe.stdout.strip() else 0.0
+    return float(probe.stdout.strip()) if probe.stdout.strip() else None
 
 
 # ═══════════════════════════════════════════════════════════════
