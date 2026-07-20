@@ -141,17 +141,23 @@ echo "BAIDU_SECRET=你的密钥" >> ~/.baidu_translate
 export BAIDU_APPID=你的APPID
 export BAIDU_SECRET=你的密钥
 
-# 3. 测试翻译（dry-run 估算用量）：
+# 3. 测试（dry-run 估算用量）：
 python scripts/translate_srt.py 参考字幕/EP001.srt --to ja --output temp/translations/EP001.srt --dry-run
+
+# 如需自定义 API 地址（自建代理等），设置环境变量或配置文件：
+#   BAIDU_API_ENDPOINT=http://your-proxy:port/api/trans/vip/translate
 ```
 
 ## 核心工作流
 
-### 分支 A: 文本规则检测（所有项目必做）
+### 分支 A: 初始化（所有项目必做，首次一次）
 
 ```
-A1. unified_scanner.py --target-dir <DIR> --output-findings findings.json
-    → 检测所有 garbled cue（含拉丁/西里尔字符的 cue）
+A1. unified_scanner.py --target-dir <DIR> \
+      --output-findings temp/scans/findings.json \
+      --output-issues temp/scans/issues/ \
+      --build-glossary
+    → 扫描全量文件 + 自动生成术语表 reports/proper-nouns.md
 ```
 
 ### 分支 B: Whisper 管线（有视频+whisper 时启用）
@@ -159,10 +165,9 @@ A1. unified_scanner.py --target-dir <DIR> --output-findings findings.json
 详见 `references/whisper-pipeline.md`。
 
 ```
-B1. episode_workflow.py EP064 --step audio
-    → VAD 判断 → Whisper Tier 1 重录 or 标记删除
-B2. whisper_full_episode.py   Tier 2: 整集转录（碎片≥15条）
-B3. whisper_deep_fix.py       Tier 3: silencedetect 拆分
+B1. episode_workflow.py EP064          # 单集全自动
+    episode_workflow.py --all           # 批量全量
+    → scan→audio→review→apply→diff→clean
 ```
 
 ### 分支 C: 翻译对照（有参考字幕时启用）
