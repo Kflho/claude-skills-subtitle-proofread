@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
-"""Single-episode proofread workflow orchestrator.
+"""Single-episode subtitle proofread workflow orchestrator (v4.0).
 
-Two modes:
-  text  — reference subtitles exist → dictionary fixes + AI review
-  audio — no reference, audio only → VAD + Whisper (no guessing)
+Both modes share the same first half (VAD + Whisper from audio).
+Only the verification step differs:
+
+  audio — no reference subs → done after Whisper
+  text  — has reference subs → translate reference → compare → review
 
 Usage:
   python episode_workflow.py EP064                    # Auto-detect mode
   python episode_workflow.py EP064 --mode audio        # Force audio mode
   python episode_workflow.py EP064 --mode text          # Force text mode
   python episode_workflow.py EP064 --dry-run            # Preview only
-  python episode_workflow.py EP064 --step scan          # Show issues
+  python episode_workflow.py EP064 --step scan          # Show garbled cues
   python episode_workflow.py EP064 --step audio         # VAD + Whisper only
+  python episode_workflow.py EP064 --step translate     # Translate reference SRT
+  python episode_workflow.py EP064 --step compare       # Compare Whisper vs ref
   python episode_workflow.py EP064 --step diff          # Show changes
   python episode_workflow.py EP064 --no-backup          # Skip git backup
   python episode_workflow.py EP064 --project-dir <DIR>  # Explicit project root
@@ -148,9 +152,8 @@ def find_original_srt(project_dir, episode):
 # ═══════════════════════════════════════════════════════════════
 
 def step_scan(project_dir, episode):
-    """Extract and display issues for a single episode."""
+    """Extract and display garbled cues for a single episode (v4.0)."""
     findings = load_json(os.path.join(project_dir, 'findings.json'))
-    proj_dict = load_json(os.path.join(project_dir, 'project_dict.json'))
 
     if not findings:
         print('No findings.json found. Run unified_scanner.py first.')
@@ -160,118 +163,138 @@ def step_scan(project_dir, episode):
     per_ep = findings.get('per_episode_issues', {})
     issues = per_ep.get(episode, [])
 
-    # Also check findings_by_type (dedup by start time + text)
-    findings_by_type = findings.get('findings', {})
-    srt_name, _ = find_srt(project_dir, episode)
-    seen_keys = {(i.get('start', ''), i.get('original_text', i.get('text', '')))
-                 for i in issues}
-    if srt_name:
-        for ftype, items in findings_by_type.items():
-            for item in items:
-                if item.get('file') == srt_name:
-                    key = (item.get('timecode', item.get('start', '')),
-                           item.get('text', ''))
-                    if key not in seen_keys:
-                        seen_keys.add(key)
-                        issues.append(item)
-
     if not issues:
-        print(f'{episode}: no issues found.')
-        return {'issues': [], 'findings_by_type': {}, 'project_dict': proj_dict}
+        print(f'{episode}: no garbled cues found.')
+        return {'issues': [], 'srt_name': None}
 
-    # Count types
-    type_counts = {}
-    for item in issues:
-        t = item.get('type', 'unknown')
-        type_counts[t] = type_counts.get(t, 0) + 1
-
-    print(f'[scan] {episode}: {len(issues)} issues')
-    for t, n in sorted(type_counts.items()):
-        print(f'  {t}: {n}')
-
-    # Check project_dict coverage
-    if proj_dict:
-        auto = proj_dict.get('auto', {})
-        hit_words = set()
-        for item in issues:
-            text = item.get('original_text', item.get('text', ''))
-            for word in re.findall(r'[a-zA-Z]{2,}', text.lower()):
-                if word in auto:
-                    hit_words.add(word)
-        if hit_words:
-            print(f'  Dict coverage: {len(hit_words)} words ({", ".join(sorted(hit_words))})')
+    print(f'[scan] {episode}: {len(issues)} garbled cue(s) → VAD + Whisper')
 
     # Show each issue
     print()
-    for item in sorted(issues, key=lambda x: x.get('start', x.get('timecode', ''))):
-        ts = item.get('start', item.get('timecode', ''))
-        text = item.get('original_text', item.get('text', ''))
+    for item in sorted(issues, key=lambda x: x.get('start', '')):
+        ts = item.get('start', '')
+        text = item.get('original_text', '')
         print(f'  {ts} | {text[:100]}')
 
-    # Build findings_by_type filtered to this episode's file
-    fbt = {}
-    if srt_name:
-        for ftype, items in findings_by_type.items():
-            ep_items = [i for i in items if i.get('file') == srt_name]
-            if ep_items:
-                fbt[ftype] = ep_items
-
-    return {'issues': issues, 'findings_by_type': fbt, 'project_dict': proj_dict,
-            'srt_name': srt_name}
+    srt_name, _ = find_srt(project_dir, episode)
+    return {'issues': issues, 'srt_name': srt_name}
 
 
 # ═══════════════════════════════════════════════════════════════
 # Step: fix — generate fixes using romaji_fixer logic
 # ═══════════════════════════════════════════════════════════════
 
-def step_fix(scan_result, project_dir):
-    """Generate romaji fixes for the episode's issues."""
-    if not scan_result or not scan_result.get('findings_by_type'):
-        print('[fix] No findings to fix.')
-        return []
+# ═══════════════════════════════════════════════════════════════
+# Step: translate — 百度翻译参考字幕→日语 (text mode only)
+# ═══════════════════════════════════════════════════════════════
 
+def step_translate(project_dir, episode, scan_result, dry_run=False):
+    """Translate reference subtitles to Japanese for comparison (text mode)."""
+    if not scan_result or not scan_result.get('issues'):
+        print('[translate] No issues — skipping translation.')
+        return None
+
+    ref_dir = os.path.join(project_dir, '参考字幕')
+    if not os.path.isdir(ref_dir):
+        print('[translate] No 参考字幕/ directory.')
+        return None
+
+    # Find reference SRT
+    ep_num = episode[2:]
+    ref_path = None
+    for fname in os.listdir(ref_dir):
+        if fname.endswith('.srt') and ep_num in fname:
+            ref_path = os.path.join(ref_dir, fname)
+            break
+
+    if not ref_path:
+        print(f'[translate] No reference SRT found for {episode}.')
+        return None
+
+    # Output path
+    out_dir = os.path.join(project_dir, 'temp', 'translations')
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f'{episode}_translated.srt')
+
+    cmd_parts = [
+        'python', os.path.join(_SCRIPT_DIR, 'translate_srt.py'),
+        f'"{ref_path}"',
+        f'--output', f'"{out_path}"',
+        '--to', 'ja',
+    ]
+    cmd = ' '.join(cmd_parts)
+
+    if dry_run:
+        print(f'[translate] DRY RUN — would execute:')
+        print(f'  {cmd}')
+        return out_path
+
+    print(f'[translate] Translating: {os.path.basename(ref_path)} → ja')
     try:
-        from romaji_fixer import generate_dict_fixes
-    except ImportError:
-        print('[fix] ERROR: Cannot import romaji_fixer. Check scripts path.')
+        result = subprocess.run(cmd, cwd=project_dir, shell=True,
+                                capture_output=False, timeout=1800)
+        if result.returncode != 0:
+            print(f'[translate] Translation failed (exit {result.returncode})')
+            return None
+    except Exception as e:
+        print(f'[translate] Error: {e}')
+        return None
+
+    print(f'[translate] → {out_path}')
+    return out_path
+
+
+# ═══════════════════════════════════════════════════════════════
+# Step: compare — 对照 Whisper 输出与翻译后参考字幕 (text mode only)
+# ═══════════════════════════════════════════════════════════════
+
+def step_compare(project_dir, episode, scan_result, translated_path, dry_run=False):
+    """Compare Whisper output with translated reference subtitles."""
+    if not translated_path or not os.path.exists(translated_path):
+        print('[compare] No translated reference available.')
         return []
 
-    fbt = scan_result['findings_by_type']
-    proj_dict = scan_result.get('project_dict')
+    srt_name, srt_path = find_srt(project_dir, episode)
+    if not srt_path:
+        print('[compare] SRT not found.')
+        return []
 
-    fixes = generate_dict_fixes(fbt, project_dict=proj_dict)
+    out_dir = os.path.join(project_dir, 'temp', 'compares')
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f'{episode}_diff.json')
 
-    # Identify which words were hit and which were missed
-    all_words = set()
-    hit_words = set()
-    for item in (fbt.get('mixed_romaji', []) + fbt.get('pure_romaji', [])):
-        text = item.get('original_text', item.get('text', ''))
-        for word in re.findall(r'[a-zA-Z]{2,}', text.lower()):
-            all_words.add(word)
+    cmd_parts = [
+        'python', os.path.join(_SCRIPT_DIR, 'compare_srt.py'),
+        f'"{srt_path}"', f'"{translated_path}"',
+        f'--output', f'"{out_path}"',
+    ]
+    cmd = ' '.join(cmd_parts)
 
-    for fix in fixes:
-        note = fix.get('note', '')
-        for word in all_words:
-            if word.lower() in note.lower():
-                hit_words.add(word)
+    if dry_run:
+        print(f'[compare] DRY RUN — would execute:')
+        print(f'  {cmd}')
+        return []
 
-    missed = all_words - hit_words
-    # Filter to meaningful misses (not English OK words)
-    missed_meaningful = {w for w in missed if len(w) > 1 and not w.startswith('ok')}
+    print(f'[compare] Comparing: {srt_name} vs translated reference')
+    try:
+        result = subprocess.run(cmd, cwd=project_dir, shell=True,
+                                capture_output=False, timeout=600)
+        if result.returncode != 0:
+            print(f'[compare] Comparison failed (exit {result.returncode})')
+            return []
+    except Exception as e:
+        print(f'[compare] Error: {e}')
+        return []
 
-    total_issues = len(scan_result.get('issues', []))
-    fixable = len(hit_words)
-    unfixable = total_issues - len(fixes)
+    # Load differences
+    diffs = load_json(out_path) if os.path.exists(out_path) else []
+    if isinstance(diffs, dict):
+        diffs = diffs.get('differences', [])
 
-    print(f'[fix] {len(fixes)} fix(es) generated for {total_issues} issues')
-    if hit_words:
-        print(f'  [HIT]  {", ".join(sorted(hit_words))}')
-    if missed_meaningful:
-        print(f'  [MISS] {", ".join(sorted(missed_meaningful)[:15])}')
-    if unfixable > 0:
-        print(f'  -> {unfixable} issue(s) require Whisper Tier 1/2')
-
-    return fixes
+    match_count = sum(1 for d in diffs if d.get('verdict') == 'match')
+    mismatch_count = sum(1 for d in diffs if d.get('verdict') != 'match')
+    print(f'[compare] {len(diffs)} cues: {match_count} match, {mismatch_count} need review')
+    return diffs
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -544,7 +567,7 @@ def main():
     parser.add_argument('--mode', choices=['text', 'audio', 'auto'], default='auto',
                         help='Workflow mode: text=reference subs, audio=VAD+Whisper, '
                              'auto=detect from project (default)')
-    parser.add_argument('--step', choices=['scan', 'fix', 'audio', 'apply', 'diff'],
+    parser.add_argument('--step', choices=['scan', 'audio', 'translate', 'compare', 'apply', 'diff'],
                         help='Run a specific step only (default: all)')
     parser.add_argument('--dry-run', action='store_true',
                         help='Preview only, no file changes')
@@ -571,7 +594,7 @@ def main():
     # Default pipeline per mode
     if args.step is None:
         if mode == 'text':
-            steps = ['scan', 'fix', 'apply', 'diff']
+            steps = ['scan', 'audio', 'translate', 'compare', 'apply', 'diff']
         else:  # audio
             steps = ['scan', 'audio', 'apply', 'diff']
     else:
@@ -580,26 +603,29 @@ def main():
     scan_result = None
     fixes = []
     applied = []
+    translated_path = None
+    diffs = []
 
     for step in steps:
         if step == 'scan':
             scan_result = step_scan(project_dir, episode)
 
-        elif step == 'fix':
-            if mode == 'audio':
-                print('[fix] Skipped — audio mode does not use dictionary fixes.')
-                print('[fix] Use --step audio for VAD+Whisper pipeline.')
-                continue
-            fixes = step_fix(scan_result, project_dir)
-            if args.dry_run:
-                for f in fixes:
-                    print(f'  [DRY] {f.get("note", "")}: {f.get("replacement", "")[:60]}')
-
         elif step == 'audio':
-            if mode == 'text':
-                print('[audio] Skipped — text mode uses dictionary fixes (--step fix).')
-                continue
             fixes = step_audio(project_dir, episode, scan_result, dry_run=args.dry_run)
+
+        elif step == 'translate':
+            if mode == 'audio':
+                print('[translate] Skipped — audio mode has no reference subtitles.')
+                continue
+            translated_path = step_translate(project_dir, episode, scan_result,
+                                             dry_run=args.dry_run)
+
+        elif step == 'compare':
+            if mode == 'audio':
+                print('[compare] Skipped — audio mode has no reference subtitles.')
+                continue
+            diffs = step_compare(project_dir, episode, scan_result, translated_path,
+                                dry_run=args.dry_run)
 
         elif step == 'apply':
             if args.dry_run:

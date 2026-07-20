@@ -47,13 +47,8 @@ from whisper_utils import classify_garbled_text, to_seconds, extract_ep_number, 
 # ═══════════════════════════════════════════════════════════════
 
 TYPE_LABELS = {
-    'pure_romaji':      '纯罗马字（需词典修复或 Whisper）',
-    'mixed_romaji':     '罗马字+日语混合行',
-    'ai_noise':         'AI 噪声碎片（可直接删除）',
-    'hallucination':    '时代错位幻觉（iPhone/Google 等）',
-    'cyrillic':         '西里尔字母残留',
-    'music_tag':        '音乐/音效标签（非乱码）',
-    'clean':            '无外文字符',
+    'clean':   '纯日语，无外文字符',
+    'garbled': '含拉丁/西里尔字符 → VAD + Whisper',
 }
 
 
@@ -79,9 +74,8 @@ def scan_file(filepath, skip_oped=True):
     Returns:
         dict: {
             'filename': str,
-            'findings': {type: [finding, ...]},
-            'issues': [issue, ...],        # 供 Whisper 阶段使用
-            'delete_candidates': [fix, ...] # 供 romaji_fixer 删除
+            'garbled_cues': [finding, ...],
+            'issues': [issue, ...],
         }
     """
     fname = os.path.basename(filepath)
@@ -125,16 +119,15 @@ def scan_file(filepath, skip_oped=True):
             'total_cues': 0,
         }
 
-    # 第二遍：分类每个 cue
-    findings_by_type = defaultdict(list)
+    # 第二遍：分类每个 cue（v4.0: 只分 clean/garbled）
+    garbled_cues = []
     issues = []
-    delete_candidates = []
 
     for c in cues:
         classification = classify_garbled_text(c['text'])
         gtype = classification['type']
 
-        if gtype == 'clean' or gtype == 'music_tag':
+        if gtype == 'clean':
             continue
 
         # OP/ED 区域豁免
@@ -149,38 +142,25 @@ def scan_file(filepath, skip_oped=True):
             'file': fname,
             'line': c['line'],
             'timecode': c['start'],
-            'type': gtype,
             'text': c['text'][:120],
             'has_kana': classification['has_kana'],
             'has_kanji': classification['has_kanji'],
         }
-        findings_by_type[gtype].append(finding)
+        garbled_cues.append(finding)
 
-        # 生成 Whisper issue（需要音频重转录的类型）
-        if gtype in ('pure_romaji', 'mixed_romaji'):
-            issues.append({
-                'ep': ep,
-                'start': c['start'],
-                'end': c['end'],
-                'original_text': c['text'][:120],
-                'type': gtype,
-                'line': c['line'],
-            })
-
-        # 生成删除候选（噪声碎片和幻觉词）
-        if classification['is_deletable']:
-            delete_candidates.append({
-                'action': 'delete_line',
-                'file': fname,
-                'line': c['line'],
-                'note': f'统一扫描: {gtype} — "{c["text"][:40]}"',
-            })
+        # 所有 garbled cue 都是 Whisper issue
+        issues.append({
+            'ep': ep,
+            'start': c['start'],
+            'end': c['end'],
+            'original_text': c['text'][:120],
+            'line': c['line'],
+        })
 
     return {
         'filename': fname,
-        'findings': dict(findings_by_type),
+        'garbled_cues': garbled_cues,
         'issues': issues,
-        'delete_candidates': delete_candidates,
         'total_cues': len(cues),
     }
 
@@ -190,15 +170,13 @@ def scan_all(target_dir, skip_oped=True):
 
     Returns:
         dict: {
-            'findings': {type: [finding, ...]},  # 所有文件汇总
+            'garbled_cues': [finding, ...],      # 所有文件汇总
             'per_episode_issues': {ep: [issue, ...]},
-            'delete_candidates': [fix, ...],
             'summary': {...},
         }
     """
-    all_findings = defaultdict(list)
+    all_garbled = []
     all_issues = defaultdict(list)
-    all_deletes = []
     total_cues = 0
     files_scanned = 0
 
@@ -207,30 +185,22 @@ def scan_all(target_dir, skip_oped=True):
         files_scanned += 1
         total_cues += result['total_cues']
 
-        for gtype, findings in result['findings'].items():
-            all_findings[gtype].extend(findings)
+        all_garbled.extend(result['garbled_cues'])
 
         for issue in result['issues']:
             all_issues[issue['ep']].append(issue)
 
-        all_deletes.extend(result['delete_candidates'])
-
-    # 构建摘要
+    # 构建摘要 (v4.0 精简)
     summary = {
         'files_scanned': files_scanned,
         'total_cues': total_cues,
-        'total_findings': sum(len(v) for v in all_findings.values()),
-        'total_issues': sum(len(v) for v in all_issues.values()),
-        'total_delete_candidates': len(all_deletes),
-        'by_type': {t: len(v) for t, v in all_findings.items()},
+        'garbled_count': len(all_garbled),
         'episodes_with_issues': len(all_issues),
-        'type_labels': TYPE_LABELS,
     }
 
     return {
-        'findings': dict(all_findings),
+        'garbled_cues': all_garbled,
         'per_episode_issues': dict(all_issues),
-        'delete_candidates': all_deletes,
         'summary': summary,
     }
 
@@ -268,12 +238,6 @@ def write_issues(output, issues_dir):
             json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-def write_delete_candidates(delete_list, path):
-    """将删除候选写入 JSON（兼容 apply_fixes.py 格式）。"""
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(delete_list, f, ensure_ascii=False, indent=2)
-
-
 # ═══════════════════════════════════════════════════════════════
 # CLI
 # ═══════════════════════════════════════════════════════════════
@@ -288,11 +252,10 @@ def main():
   # 基础扫描
   python unified_scanner.py --target-dir ./AI审查后/ --output-findings findings.json
 
-  # 完整输出（findings + issues + delete candidates）
+  # 完整输出（findings + per-episode issues）
   python unified_scanner.py --target-dir ./AI审查后/ \\
     --output-findings findings.json \\
-    --output-issues issues/ \\
-    --output-delete delete_candidates.json
+    --output-issues issues/
 
   # 保留 OP/ED 区域（不跳过）
   python unified_scanner.py --target-dir ./AI审查后/ --no-skip-oped
@@ -301,7 +264,6 @@ def main():
     parser.add_argument('--target-dir', required=True, help='目标字幕目录')
     parser.add_argument('--output-findings', help='Findings JSON 输出路径')
     parser.add_argument('--output-issues', help='Per-episode issues 输出目录')
-    parser.add_argument('--output-delete', help='删除候选 JSON 输出路径')
     parser.add_argument('--no-skip-oped', action='store_true',
                         help='不跳过 OP/ED 区域（默认跳过开头 95s + 结尾 120s）')
     parser.add_argument('--project-lang', default='ja',
@@ -322,19 +284,12 @@ def main():
     # 摘要输出到 stderr
     print(f'\n=== 扫描完成 ===', file=sys.stderr)
     print(f'文件: {s["files_scanned"]} | Cues: {s["total_cues"]} | '
-          f'发现: {s["total_findings"]} | Issues: {s["total_issues"]} | '
-          f'可删除: {s["total_delete_candidates"]}',
+          f'Garbled: {s["garbled_count"]}',
           file=sys.stderr)
     print(file=sys.stderr)
 
-    if s['by_type']:
-        print('按类型分布:', file=sys.stderr)
-        for gtype, count in sorted(s['by_type'].items(), key=lambda x: -x[1]):
-            label = TYPE_LABELS.get(gtype, gtype)
-            print(f'  {gtype}: {count} ({label})', file=sys.stderr)
-
     if s['episodes_with_issues']:
-        print(f'\n需 Whisper 的集数: {s["episodes_with_issues"]}', file=sys.stderr)
+        print(f'需 Whisper 的集数: {s["episodes_with_issues"]}', file=sys.stderr)
 
     # 写入输出文件
     if args.output_findings:
@@ -346,13 +301,8 @@ def main():
         count = len(result['per_episode_issues'])
         print(f'→ issues: {args.output_issues}/ ({count} 集)', file=sys.stderr)
 
-    if args.output_delete:
-        write_delete_candidates(result['delete_candidates'], args.output_delete)
-        print(f'→ delete: {args.output_delete} ({len(result["delete_candidates"])} 条)',
-              file=sys.stderr)
-
     # 如果没有指定任何输出，则输出 findings 到 stdout
-    if not any([args.output_findings, args.output_issues, args.output_delete]):
+    if not any([args.output_findings, args.output_issues]):
         json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
         sys.stdout.write('\n')
 

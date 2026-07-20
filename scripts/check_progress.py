@@ -188,10 +188,7 @@ def main():
     if summary:
         print(format_kv('Files scanned:', summary.get('files_scanned', '?')))
         print(format_kv('Total cues:', summary.get('total_cues', '?')))
-        print(format_kv('Total findings:', summary.get('total_findings', '?')))
-        by_type = summary.get('by_type', {})
-        for t, n in by_type.items():
-            print(format_kv(f'  {t}:', n))
+        print(format_kv('Garbled cues:', summary.get('garbled_count', '?')))
         print(format_kv('Episodes w/ issues:', summary.get('episodes_with_issues', '?')))
     else:
         print('  (no findings.json found)')
