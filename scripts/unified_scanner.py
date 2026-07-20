@@ -28,7 +28,6 @@
 import argparse
 import json
 import os
-import re
 import sys
 from collections import defaultdict
 
@@ -40,7 +39,7 @@ from ass_utils import (
     strip_ass_tags, iter_ass_files, iter_dialogue_lines,
     read_ass_file, contains_cjk,
 )
-from whisper_utils import classify_garbled_text, to_seconds
+from whisper_utils import classify_garbled_text, to_seconds, extract_ep_number
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -143,7 +142,7 @@ def scan_file(filepath, skip_oped=True):
             continue
 
         # 提取集号
-        ep = _extract_ep(fname)
+        ep = extract_ep_number(fname)
 
         # 构建 finding
         finding = {
@@ -239,19 +238,6 @@ def scan_all(target_dir, skip_oped=True):
 # ═══════════════════════════════════════════════════════════════
 # 辅助
 # ═══════════════════════════════════════════════════════════════
-
-def _extract_ep(fname):
-    """从文件名提取集号。"""
-    m = re.search(r'\b(\d{3})\b', fname)
-    if m:
-        return f'EP{m.group(1)}'
-    parts = fname.split('-')
-    if len(parts) >= 2:
-        num = parts[1].strip().split()[0]
-        if num.isdigit():
-            return f'EP{num}'
-    return fname[:20]
-
 
 # ═══════════════════════════════════════════════════════════════
 # 输出函数

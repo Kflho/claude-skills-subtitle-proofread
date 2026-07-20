@@ -16,6 +16,7 @@
   python romaji_fixer.py --findings findings.json --mode delete-only --output delete_fixes.json
 """
 
+import argparse
 import json
 import re
 import sys
@@ -29,7 +30,6 @@ if _script_dir not in sys.path:
 from generate_romaji_fixes import (
     ROMAJI_TO_KANA, ROMAJI_TO_KATAKANA,
     ENGLISH_OK, AI_NOISE,
-    is_romaji_only,
 )
 
 
@@ -230,7 +230,6 @@ def generate_fixes(findings_data, mode='all'):
 # ═══════════════════════════════════════════════════════════════
 
 def main():
-    import argparse
     parser = argparse.ArgumentParser(
         description='统一修复生成器 — 从 unified_scanner 输出生成 fixes.json',
         formatter_class=argparse.RawDescriptionHelpFormatter,

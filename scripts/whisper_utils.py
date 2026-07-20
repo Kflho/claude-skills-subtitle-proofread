@@ -61,7 +61,7 @@ def format_tc(seconds):
 HALLUCINATION_PATTERNS = [
     r'\b(i?phone|iphone)\b', r'\bgoogle\b', r'\byoutube\b', r'\btwitter\b',
     r'\bfacebook\b', r'\binstagram\b', r'\btiktok\b', r'\bnetflix\b',
-    r'\bwindows\b', r'\bmicrosoft\b', r'\bamazon\b', r'\bgoogle\b',
+    r'\bwindows\b', r'\bmicrosoft\b', r'\bamazon\b',
 ]
 
 HALLUCINATION_RE = re.compile('|'.join(HALLUCINATION_PATTERNS), re.IGNORECASE)
