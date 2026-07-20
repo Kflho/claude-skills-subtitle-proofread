@@ -99,7 +99,7 @@ def detect_speech_segments(video_path, start_s, end_s):
         [whisper_cli, '-m', model, '-f', tmp,
          '-l', 'ja', '-t', '4', '-p', '1', '-bs', '5', '-bo', '1',
          '-oj', '-of', tmp + '.whisper', '--print-progress',
-         '-nf', '-nth', '0.3', '-sns'],
+         '-nf', '-nth', '0.3']  # -sns 已移除：VAD 模式下非语音 token 抑制会制造幻觉,
         capture_output=True, text=True
     )
 

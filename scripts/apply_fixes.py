@@ -367,7 +367,8 @@ def main():
             if fname not in per_file_fixes:
                 continue
             lines = read_ass_file(fpath)
-            file_fixes = sorted(per_file_fixes[fname], key=lambda f: f.get('line', 0))
+            # 按行号降序排列，避免 delete_line 导致后续修复行号偏移
+            file_fixes = sorted(per_file_fixes[fname], key=lambda f: f.get('line', 0), reverse=True)
 
             # 预解析 SRT cues（用于获取时间码）
             srt_cues_cache = None

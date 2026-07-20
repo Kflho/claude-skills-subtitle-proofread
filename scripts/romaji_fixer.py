@@ -31,55 +31,129 @@ if _script_dir not in sys.path:
 # Romaji → Kana 词典（从 generate_romaji_fixes.py 迁移）
 # ═══════════════════════════════════════════════════════════════
 
+# 完整 Hepburn 罗马字 → 平假名表（~250 条目，按长度降序以便最长匹配）
 ROMAJI_TO_KANA = {
-    # Vowels
+    # ═══ 常用词汇/短语（优先最长匹配） ═══
+    'sayounara': 'さようなら', 'konnichiwa': 'こんにちは',
+    'arigatou': 'ありがとう', 'sumimasen': 'すみません',
+    'ohayou': 'おはよう', 'konbanwa': 'こんばんは',
+    'itadakimasu': 'いただきます', 'gochisousama': 'ごちそうさま',
+    'otsukaresama': 'おつかれさま', 'yoroshiku': 'よろしく',
+    'onegai': 'おねがい', 'daijoubu': 'だいじょうぶ',
+    'ganbatte': 'がんばって', 'omedetou': 'おめでとう',
+    'tadaima': 'ただいま', 'okaeri': 'おかえり',
+    'itterasshai': 'いってらっしゃい', 'irasshai': 'いらっしゃい',
+    'sayonara': 'さよなら', 'hontou': 'ほんとう',
+    'sugoku': 'すごく', 'totemo': 'とても',
+    'chotto': 'ちょっと', 'motto': 'もっと',
+    'zutto': 'ずっと', 'kitto': 'きっと',
+    'yappari': 'やっぱり', 'soshite': 'そして',
+    'dakara': 'だから', 'keredo': 'けれど',
+    'shikashi': 'しかし', 'tsumari': 'つまり',
+    'tabun': 'たぶん', 'kanarazu': 'かならず',
+    'hayaku': 'はやく', 'sukoshi': 'すこし',
+    'sugu': 'すぐ', 'mou': 'もう',
+    # 指示词
+    'kore': 'これ', 'sore': 'それ', 'are': 'あれ',
+    'koko': 'ここ', 'soko': 'そこ', 'asoko': 'あそこ',
+    'kochira': 'こちら', 'sochira': 'そちら', 'achira': 'あちら',
+    'konna': 'こんな', 'sonna': 'そんな', 'anna': 'あんな',
+    'dore': 'どれ', 'doko': 'どこ', 'dochira': 'どちら',
+    'donna': 'どんな', 'doushite': 'どうして', 'douzo': 'どうぞ',
+    # 人称/事物
+    'watashi': 'わたし', 'boku': 'ぼく', 'ore': 'おれ',
+    'anata': 'あなた', 'kimi': 'きみ', 'omae': 'おまえ',
+    'kare': 'かれ', 'kanojo': 'かのじょ',
+    'minna': 'みんな', 'jibun': 'じぶん',
+    'sensei': 'せんせい', 'tomodachi': 'ともだち',
+    'otousan': 'おとうさん', 'okaasan': 'おかあさん',
+    'oniisan': 'おにいさん', 'oneesan': 'おねえさん',
+    'ojisan': 'おじさん', 'obasan': 'おばさん',
+    'nani': 'なに', 'naze': 'なぜ', 'itsu': 'いつ',
+    'dare': 'だれ',
+    # 常用动词/形容词
+    'suru': 'する', 'kuru': 'くる', 'aru': 'ある',
+    'iru': 'いる', 'iku': 'いく', 'miru': 'みる',
+    'kiku': 'きく', 'hanasu': 'はなす', 'taberu': 'たべる',
+    'nomu': 'のむ', 'neru': 'ねる', 'okiru': 'おきる',
+    'omou': 'おもう', 'wakaru': 'わかる', 'dekiru': 'できる',
+    'tsukau': 'つかう', 'tsukuru': 'つくる',
+    'motsu': 'もつ', 'toru': 'とる', 'ageru': 'あげる',
+    'kureru': 'くれる', 'morau': 'もらう',
+    'ii': 'いい', 'yoi': 'よい', 'warui': 'わるい',
+    'ookii': 'おおきい', 'chiisai': 'ちいさい',
+    'hayai': 'はやい', 'osoi': 'おそい',
+    'atsui': 'あつい', 'samui': 'さむい',
+    'takai': 'たかい', 'yasui': 'やすい',
+    'tooi': 'とおい', 'chikai': 'ちかい',
+    'atarashii': 'あたらしい', 'furui': 'ふるい',
+    'tanoshii': 'たのしい', 'kanashii': 'かなしい',
+    'ureshii': 'うれしい', 'sabishii': 'さびしい',
+    'muzukashii': 'むずかしい', 'yasashii': 'やさしい',
+    # 助词/副词
+    'made': 'まで', 'kara': 'から', 'dake': 'だけ',
+    'demo': 'でも', 'shika': 'しか', 'hodo': 'ほど',
+    'nado': 'など', 'yori': 'より', 'koso': 'こそ',
+    'sae': 'さえ', 'nagara': 'ながら',
+    'mada': 'まだ', 'mata': 'また', 'sudeni': 'すでに',
+    'ato': 'あと', 'mae': 'まえ', 'ushiro': 'うしろ',
+    'naka': 'なか', 'soto': 'そと', 'ue': 'うえ',
+    'shita': 'した', 'migi': 'みぎ', 'hidari': 'ひだり',
+    'tonari': 'となり', 'chikaku': 'ちかく',
+    'hoka': 'ほか', 'toki': 'とき', 'mono': 'もの',
+    'koto': 'こと', 'tokoro': 'ところ',
+    'tame': 'ため', 'hazu': 'はず', 'wake': 'わけ',
+    'dame': 'だめ', 'dai': 'だい',
+
+    # ═══ 拗音 (Yōon) — 清音 ═══
+    'kya': 'きゃ', 'kyu': 'きゅ', 'kyo': 'きょ',
+    'sha': 'しゃ', 'shu': 'しゅ', 'sho': 'しょ',
+    'cha': 'ちゃ', 'chu': 'ちゅ', 'cho': 'ちょ',
+    'nya': 'にゃ', 'nyu': 'にゅ', 'nyo': 'にょ',
+    'hya': 'ひゃ', 'hyu': 'ひゅ', 'hyo': 'ひょ',
+    'mya': 'みゃ', 'myu': 'みゅ', 'myo': 'みょ',
+    'rya': 'りゃ', 'ryu': 'りゅ', 'ryo': 'りょ',
+    # ═══ 拗音 — 浊音 ═══
+    'gya': 'ぎゃ', 'gyu': 'ぎゅ', 'gyo': 'ぎょ',
+    'ja': 'じゃ', 'ju': 'じゅ', 'jo': 'じょ',
+    'bya': 'びゃ', 'byu': 'びゅ', 'byo': 'びょ',
+    # ═══ 拗音 — 半浊音 ═══
+    'pya': 'ぴゃ', 'pyu': 'ぴゅ', 'pyo': 'ぴょ',
+
+    # ═══ 基本五十音（放在最后：长度短的优先被长键覆盖） ═══
+    # 清音
     'a': 'あ', 'i': 'い', 'u': 'う', 'e': 'え', 'o': 'お',
-    # K-row
     'ka': 'か', 'ki': 'き', 'ku': 'く', 'ke': 'け', 'ko': 'こ',
-    # S-row
     'sa': 'さ', 'shi': 'し', 'su': 'す', 'se': 'せ', 'so': 'そ',
-    # T-row
     'ta': 'た', 'chi': 'ち', 'tsu': 'つ', 'te': 'て', 'to': 'と',
-    # N-row
     'na': 'な', 'ni': 'に', 'nu': 'ぬ', 'ne': 'ね', 'no': 'の',
-    # H-row
     'ha': 'は', 'hi': 'ひ', 'fu': 'ふ', 'he': 'へ', 'ho': 'ほ',
-    # M-row
     'ma': 'ま', 'mi': 'み', 'mu': 'む', 'me': 'め', 'mo': 'も',
-    # Y-row
     'ya': 'や', 'yu': 'ゆ', 'yo': 'よ',
-    # R-row
     'ra': 'ら', 'ri': 'り', 'ru': 'る', 're': 'れ', 'ro': 'ろ',
-    # W-row
     'wa': 'わ', 'wo': 'を', 'n': 'ん',
-    # Voiced variants
+    # 浊音
     'ga': 'が', 'gi': 'ぎ', 'gu': 'ぐ', 'ge': 'げ', 'go': 'ご',
     'za': 'ざ', 'ji': 'じ', 'zu': 'ず', 'ze': 'ぜ', 'zo': 'ぞ',
-    'da': 'だ', 'de': 'で', 'do': 'ど',
+    'da': 'だ', 'di': 'ぢ', 'du': 'づ', 'de': 'で', 'do': 'ど',
     'ba': 'ば', 'bi': 'び', 'bu': 'ぶ', 'be': 'べ', 'bo': 'ぼ',
+    # 半浊音
     'pa': 'ぱ', 'pi': 'ぴ', 'pu': 'ぷ', 'pe': 'ぺ', 'po': 'ぽ',
-    # Common compound/diphthong patterns
-    'dai': 'だい', 'dare': 'だれ', 'dame': 'だめ',
-    'kara': 'から', 'koko': 'ここ', 'kore': 'これ',
-    'sore': 'それ', 'soko': 'そこ',
-    'demo': 'でも', 'doko': 'どこ',
-    'nani': 'なに', 'naze': 'なぜ',
-    'mada': 'まだ', 'mata': 'また',
-    'sugu': 'すぐ',
-    'hoka': 'ほか', 'toki': 'とき',
-    'mono': 'もの', 'koto': 'こと',
-    'naka': 'なか', 'mae': 'まえ',
-    'ato': 'あと', 'ushiro': 'うしろ',
-    'hayaku': 'はやく', 'sukoshi': 'すこし',
-    'ohayou': 'おはよう', 'konnichiwa': 'こんにちは',
-    'arigatou': 'ありがとう', 'gomen': 'ごめん',
-    'sumimasen': 'すみません', 'sayounara': 'さようなら',
+    # 双元音/长音
+    'ou': 'おう', 'ei': 'えい', 'aa': 'ああ',
+    'ii': 'いい', 'uu': 'うう', 'ee': 'ええ', 'oo': 'おお',
 }
 
 ROMAJI_TO_KATAKANA = {
-    'atom': 'アトム',
-    'atomu': 'アトム',
+    # 阿童木专有名词
+    'atom': 'アトム', 'atomu': 'アトム',
     'wan': 'ワン',
+    # 常见片假名词汇（外来语）
+    'robot': 'ロボット', 'roboto': 'ロボット',
+    'enerugi': 'エネルギー', 'enerugii': 'エネルギー',
+    'scien': 'サイエン', 'kagaku': '科学',
+    'uchuu': '宇宙', 'chikyuu': '地球',
+    'ningen': '人間', 'ningenzo': '人間像',
 }
 
 ENGLISH_OK = {

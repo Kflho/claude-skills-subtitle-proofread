@@ -2,7 +2,14 @@
 """Whisper 共享工具模块 — 消除 whisper_transcribe/full_episode/deep_fix 之间的重复代码。
 
 提供: 时间码转换、Windows UTF-8、集号提取、SRT解析/写回、
-      Whisper CLI调用、ffmpeg音频提取。
+      Whisper CLI调用、ffmpeg音频提取、VAD预过滤、置信度评估。
+
+v2.1 变更:
+  - 移除默认 -sns（已知在音乐/静音段制造幻觉）；改为 opt-in suppress_nst
+  - 新增 VAD 预过滤 vad_filter_audio()（ffmpeg silencedetect）
+  - 新增置信度指标解析（no_speech_prob, avg_logprob, compression_ratio）
+  - 新增 filter_low_confidence() 三道防线过滤
+  - parse_srt() OP/ED 边界可配置
 """
 
 import sys, os, re, subprocess, json, io
@@ -150,9 +157,13 @@ def classify_garbled_text(text):
 # 4. SRT 解析
 # ═══════════════════════════════════════════════════════════════
 
-def parse_srt(path, mark_garbled=True):
+def parse_srt(path, mark_garbled=True, op_boundary=95, ed_boundary=120):
     """解析 SRT 文件，返回带时间戳的 cue 列表。
     每个 cue: {start, end, start_s, end_s, text, line, is_garbled?, garbled_type?}
+
+    Args:
+        op_boundary: OP 豁免边界（开头 N 秒不标记乱码），默认 95s
+        ed_boundary: ED 豁免边界（结尾 N 秒不标记乱码），默认 120s
     """
     from srt_utils import read_srt_file, parse_srt_cue
 
@@ -177,11 +188,13 @@ def parse_srt(path, mark_garbled=True):
             c['garbled_type'] = classification['type']
         cues.append(c)
 
-    # OP/ED 豁免（开头95s + 结尾120s 不标记为乱码）
+    # OP/ED 豁免
     if mark_garbled and cues:
         max_end_s = max(c['end_s'] for c in cues)
         for c in cues:
-            if c.get('is_garbled') and (c['start_s'] < 95 or c['start_s'] > max_end_s - 120):
+            if c.get('is_garbled') and (
+                c['start_s'] < op_boundary or c['start_s'] > max_end_s - ed_boundary
+            ):
                 c['is_garbled'] = False
                 c['garbled_type'] = 'clean'
 
@@ -220,14 +233,22 @@ def apply_fixes_to_srt(path, fixes):
 
 def run_whisper(audio_path, whisper_cli, model_path, language='ja',
                 threads=8, processors=2, beam_size=5, best_of=8,
-                nth=0.6, max_context=0, no_fallback=False):
-    """调用 whisper.cpp CLI 转录音频。返回 [{start_s, end_s, text}, ...]。
+                nth=0.6, max_context=0, no_fallback=False,
+                suppress_nst=False):
+    """调用 whisper.cpp CLI 转录音频。
+
+    返回 [{start_s, end_s, text, no_speech_prob, avg_logprob, compression_ratio}, ...]
 
     参数:
         nth: 无声阈值 (0.0-1.0)，越低越敏感。Tier 1/2 用 0.6，Tier 3 用 0.3。
         max_context: 跨段上下文 token 数，0=禁用。
         no_fallback: True=禁用 temperature fallback（不推荐，幻觉后处理已兜底）。
+        suppress_nst: 启用 -sns（非语音 token 抑制）。
+                      ⚠️ 默认 False。研究证实 -sns 会在非语音段制造幻觉；
+                      仅当外部 VAD 完全移除音乐/静音后才考虑启用。
     """
+    # 不默认启用 -sns：研究证实 suppress_non_speech_tokens 在音乐/静音段
+    # 导致模型编造文字 (Calm-Whisper IS2025; whisper.cpp #1258, #2137)
     cmd = [
         whisper_cli, '-m', model_path, '-f', audio_path, '-l', language,
         '-t', str(threads), '-p', str(processors),
@@ -235,10 +256,11 @@ def run_whisper(audio_path, whisper_cli, model_path, language='ja',
         '-oj', '-of', audio_path + '.whisper', '--print-progress',
         '-nth', str(nth),
         '-mc', str(max_context),
-        '-sns',
     ]
+    if suppress_nst:
+        cmd.append('-sns')
     if no_fallback:
-        cmd.insert(-1, '-nf')  # 插入在 -sns 之前
+        cmd.append('-nf')
 
     proc = subprocess.run(cmd, capture_output=True, text=True)
     for line in (proc.stderr or '').strip().split('\n'):
@@ -265,18 +287,144 @@ def run_whisper(audio_path, whisper_cli, model_path, language='ja',
         ts_from = seg.get('timestamps', {}).get('from', '00:00:00,000').replace(',', '.')
         ts_to = seg.get('timestamps', {}).get('to', '00:00:08,000').replace(',', '.')
         text = seg.get('text', '').strip()
-        if text:
-            segs.append({
-                'start_s': to_seconds(ts_from),
-                'end_s': to_seconds(ts_to),
-                'text': text,
-            })
+        if not text:
+            continue
+        segs.append({
+            'start_s': to_seconds(ts_from),
+            'end_s': to_seconds(ts_to),
+            'text': text,
+            # 置信度指标（whisper.cpp JSON 输出字段）
+            'no_speech_prob': seg.get('no_speech_prob', -1.0),
+            'avg_logprob': seg.get('avg_logprob', 0.0),
+            'compression_ratio': seg.get('compression_ratio', 0.0),
+        })
     return segs
+
+
+def filter_low_confidence(segs, no_speech_threshold=0.6, min_avg_logprob=-1.5,
+                          max_compression_ratio=2.4):
+    """过滤低置信度/疑似幻觉的 Whisper 输出段（whisper.cpp 社区推荐三道防线）。
+
+    Returns:
+        (kept, discarded): 两个列表
+    """
+    kept, discarded = [], []
+    for seg in segs:
+        nsp = seg.get('no_speech_prob', -1.0)
+        alp = seg.get('avg_logprob', 0.0)
+        cr = seg.get('compression_ratio', 0.0)
+
+        if nsp >= 0 and nsp > no_speech_threshold:
+            discarded.append({**seg, 'discard_reason': f'no_speech_prob={nsp:.2f}'})
+        elif alp < min_avg_logprob:
+            discarded.append({**seg, 'discard_reason': f'avg_logprob={alp:.2f}'})
+        elif cr > max_compression_ratio:
+            discarded.append({**seg, 'discard_reason': f'compression_ratio={cr:.1f}'})
+        else:
+            kept.append(seg)
+    return kept, discarded
 
 
 # ═══════════════════════════════════════════════════════════════
 # 6. ffmpeg 音频
 # ═══════════════════════════════════════════════════════════════
+
+def vad_filter_audio(input_audio, output_audio, silence_db=-30, min_silence=0.8,
+                     min_speech=0.3, padding=0.15):
+    """用 ffmpeg silencedetect 预过滤非语音段，减少 Whisper 幻觉触发源。
+
+    原理：Whisper 在静音/音乐段产生幻觉（研究显示 99.97% 的非语音音频触发）。
+    VAD 预过滤从源头去除非语音段，比后处理清理更有效。
+
+    Args:
+        input_audio: 输入 WAV 路径
+        output_audio: 输出（仅含语音段拼接的）WAV 路径
+        silence_db: 静音判定 dB 阈值（默认 -30）
+        min_silence: 判定静音的最短时长（秒，默认 0.8）
+        min_speech: 保留语音段的最短时长（秒，默认 0.3）
+        padding: 语音段前后保留的缓冲（秒，默认 0.15）
+
+    Returns:
+        (speech_segments, total_duration, speech_duration):
+          speech_segments: [(start_s, end_s), ...] 检测到的语音段时间对
+          total_duration: 原始音频时长
+          speech_duration: 语音段总时长
+    """
+    import shutil
+
+    # 1. 用 ffmpeg silencedetect 找静音区间
+    proc = subprocess.run(
+        ['ffmpeg', '-i', input_audio,
+         '-af', f'silencedetect=n={silence_db}dB:d={min_silence}',
+         '-f', 'null', '-'],
+        capture_output=True, text=True)
+
+    dur = get_audio_duration(input_audio)
+
+    silence_starts = []
+    silence_ends = []
+    for line in (proc.stderr or '').split('
+'):
+        m_start = re.search(r'silence_start:\s*([\d.]+)', line)
+        m_end = re.search(r'silence_end:\s*([\d.]+)', line)
+        if m_start:
+            silence_starts.append(float(m_start.group(1)))
+        elif m_end:
+            silence_ends.append(float(m_end.group(1)))
+
+    # 2. 从静音区间反推语音区间
+    if not silence_starts:
+        shutil.copy2(input_audio, output_audio)
+        return [(0, dur)], dur, dur
+
+    speech_segs = []
+    prev_end = 0.0
+    for sil_start, sil_end in zip(silence_starts, silence_ends):
+        if sil_start - prev_end >= min_speech:
+            ss = max(0, prev_end - padding)
+            es = min(dur, sil_start + padding)
+            if es - ss >= min_speech:
+                speech_segs.append((ss, es))
+        prev_end = sil_end
+    # 最后一段
+    if dur - prev_end >= min_speech:
+        ss = max(0, prev_end - padding)
+        es = dur
+        if es - ss >= min_speech:
+            speech_segs.append((ss, es))
+
+    if not speech_segs:
+        shutil.copy2(input_audio, output_audio)
+        return [], dur, 0
+
+    # 3. 拼接语音段
+    concat_file = output_audio + '.concat.txt'
+    with open(concat_file, 'w') as f:
+        for i, (ss, es) in enumerate(speech_segs):
+            seg_path = output_audio + f'.seg{i:03d}.wav'
+            subprocess.run([
+                'ffmpeg', '-y', '-ss', str(ss), '-t', str(es - ss),
+                '-i', input_audio, '-c', 'copy', seg_path
+            ], capture_output=True, check=True)
+            f.write(f"file '{seg_path}'
+")
+
+    subprocess.run([
+        'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
+        '-i', concat_file, '-c', 'copy', output_audio
+    ], capture_output=True, check=True)
+
+    # 清理临时文件
+    for i in range(len(speech_segs)):
+        seg_path = output_audio + f'.seg{i:03d}.wav'
+        if os.path.exists(seg_path):
+            os.remove(seg_path)
+    if os.path.exists(concat_file):
+        os.remove(concat_file)
+
+    speech_dur = sum(es - ss for ss, es in speech_segs)
+    return speech_segs, dur, speech_dur
+
 
 def extract_audio_wav(video_path, output_path, ss=None, duration=None):
     """从视频提取 WAV 音频（16kHz mono 无损）。可选起止时间。"""
