@@ -32,7 +32,7 @@ argument-hint: [目标目录] [参考字幕目录]
 | +参考字幕 | +分支 C（对照验证翻译），加载 `references/full-mode.md` |
 | +视频 + whisper | +分支 B（音频重转录），加载 `references/whisper-pipeline.md` |
 | SRT only（无 .ass 文件） | 跳过 ASS 专用脚本 |
-| 日语源语言 | 跳过 trad_to_simp、garbled_detect、interjection_detect |
+| 日语源语言 | 跳过 trad_to_simp、garbled_detect、interjection_detect（已删除） |
 | 无参考字幕 | audio 模式：VAD+Whisper，不猜 |
 | 无 whisper | 加载 `setup-guide.md` |
 
@@ -180,12 +180,10 @@ C2. compare_srt.py AI审查后/EP001.srt temp/translations/EP001.srt
 C3. 人工审查 flagged mismatches → apply_fixes.py
 ```
 
-### 分支 D: ASS 专用（目录含 .ass 文件时启用）
+### 分支 D: ASS 专用
 
-```
-D1. names_detect.py / styles_detect.py / drawing_detect.py
-D2. comment_detect.py / oped_detect.py
-```
+ASS 专用脚本已删除（SRT 项目为主）。如需 ASS 支持，从 git 历史恢复：
+`git checkout HEAD~1 -- scripts/names_detect.py scripts/styles_detect.py scripts/drawing_detect.py scripts/comment_detect.py scripts/oped_detect.py`
 
 ## 报告
 
