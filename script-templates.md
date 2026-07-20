@@ -16,11 +16,11 @@
 
 ---
 
-## 1. OP/ED 时间码匹配
+## 1. OP/ED 多样式对比（ass_repair.py --check oped）
 
 ### 检测
 ```bash
-python scripts/oped_detect.py --target-dir ./target/ --config oped_config.json > oped_findings.json
+python scripts/ass_repair.py --target-dir ./target/ --check oped --oped-config oped_config.json
 ```
 
 ### 配置 (oped_config.json)
@@ -34,16 +34,20 @@ python scripts/oped_detect.py --target-dir ./target/ --config oped_config.json >
 
 ### 检测输出（片段）
 ```json
-[
-  {
-    "file": "Episode 001.ass",
-    "line": 342,
-    "start_ms": 89200,
-    "source_text": "Ai-yai-ya... yume wo miteita",
-    "ref_text": "啊呀呀... 我曾梦见",
-    "style": "Opening Romaji"
+{
+  "checks_run": ["oped"],
+  "results": {
+    "oped": {
+      "findings": {
+        "per_file_diffs": [
+          {"file": "Episode 001.ass", "line": 342, "start_ms": 89200,
+           "source_text": "Ai-yai-ya...", "ref_text": "啊呀呀...", "style": "Opening Romaji"}
+        ]
+      },
+      "summary": {"total_files": 109, "total_text_diffs": 45}
+    }
   }
-]
+}
 ```
 
 ### 对应 fixes.json
@@ -55,59 +59,52 @@ python scripts/oped_detect.py --target-dir ./target/ --config oped_config.json >
 
 ---
 
-## 2. 双语混合检测
+## 2. 统一字符扫描（替代旧版独立脚本）
+
+> **旧版脚本已删除**：`bilingual_detect.py` / `source_lang_detect.py` / `source_char_detect.py` / `repeat_detect.py` / `issue_tracker.py`。
+> 功能已全部合并到 `unified_scanner.py`，单次遍历完成所有字符层检测。
 
 ### 检测
 ```bash
-python scripts/bilingual_detect.py --target-dir ./target/ --config bilingual_config.json > bilingual_findings.json
+python scripts/unified_scanner.py --target-dir ./target/ \
+  --output-findings findings.json \
+  --output-issues issues/ \
+  --build-glossary
 ```
 
-### 配置 (bilingual_config.json)
+### 检测输出（findings.json 片段）
 ```json
 {
-  "dialogue_styles": ["Default", "DefaultTop", "Episode"],
-  "source_lang_pattern": "[A-Za-z]"
+  "garbled_cues": [
+    {"file": "Ep 001.srt", "line": 15, "timecode": "0:01:23.45", "text": "走吧 Come on！", "has_kana": false, "has_kanji": true},
+    {"file": "Ep 001.srt", "line": 42, "timecode": "0:03:10.20", "text": "I'm sorry.", "has_kana": false, "has_kanji": false}
+  ],
+  "repeats": [
+    {"file": "Ep 006.srt", "line": 201, "timecode": "0:05:45.00", "repeat_seq": "红尘", "repeat_count": 12}
+  ],
+  "per_episode_issues": { "EP001": [...], "EP006": [...] },
+  "summary": { "files_scanned": 192, "garbled_count": 1101, "repeat_count": 45 }
 }
-```
-
-### 检测输出（片段）
-```json
-[
-  {"file": "Ep 001.ass", "line": 15, "type": "mixed", "text": "走吧 Come on！", "visible": "走吧 Come on！", "timecode": "0:01:23.45"},
-  {"file": "Ep 001.ass", "line": 42, "type": "pure_source", "text": "I'm sorry.", "visible": "I'm sorry.", "timecode": "0:03:10.20"}
-]
 ```
 
 ### 对应 fixes.json
 
-`type: "mixed"` → Claude 判断删除源语言部分：
+Garbled cue → VAD + Whisper 重转录后替换；Repeat → Claude 审查后替换：
 ```json
 [
-  {"action": "replace_global_regex", "pattern": "走吧 Come on！", "replacement": "走吧！", "note": "删除英文残留"}
-]
-```
-
-`type: "pure_source"` → Claude 翻译后：
-```json
-[
-  {"action": "replace_text", "file": "Ep 001.ass", "line": 42, "replacement": "对不起。"}
+  {"action": "replace_text", "file": "Ep 001.srt", "line": 15, "replacement": "走吧！"},
+  {"action": "replace_text", "file": "Ep 001.srt", "line": 42, "replacement": "ごめんなさい。"},
+  {"action": "replace_text", "file": "Ep 006.srt", "line": 201, "replacement": "正しいテキスト..."}
 ]
 ```
 
 ---
 
-## 3. Name 字段映射 + 多语言审查
+## 3. Name 字段映射（ass_repair.py --check names）
 
 ### 检测
 ```bash
-# 基本扫描（列出所有 Name 值）
-python scripts/names_detect.py --target-dir ./target/
-
-# 打印映射模板（含语言分类标记）
-python scripts/names_detect.py --target-dir ./target/ --scan
-
-# 语言分类检测（推荐）
-python scripts/names_detect.py --target-dir ./target/ --lang-check > names_lang.json
+python scripts/ass_repair.py --target-dir ./target/ --check names
 ```
 
 ### 检测输出（--lang-check 模式，片段）
@@ -227,11 +224,11 @@ python scripts/proper_noun_detect.py --target-dir ./target/ --ref-dir ./ref/ > p
 
 ---
 
-## 6. 样式统计与删除
+## 6. 样式统计（ass_repair.py --check styles）
 
 ### 检测
 ```bash
-python scripts/styles_detect.py --target-dir ./target/ > styles.json
+python scripts/ass_repair.py --target-dir ./target/ --check styles
 ```
 
 ### 检测输出（片段）
@@ -257,11 +254,11 @@ Claude 审查后删除译者署名样式：
 
 ---
 
-## 7. 绘图指令修复
+## 7. 绘图指令修复（ass_repair.py --check drawing）
 
 ### 检测
 ```bash
-python scripts/drawing_detect.py --target-dir ./target/ > drawing_findings.json
+python scripts/ass_repair.py --target-dir ./target/ --check drawing
 ```
 
 ### 检测输出（片段）
@@ -281,79 +278,24 @@ python scripts/drawing_detect.py --target-dir ./target/ > drawing_findings.json
 
 ---
 
-## 8. 纯源语言行处理
+## 8. 纯源语言行 + 卡死重复 → 已合并到 unified_scanner
 
-### 检测
-```bash
-python scripts/source_lang_detect.py --target-dir ./target/ --config source_config.json > pure_source.json
-```
-
-### 配置 (source_config.json)
-```json
-{
-  "dialogue_styles": ["Default", "DefaultTop", "Episode"],
-  "source_char_pattern": "[A-Za-zА-Яа-яЁё]",
-  "target_lang": "cjk"
-}
-```
-
-### 检测输出（片段）
-```json
-[
-  {"file": "Ep 003.ass", "line": 78, "text": "I'm sorry.", "visible": "I'm sorry.", "timecode": "0:05:42.10", "style": "Default"}
-]
-```
-
-### 对应 fixes.json
-
-Claude 对照上下文集判断：
-```json
-[
-  {"action": "replace_text", "file": "Ep 003.ass", "line": 78, "replacement": "对不起。"},
-  {"action": "delete_line", "file": "Ep 003.ass", "line": 102}
-]
-```
+> ⚠️ 旧脚本 `source_lang_detect.py` 和 `repeat_detect.py` 已删除。
+> 纯源语言行检测和卡死重复检测已合并到 `unified_scanner.py`（见上方 ## 2）。
+> 纯源语言行 → `garbled_cues` 中 `has_kana: false, has_kanji: false` 的条目。
+> 卡死重复 → `repeats` 数组。
 
 ---
 
-## 9. 机翻卡死重复
+## 10. 机翻幻觉/乱码（语义层）
 
 ### 检测
 ```bash
-python scripts/repeat_detect.py --target-dir ./target/ --config repeat_config.json > repeat_findings.json
-```
+# --lang 加载对应语言的预设模式（zh=中文, en=英语, ja=日语空模式）
+python scripts/garbled_detect.py --target-dir ./target/ --lang zh > garbled_findings.json
 
-### 配置 (repeat_config.json)
-```json
-{
-  "dialogue_styles": ["Default", "DefaultTop", "Episode"],
-  "min_repeats": 8
-}
-```
-
-### 检测输出（片段）
-```json
-[
-  {"file": "Ep 006.ass", "line": 201, "start_ms": 345000, "visible_text": "红尘红尘红尘...", "repeat_seq": "红尘", "repeat_count": 12, "full_match": "红尘红尘红尘红尘红尘红尘红尘红尘红尘红尘红尘红尘"}
-]
-```
-
-### 对应 fixes.json
-
-Claude 对照参考字幕找到正确文本后：
-```json
-[
-  {"action": "replace_text", "file": "Ep 006.ass", "line": 201, "replacement": "红粉，红粉，红粉，瞬间变变变..."}
-]
-```
-
----
-
-## 10. 机翻幻觉/乱码
-
-### 检测
-```bash
-python scripts/garbled_detect.py --target-dir ./target/ --config garbled_config.json > garbled_findings.json
+# 追加自定义模式
+python scripts/garbled_detect.py --target-dir ./target/ --lang zh --config garbled_config.json
 ```
 
 ### 配置 (garbled_config.json) — 可选，添加自定义模式
@@ -438,72 +380,11 @@ Claude 选定标准后统一：
 
 ---
 
-## 12. 源语言字符残留（多语言版）
+## 12. 源语言字符残留 → 已合并到 unified_scanner
 
-### 检测
-```bash
-# 多语言模式（推荐）
-python scripts/source_char_detect.py --target-dir ./target/ --langs en,jp,ru > char_scan.json
-
-# 仅检测 Name 字段
-python scripts/source_char_detect.py --target-dir ./target/ --langs en,jp,ru --mode names > name_scan.json
-
-# 单语言模式（向后兼容旧版 config）
-python scripts/source_char_detect.py --target-dir ./target/ --config source_char_config.json
-```
-
-### 配置 (source_char_config.json) — 旧版单语言模式
-```json
-{
-  "dialogue_styles": ["Default", "DefaultTop", "Episode"],
-  "source_char_pattern": "[А-Яа-яЁё]"
-}
-```
-
-### 内建语言预设
-| 代码 | 语言 | 模式 |
-|------|------|------|
-| `en` | 英语 | `[A-Za-z]{2,}` (2+连续拉丁字母) |
-| `jp` | 日语假名 | 平假名+片假名范围 |
-| `ru` | 俄语西里尔 | `[А-Яа-яЁё]` |
-| `cjk` | 中日韩汉字 | 用于确认目标语言覆盖率 |
-
-### 检测输出（--langs en,jp,ru 多语言模式，片段）
-```json
-{
-  "by_language": {
-    "en": {
-      "name": "English",
-      "findings": [
-        {"file": "Ep 003.ass", "line": 78, "field": "text", "visible": "I'm sorry.", "matches": ["I'm", "sorry"]}
-      ],
-      "summary": {"total_findings": 45, "affected_files": 12, "top_matches": {"come": 30, "sorry": 15}}
-    },
-    "ru": {
-      "name": "Russian Cyrillic",
-      "findings": [
-        {"file": "Ep 015.ass", "line": 89, "field": "text", "visible": "我们走吧Давай", "matches": ["Давай"]},
-        {"file": "Ep 056.ass", "line": 292, "field": "name", "name": "Мужик", "name_match": true}
-      ],
-      "summary": {"total_findings": 200, "affected_files": 50, "name_values": {"Мужик": 20, "Мама Осаму": 49}}
-    }
-  },
-  "total_findings": 300,
-  "mode": "all"
-}
-```
-
-### 对应 fixes.json
-
-Claude 按语言逐条审查。Name 字段用 `replace_global`：
-
-```json
-[
-  {"action": "replace_global", "original": "Давай", "replacement": "走吧", "note": "俄语残留"},
-  {"action": "replace_global_regex", "pattern": "我们走吧Давай", "replacement": "我们走吧！", "note": "删除俄语残留"},
-  {"action": "replace_global", "original": ",Мужик,", "replacement": ",男子,", "note": "Name字段：俄→中"}
-]
-```
+> ⚠️ 旧脚本 `source_char_detect.py` 已删除。
+> 字符层检测（按语言分类的字符残留扫描）已合并到 `unified_scanner.py`（见上方 ## 2）。
+> `unified_scanner` 的 `garbled_cues` 输出包含 `has_kana`/`has_kanji` 标记，可区分不同类型的字符残留。
 
 ---
 

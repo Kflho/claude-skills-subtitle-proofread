@@ -1,8 +1,8 @@
 # 完整模式（有参考字幕）
 
-> 加载条件：用户提供了参考字幕目录（路径 #2）。
+> 加载条件：用户提供了参考字幕目录。`episode_workflow.py --mode auto` 自动检测。
 
-此模式可验证翻译正确性、统一专有名词、修复 OP/ED 歌词。所有 📎 标记的检测脚本可用。
+此模式可验证翻译正确性、统一专有名词、修复 OP/ED 歌词。所有检测脚本按项目特征自动选用。
 
 ## 参考字幕的用法
 
@@ -17,16 +17,89 @@
 
 按以下顺序执行。每步流程：运行检测脚本 → Claude 审查输出 → 生成 fixes.json → 运行 apply_fixes.py。
 
-1. **OP/ED 修复** 📎 — `oped_detect.py`（见错误#4）
-2. **繁体中文→简体** — `trad_to_simp_detect.py --auto` → 确定性规则，可直接自动转换
-3. **双语混合清理** — `bilingual_detect.py`（见错误#5）
-4. **Name 字段本地化 + 多语言审查** — `names_detect.py --lang-check` + `source_char_detect.py --langs en,jp,ru --mode names` + 感叹词替换 — `interjection_detect.py`
-5. **专有名词统一** 📎 — `proper_noun_detect.py`
-6. **删除署名** + 绘图指令修复 — `styles_detect.py` + `drawing_detect.py`
-7. **Comment 行外语残留** — `comment_detect.py --langs en,jp,ru` → 扫描 Comment 行文本和 Name 字段
-8. **纯源语言行处理** — `source_lang_detect.py`
-9. **多语言字符残留检测** — `source_char_detect.py --langs en,jp,ru` → 按语言分类输出
-10. **固定格式统一** — `format_detect.py`
+### 1.0 统一扫描（所有项目，替代旧版独立扫描脚本）
+
+```bash
+python scripts/unified_scanner.py --target-dir <DIR> \
+  --output-findings temp/scans/findings.json \
+  --output-issues temp/scans/issues/ \
+  --build-glossary
+```
+
+> 单次遍历替代：bilingual_detect、source_lang_detect、source_char_detect、repeat_detect、issue_tracker。
+> 输出：garbled cues + 卡死重复 + 术语频率 → 自动生成 proper-nouns.md。
+
+### 1.1 OP/ED 修复 📎（ASS 多样式项目）
+
+`ass_repair.py --check oped` — 检测 OP/ED 歌词轨的文本差异、行数不一致、Comment 行残留、文本变体。
+
+```bash
+python scripts/ass_repair.py --target-dir <DIR> --check oped --oped-config oped_config.json
+```
+
+> ⚠️ 仅 ASS 格式 + 存在多个 OP/ED 样式轨时启用。SRT 项目跳过。
+
+### 1.2 繁体中文 → 简体（仅中文目标语言）
+
+```bash
+# 自动转换（推荐 — 繁→简为确定性规则）
+python scripts/trad_to_simp_detect.py --target-dir <DIR> --auto
+
+# 或先检测再审查
+python scripts/trad_to_simp_detect.py --target-dir <DIR> > trad_findings.json
+```
+
+> ⚠️ 仅目标语言为中文时启用。日语/其他语言项目跳过。
+
+### 1.3 机翻幻觉检测（仅中文目标语言）
+
+```bash
+python scripts/garbled_detect.py --target-dir <DIR> --lang zh > garbled_findings.json
+```
+
+> ⚠️ 仅中文目标语言项目。日语源语言项目跳过（字符层检测由 unified_scanner 覆盖）。
+
+### 1.4 感叹词残留检测（翻译项目）
+
+```bash
+python scripts/interjection_detect.py --target-dir <DIR> --config interj_config.json
+```
+
+> 检测对话中残留的源语言短词（2-5 字符）。需配置 `source_char_pattern` 匹配源语言字符集。
+
+### 1.5 ASS 格式修补（ASS only，一键运行）
+
+```bash
+# 一键运行所有 ASS 检查（names + styles + drawing + comment + oped）
+python scripts/ass_repair.py --target-dir <DIR> --check all
+
+# 或单独检查
+python scripts/ass_repair.py --target-dir <DIR> --check names     # Name 字段语言分类
+python scripts/ass_repair.py --target-dir <DIR> --check styles    # 样式统计
+python scripts/ass_repair.py --target-dir <DIR> --check drawing   # 绘图指令检测
+python scripts/ass_repair.py --target-dir <DIR> --check comment   # Comment 行外语残留
+python scripts/ass_repair.py --target-dir <DIR> --check oped --oped-config config.json  # OP/ED 多样式对比
+```
+
+> ⚠️ SRT 项目全部跳过。`episode_workflow.py --repair-ass` 自动调用。
+
+### 1.6 专有名词统一 📎（需要参考字幕）
+
+```bash
+python scripts/proper_noun_detect.py --target-dir <DIR> --ref-dir <REF_DIR> > proper_nouns.json
+```
+
+> 对照参考字幕找出：仅在机翻中出现的专名（可能是幻觉）、仅在参考中出现的专名（可能是漏译）。
+
+### 1.8 固定格式统一（翻译项目）
+
+```bash
+python scripts/format_detect.py --target-dir <DIR> --lang <LANG> > format_findings.json
+```
+
+> 检测预告标题、结尾语、转场提示等固定格式短语的变体，统一为一种写法。
+
+---
 
 ## 阶段二：批量精读审查 📎
 
@@ -44,11 +117,11 @@
 ```
 你是字幕校对专家。请对照参考字幕逐行精读以下剧集：
 
-目标文件（机翻中文）: {目标目录}/Mahou Tsukai Sally {集号范围}.ass
-参考文件（人工翻译）: {参考目录}/Mahou Tsukai Sally {集号范围}.ass
+目标文件（机翻）: {目标目录}/{文件名前缀} {集号范围}.{格式}
+参考文件（人工翻译）: {参考目录}/{文件名前缀} {集号范围}.{格式}
 
 任务：
-1. 逐行对比同一时间码的中文和参考字幕
+1. 逐行对比同一时间码的目标文本和参考文本
 2. 找出所有翻译错误、用词不当、机翻幻觉
 3. 以 OLD → NEW 格式输出修复列表
 4. 标注每条修复的原因
@@ -56,6 +129,8 @@
 输出格式（每行一条）：
 文件名 | 行号 | OLD文本 | NEW文本 | 原因
 ```
+
+---
 
 ## 阶段三：机翻语气润色（抽样精读）📎
 
@@ -70,20 +145,29 @@
    - 📍 **单集偶发** → 用 `replace_text` 逐行修复
 4. **执行修复**：生成 fixes.json，运行 `apply_fixes.py`
 
+---
+
 ## 阶段四：残留检查
 
-重新运行关键检测脚本，确保无遗漏：
+重新运行关键检测脚本，确保无遗漏。**根据项目特征选择性运行**：
 
 ```bash
-python scripts/trad_to_simp_detect.py --target-dir ./target/ > check_trad.json
-python scripts/bilingual_detect.py --target-dir ./target/ --config config.json > check_bilingual.json
-python scripts/source_lang_detect.py --target-dir ./target/ --config config.json > check_source.json
-python scripts/repeat_detect.py --target-dir ./target/ > check_repeat.json
-python scripts/source_char_detect.py --target-dir ./target/ --langs en,jp,ru > check_chars.json
-python scripts/interjection_detect.py --target-dir ./target/ --config config.json > check_interjections.json
-python scripts/names_detect.py --target-dir ./target/ --lang-check > check_names.json
-python scripts/comment_detect.py --target-dir ./target/ --langs en,jp,ru > check_comments.json
+# 字符层（所有项目）
+python scripts/unified_scanner.py --target-dir <DIR> --output-findings temp/scans/check.json
+
+# 中文项目
+python scripts/trad_to_simp_detect.py --target-dir <DIR> > check_trad.json
+python scripts/garbled_detect.py --target-dir <DIR> --lang zh > check_garbled.json
+
+# 翻译项目
+python scripts/interjection_detect.py --target-dir <DIR> --config interj_config.json > check_interj.json
+python scripts/format_detect.py --target-dir <DIR> > check_format.json
+
+# ASS only
+python scripts/ass_repair.py --target-dir <DIR> --check names,comment
 ```
+
+---
 
 ## 阶段五：反馈迭代（每次必做）
 
@@ -120,15 +204,18 @@ python scripts/comment_detect.py --target-dir ./target/ --langs en,jp,ru > check
 
 MT 将专有名词误译为字面意思。运行 `garbled_detect.py`（内置常见幻觉模式），对照参考字幕逐条确认。
 
-| 类型 | 示例 |
-|------|------|
-| 人名→名人幻觉 | `Abe`→`安倍晋三` |
-| 假朋友 | `sister`→`修女` 而非 `姐姐` |
-| 脏话误译 | "Serves you right!"→`去你妈的` |
+| 类型 | 示例（中文） | 示例（日语） |
+|------|------------|------------|
+| 人名→名人幻觉 | `Abe`→`安倍晋三` | `Abe`→`阿部`（正解） |
+| 假朋友 | `sister`→`修女` 而非 `姐姐` | — |
+| 脏话误译 | "Serves you right!"→`去你妈的` | — |
 
-### OP/ED 歌词乱码（每集固定出现）📎
+> 具体模式因语言对而异。`garbled_detect.py --lang <LANG>` 加载对应语言的预设模式。
 
-运行 `oped_detect.py`。常见问题：行数不一致、Comment 行残留、旧时间码格式、文本变体。
+### OP/ED 歌词异常（每集固定出现）📎
+
+运行 `ass_repair.py --check oped`。常见问题：行数不一致、Comment 行残留、文本变体。
+> ⚠️ ASS only。
 
 ### 节目名/角色名/术语不统一（高频）📎
 

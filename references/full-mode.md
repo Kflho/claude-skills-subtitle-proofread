@@ -1,11 +1,11 @@
 # 完整模式（有参考字幕）
 
-> ⚠️ **适用条件**：有参考字幕 **且** 项目含 ASS 多样式文件。SRT-only 项目或日语原文项目不适用。
+> ⚠️ **适用条件**：有参考字幕。SRT-only 项目或日语原文项目部分脚本不适用。
 > 加载条件：用户提供了参考字幕目录（路径 #2）。
 >
-> **2026-07 更新**：字符层扫描（双语混合/源语言/字符残留）推荐使用 `unified_scanner.py` 单次遍历替代。以下工作流中 `bilingual_detect.py` / `source_lang_detect.py` / `source_char_detect.py` 的调用可替换为从 `findings.json` 按 type 过滤。
+> **2026-07 更新**：字符层扫描（双语混合/源语言/字符残留）已由 `unified_scanner.py` 单次遍历替代。旧脚本 `bilingual_detect.py` / `source_lang_detect.py` / `source_char_detect.py` 已删除。
 
-此模式可验证翻译正确性、统一专有名词、修复 OP/ED 歌词。所有 📎 标记的检测脚本可用。
+此模式可验证翻译正确性、统一专有名词、修复 OP/ED 歌词。所有检测脚本按项目特征自动选用。
 
 ## 参考字幕的用法
 
@@ -20,16 +20,13 @@
 
 按以下顺序执行。每步流程：运行检测脚本 → Claude 审查输出 → 生成 fixes.json → 运行 apply_fixes.py。
 
-1. **OP/ED 修复** 📎 — `oped_detect.py`（见错误#4）
-2. **繁体中文→简体** — `trad_to_simp_detect.py --auto` → 确定性规则，可直接自动转换
-3. **双语混合清理** — `bilingual_detect.py`（见错误#5）
-4. **Name 字段本地化 + 多语言审查** — `names_detect.py --lang-check` + `source_char_detect.py --langs en,jp,ru --mode names` + 感叹词替换 — `interjection_detect.py`
-5. **专有名词统一** 📎 — `proper_noun_detect.py`
-6. **删除署名** + 绘图指令修复 — `styles_detect.py` + `drawing_detect.py`
-7. **Comment 行外语残留** — `comment_detect.py --langs en,jp,ru` → 扫描 Comment 行文本和 Name 字段
-8. **纯源语言行处理** — `source_lang_detect.py`
-9. **多语言字符残留检测** — `source_char_detect.py --langs en,jp,ru` → 按语言分类输出
-10. **固定格式统一** — `format_detect.py`
+1. **统一扫描（替代旧版独立脚本）** — `unified_scanner.py --output-findings ... --output-issues ... --build-glossary`
+2. **ASS 格式修补** 📎 — `ass_repair.py --check all`（ASS only，涵盖 names/styles/drawing/comment/oped）
+3. **繁体中文→简体** — `trad_to_simp_detect.py --auto`（仅中文目标语言，日文自动空操作）
+4. **感叹词替换** — `interjection_detect.py`（翻译项目）
+5. **专有名词统一** 📎 — `proper_noun_detect.py --ref-dir <REF_DIR>`
+6. **机翻幻觉检测** — `garbled_detect.py --lang <LANG>`（中文目标语言）
+7. **固定格式统一** — `format_detect.py --lang <LANG>`（翻译项目）
 
 ## 阶段二：批量精读审查 📎
 
@@ -47,11 +44,11 @@
 ```
 你是字幕校对专家。请对照参考字幕逐行精读以下剧集：
 
-目标文件（机翻中文）: {目标目录}/Mahou Tsukai Sally {集号范围}.ass
-参考文件（人工翻译）: {参考目录}/Mahou Tsukai Sally {集号范围}.ass
+目标文件（机翻）: {目标目录}/{文件名前缀} {集号范围}.{格式}
+参考文件（人工翻译）: {参考目录}/{文件名前缀} {集号范围}.{格式}
 
 任务：
-1. 逐行对比同一时间码的中文和参考字幕
+1. 逐行对比同一时间码的目标文本和参考文本
 2. 找出所有翻译错误、用词不当、机翻幻觉
 3. 以 OLD → NEW 格式输出修复列表
 4. 标注每条修复的原因
@@ -78,15 +75,19 @@
 重新运行关键检测脚本，确保无遗漏：
 
 ```bash
-# 字符层统一扫描（替代旧的 bilingual/source_lang/source_char）
-python scripts/unified_scanner.py --target-dir ./target/ --output-findings check_findings.json
+# 字符层（所有项目）
+python scripts/unified_scanner.py --target-dir <DIR> --output-findings temp/scans/check.json
 
-# 语义层独立脚本
-python scripts/trad_to_simp_detect.py --target-dir ./target/ > check_trad.json
-python scripts/repeat_detect.py --target-dir ./target/ > check_repeat.json
-python scripts/interjection_detect.py --target-dir ./target/ --config config.json > check_interjections.json
-python scripts/names_detect.py --target-dir ./target/ --lang-check > check_names.json
-python scripts/comment_detect.py --target-dir ./target/ --langs en,jp,ru > check_comments.json
+# 中文项目
+python scripts/trad_to_simp_detect.py --target-dir <DIR> > check_trad.json
+python scripts/garbled_detect.py --target-dir <DIR> --lang zh > check_garbled.json
+
+# 翻译项目
+python scripts/interjection_detect.py --target-dir <DIR> --config interj_config.json > check_interj.json
+python scripts/format_detect.py --target-dir <DIR> > check_format.json
+
+# ASS only
+python scripts/ass_repair.py --target-dir <DIR> --check names,comment
 ```
 
 ## 阶段五：反馈迭代（每次必做）
@@ -122,17 +123,18 @@ python scripts/comment_detect.py --target-dir ./target/ --langs en,jp,ru > check
 
 ### 机翻幻觉 / 假朋友（高频）📎
 
-MT 将专有名词误译为字面意思。运行 `garbled_detect.py`（内置常见幻觉模式），对照参考字幕逐条确认。
+MT 将专有名词误译为字面意思。运行 `garbled_detect.py --lang <LANG>`（内置常见幻觉模式），对照参考字幕逐条确认。
 
 | 类型 | 示例 |
 |------|------|
-| 人名→名人幻觉 | `Abe`→`安倍晋三` |
+| 人名→名人幻觉 | `Abe`→`安倍晋三`（应为角色名） |
 | 假朋友 | `sister`→`修女` 而非 `姐姐` |
 | 脏话误译 | "Serves you right!"→`去你妈的` |
 
-### OP/ED 歌词乱码（每集固定出现）📎
+### OP/ED 歌词异常（每集固定出现）📎
 
-运行 `oped_detect.py`。常见问题：行数不一致、Comment 行残留、旧时间码格式、文本变体。
+运行 `ass_repair.py --check oped`。常见问题：行数不一致、Comment 行残留、文本变体。
+> ⚠️ ASS only。
 
 ### 节目名/角色名/术语不统一（高频）📎
 

@@ -207,14 +207,15 @@ CYRILLIC_RE = re.compile(r'[А-Яа-яЁё]')
 NOISE_RE = re.compile(r'^[a-zA-Z\s\d\-\.\,\!\?\'\"\+]{1,2}$')  # ≤2 字符的纯拉丁噪声
 
 
-def classify_garbled_text(text):
-    """统一乱码分类 — v4.0 简化为 2 类。
+def classify_garbled_text(text, target_lang='ja'):
+    """统一乱码分类 — v4.0 简化为 2 类。语言感知。
 
     不再细分纯罗马字/混合行/噪声/幻觉/西里尔。词典修复已砍，
-    所有含非日语字符的 cue 一律送 VAD + Whisper 用音频判断。
+    所有含非目标语言字符的 cue 一律送 VAD + Whisper 用音频判断。
 
     Args:
         text: 字幕文本（已 strip 标签）
+        target_lang: 目标语言 'ja'=日语, 'zh'=中文。决定哪些字符算"外文"。
 
     Returns:
         dict: {
@@ -232,11 +233,16 @@ def classify_garbled_text(text):
     has_latin = bool(LATIN_RE.search(text))
     has_cyrillic = bool(CYRILLIC_RE.search(text))
 
-    # 无外文字符 → 干净（含括号标签如 [音楽] — 纯日语无拉丁/西里尔）
-    if not has_latin and not has_cyrillic:
-        return {'type': 'clean', 'has_kana': has_kana, 'has_kanji': has_kanji}
+    if target_lang == 'zh':
+        # 中文项目：假名也是外文字符。仅汉字（无假名/拉丁/西里尔）为干净。
+        if not has_latin and not has_cyrillic and not has_kana:
+            return {'type': 'clean', 'has_kana': False, 'has_kanji': has_kanji}
+    else:
+        # 日语项目：假名+汉字均为目标字符。无拉丁/西里尔为干净。
+        if not has_latin and not has_cyrillic:
+            return {'type': 'clean', 'has_kana': has_kana, 'has_kanji': has_kanji}
 
-    # 有任何拉丁/西里尔字符 → 乱码，送 VAD + Whisper
+    # 有任何外文字符 → 乱码，送 VAD + Whisper
     return {'type': 'garbled', 'has_kana': has_kana, 'has_kanji': has_kanji}
 
 
@@ -244,15 +250,16 @@ def classify_garbled_text(text):
 # 4. SRT 解析
 # ═══════════════════════════════════════════════════════════════
 
-def parse_srt(path, mark_garbled=True, op_boundary=95, ed_boundary=120):
+def parse_srt(path, mark_garbled=True, op_boundary=95, ed_boundary=120, target_lang='ja'):
     """解析 SRT 文件，返回带时间戳的 cue 列表。
     每个 cue: {start, end, start_s, end_s, text, line, is_garbled?, garbled_type?}
 
     Args:
         op_boundary: OP 豁免边界（开头 N 秒不标记乱码），默认 95s
         ed_boundary: ED 豁免边界（结尾 N 秒不标记乱码），默认 120s
+        target_lang: 目标语言 'ja'|'zh'，影响乱码判断
     """
-    from srt_utils import read_srt_file, parse_srt_cue
+    from lib.srt_utils import read_srt_file, parse_srt_cue
 
     lines = read_srt_file(path)
     cues, idx = [], 0
@@ -270,7 +277,7 @@ def parse_srt(path, mark_garbled=True, op_boundary=95, ed_boundary=120):
             'end_s': to_seconds(cue['end']),
         }
         if mark_garbled:
-            classification = classify_garbled_text(c['text'])
+            classification = classify_garbled_text(c['text'], target_lang=target_lang)
             c['is_garbled'] = (classification['type'] == 'garbled')
             c['garbled_type'] = classification['type']
         cues.append(c)
