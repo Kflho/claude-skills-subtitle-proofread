@@ -209,6 +209,8 @@ def main():
                         help='OP 豁免边界 — 开头 N 秒不标记乱码 (default: 95)')
     parser.add_argument('--ed-boundary', type=float, default=120,
                         help='ED 豁免边界 — 结尾 N 秒不标记乱码 (default: 120)')
+    parser.add_argument('--separate-vocals', action='store_true',
+                        help='用 demucs 分离人声后再转录（去 BGM，减少幻觉）')
     args = parser.parse_args()
 
     # 扫描
@@ -250,6 +252,11 @@ def main():
     extract_audio_wav(args.video, full_audio)
     if not args.json:
         print(f'[2/5] 提取全片音频: {tock("extract"):.1f}s')
+
+    # 可选：人声分离
+    if getattr(args, 'separate_vocals', False):
+        from whisper_utils import separate_vocals
+        full_audio = separate_vocals(full_audio, output_dir=tmpdir)
 
     # 切片段 + 拼接
     tick('merge')

@@ -98,6 +98,8 @@ def main():
     parser.add_argument('--json', action='store_true')
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--update-report', metavar='REPORTS_DIR')
+    parser.add_argument('--separate-vocals', action='store_true',
+                        help='用 demucs 分离人声后再转录（去 BGM，减少幻觉）')
     args = parser.parse_args()
 
     # 扫描
@@ -113,6 +115,11 @@ def main():
     tmpdir = tempfile.mkdtemp()
     full_audio = os.path.join(tmpdir, 'full.wav')
     extract_audio_wav(args.video, full_audio)
+
+    # 可选：人声分离
+    if args.separate_vocals:
+        from whisper_utils import separate_vocals
+        full_audio = separate_vocals(full_audio, output_dir=tmpdir)
     whisper_segs = run_whisper(full_audio, args.whisper_cli, args.model, args.language)
     print(f'  {len(whisper_segs)} segments')
 

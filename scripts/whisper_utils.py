@@ -458,7 +458,56 @@ def get_audio_duration(audio_path):
 
 
 # ═══════════════════════════════════════════════════════════════
-# 7. 日语质量判断
+# 7. 人声分离（demucs）
+# ═══════════════════════════════════════════════════════════════
+
+def separate_vocals(audio_path, output_dir=None, python_exe=None):
+    """用 demucs 分离人声（去掉 BGM/音效，减少 Whisper 幻觉触发源）。
+
+    注意：demucs 是音乐源分离，不是传统降噪。研究证实传统降噪会破坏
+    Whisper 需要的声学特征（WER +3~35%），但移除背景音乐对动漫 ASR 有益
+    因为 BGM 是 Whisper 幻觉的主要触发源。
+
+    Args:
+        audio_path: 输入 WAV 路径
+        output_dir: 输出目录（默认同输入目录）
+        python_exe: Python 解释器路径（默认 sys.executable）
+
+    Returns:
+        vocals_path: 人声文件路径，失败时返回原始 audio_path
+    """
+    if python_exe is None:
+        python_exe = sys.executable
+
+    out_dir = output_dir or os.path.dirname(audio_path)
+    os.makedirs(out_dir, exist_ok=True)
+
+    try:
+        proc = subprocess.run(
+            [python_exe, '-m', 'demucs', '--two-stems=vocals',
+             '-o', out_dir, audio_path],
+            capture_output=True, text=True, timeout=600)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        print('⚠ demucs 不可用或超时，跳过人声分离', file=sys.stderr)
+        return audio_path
+
+    if proc.returncode != 0:
+        print(f'⚠ demucs 失败，使用原始音频: {proc.stderr[-200:]}', file=sys.stderr)
+        return audio_path
+
+    # demucs 输出路径: <out_dir>/htdemucs/<basename>/vocals.wav
+    basename = os.path.splitext(os.path.basename(audio_path))[0]
+    vocals = os.path.join(out_dir, 'htdemucs', basename, 'vocals.wav')
+    if os.path.exists(vocals):
+        print(f'  [demucs] 人声分离完成 → {vocals}', file=sys.stderr)
+        return vocals
+
+    print('⚠ demucs 输出文件未找到，使用原始音频', file=sys.stderr)
+    return audio_path
+
+
+# ═══════════════════════════════════════════════════════════════
+# 8. 日语质量判断
 # ═══════════════════════════════════════════════════════════════
 
 def is_valid_japanese(text):

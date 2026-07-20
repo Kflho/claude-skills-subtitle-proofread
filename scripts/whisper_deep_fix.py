@@ -85,6 +85,8 @@ def main():
     parser.add_argument('--json', action='store_true')
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--episode', '-e')
+    parser.add_argument('--separate-vocals', action='store_true',
+                        help='用 demucs 分离人声后再转录（去 BGM，减少幻觉）')
     args = parser.parse_args()
 
     from update_report import read_report, update_entry_status
@@ -120,6 +122,9 @@ def main():
             tmp_audio = os.path.join(tmpdir, 'frag.wav')
             try:
                 extract_audio_wav(clip, tmp_audio)
+                if args.separate_vocals:
+                    from whisper_utils import separate_vocals
+                    tmp_audio = separate_vocals(tmp_audio, output_dir=tmpdir)
             except subprocess.CalledProcessError:
                 import shutil; shutil.rmtree(tmpdir)
                 total_unmatched += 1; continue
