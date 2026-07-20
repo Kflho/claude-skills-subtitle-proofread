@@ -36,15 +36,15 @@ def tock(label):
 # 上下文集群（unique to Tier 1）
 # ═══════════════════════════════════════════════════════════════════
 
-def build_clusters(cues):
-    """1) 按 MAX_CLUSTER_GAP 聚类乱码 cue；2) 扩展到前后好字幕边界。"""
+def build_clusters(cues, max_gap=MAX_CLUSTER_GAP):
+    """1) 按 max_gap 秒聚类乱码 cue；2) 扩展到前后好字幕边界。"""
     garbled_cues = [c for c in cues if c.get('is_garbled')]
     if not garbled_cues:
         return []
 
     groups, current = [], [garbled_cues[0]]
     for g in garbled_cues[1:]:
-        if g['start_s'] - current[-1]['start_s'] <= MAX_CLUSTER_GAP:
+        if g['start_s'] - current[-1]['start_s'] <= max_gap:
             current.append(g)
         else:
             groups.append(current); current = [g]
@@ -201,12 +201,20 @@ def main():
     parser.add_argument('--retry-model')
     parser.add_argument('--json', action='store_true')
     parser.add_argument('--update-report', metavar='REPORTS_DIR')
+    parser.add_argument('--cluster-gap', type=float, default=MAX_CLUSTER_GAP,
+                        help=f'乱码 cue 聚类最大间隔秒数 (default: {MAX_CLUSTER_GAP})')
+    parser.add_argument('--gap-sec', type=float, default=GAP_SEC,
+                        help=f'聚类片段间的静音间隔秒数 (default: {GAP_SEC})')
+    parser.add_argument('--op-boundary', type=float, default=95,
+                        help='OP 豁免边界 — 开头 N 秒不标记乱码 (default: 95)')
+    parser.add_argument('--ed-boundary', type=float, default=120,
+                        help='ED 豁免边界 — 结尾 N 秒不标记乱码 (default: 120)')
     args = parser.parse_args()
 
     # 扫描
     tick('scan')
-    cues = parse_srt(args.srt)
-    clusters = build_clusters(cues)
+    cues = parse_srt(args.srt, op_boundary=args.op_boundary, ed_boundary=args.ed_boundary)
+    clusters = build_clusters(cues, max_gap=args.cluster_gap)
     total_garbled = sum(len(c['garbled']) for c in clusters)
     if not args.json:
         print(f'[1/5] 扫描: {total_garbled}处乱码 → {len(clusters)}群 ({tock("scan"):.1f}s)')
@@ -247,7 +255,7 @@ def main():
     tick('merge')
     clips, total_dur = [], 0
     silence = os.path.join(tmpdir, 'silence.wav')
-    subprocess.run(['ffmpeg', '-y', '-f', 'lavfi', '-i', f'anullsrc=r=16000:d={GAP_SEC}',
+    subprocess.run(['ffmpeg', '-y', '-f', 'lavfi', '-i', f'anullsrc=r=16000:d={args.gap_sec}',
                     '-c:a', 'pcm_s16le', silence], capture_output=True, check=True)
 
     for i, cl in enumerate(clusters):
@@ -256,7 +264,7 @@ def main():
         subprocess.run(['ffmpeg', '-y', '-ss', str(ss), '-t', str(dur),
                         '-i', full_audio, '-c', 'copy', cp], capture_output=True, check=True)
         clips.append((i, ss, es, dur, cp))
-        total_dur += dur + GAP_SEC
+        total_dur += dur + args.gap_sec
 
     concat_txt = os.path.join(tmpdir, 'concat.txt')
     with open(concat_txt, 'w') as f:
@@ -283,7 +291,7 @@ def main():
         fixes, covered = match_whisper_to_cues(wh_segs, clusters[ci], offset)
         all_fixes.extend(fixes)
         all_covered |= covered
-        offset += dur + GAP_SEC
+        offset += dur + args.gap_sec
 
     if not args.json:
         print(f'[4+5/5] 首轮完成: {len(all_whisper)}段, {tock("whisper"):.1f}s')
@@ -328,7 +336,7 @@ def main():
                         fix['covered_count'] = 1
                         all_covered.add(f['start'])
                         retry_fixed += 1; break
-            retry_offset += dur2 + GAP_SEC
+            retry_offset += dur2 + args.gap_sec
         if not args.json:
             print(f'[retry] 修复 {retry_fixed}/{len(unmatched)} ({tock("retry"):.1f}s)')
 

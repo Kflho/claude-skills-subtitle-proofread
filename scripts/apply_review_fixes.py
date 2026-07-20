@@ -71,10 +71,6 @@ def parse_checklist(path):
             seen.add((ep, start))
             entries.append((ep, start, end, original, corrected_lines, clip_file))
 
-        if corrected_lines and (ep, start) not in seen:
-            seen.add((ep, start))
-            entries.append((ep, start, end, original, corrected_lines, clip_file))
-
     return entries
 
 

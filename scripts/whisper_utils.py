@@ -363,8 +363,7 @@ def vad_filter_audio(input_audio, output_audio, silence_db=-30, min_silence=0.8,
 
     silence_starts = []
     silence_ends = []
-    for line in (proc.stderr or '').split('
-'):
+    for line in (proc.stderr or '').splitlines():
         m_start = re.search(r'silence_start:\s*([\d.]+)', line)
         m_end = re.search(r'silence_end:\s*([\d.]+)', line)
         if m_start:
@@ -376,6 +375,17 @@ def vad_filter_audio(input_audio, output_audio, silence_db=-30, min_silence=0.8,
     if not silence_starts:
         shutil.copy2(input_audio, output_audio)
         return [(0, dur)], dur, dur
+
+    # 对齐 start/end：ffmpeg 可能产生不成对的事件（音频以语音开始→无 silence_start，
+    # 以静音结束→无 silence_end）。补齐使 zip 不会截断。
+    # 如果第一个事件是 silence_end（音频以语音开始，静音结束），
+    # 则插入 silence_start=0.0。
+    if silence_ends and (not silence_starts or silence_ends[0] < silence_starts[0]):
+        silence_starts.insert(0, 0.0)
+    # 截断到较短列表的长度
+    n = min(len(silence_starts), len(silence_ends))
+    silence_starts = silence_starts[:n]
+    silence_ends = silence_ends[:n]
 
     speech_segs = []
     prev_end = 0.0
@@ -398,6 +408,7 @@ def vad_filter_audio(input_audio, output_audio, silence_db=-30, min_silence=0.8,
         return [], dur, 0
 
     # 3. 拼接语音段
+    os.makedirs(os.path.dirname(output_audio) if os.path.dirname(output_audio) else '.', exist_ok=True)
     concat_file = output_audio + '.concat.txt'
     with open(concat_file, 'w') as f:
         for i, (ss, es) in enumerate(speech_segs):
