@@ -64,7 +64,60 @@ Claude 自动扫描系统中是否存在 whisper.cpp（CUDA 版）：
 
 > ⚠️ 下载失败一次就停止，不要反复重试 CLI。给用户浏览器下载链接和精确的目标路径。
 
-## 第四步：安装后用户需提供
+## 第四步：Python 环境（人声分离 `--separate-vocals`）
+
+**作用**：用 demucs AI 模型分离人声，去除 BGM/音效后再送 Whisper 转录。实测可显著减少幻觉（BGM 是 Whisper 幻觉的主要触发源）。**仅 GPU 用户推荐**（需 NVIDIA 显卡 + CUDA）。
+
+### 4.1 确认 Python 3.12+ 为默认
+
+```bash
+python --version   # 必须: Python 3.12.x
+pip --version      # 必须来自 Python 3.12
+```
+
+如果系统有多个 Python 版本，确保 Python 3.12 在 PATH 最前面。
+
+### 4.2 安装 PyTorch（CUDA 12.4 版）
+
+```bash
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+```
+
+> 约 2.5GB，需稳定网络。其他 CUDA 版本见 https://pytorch.org/get-started/locally/
+
+### 4.3 安装 demucs
+
+```bash
+pip install demucs
+```
+
+### 4.4 验证安装
+
+```bash
+python -c "import torch; print(f'PyTorch {torch.__version__}, CUDA: {torch.cuda.is_available()}')"
+# 预期: PyTorch 2.x.x+cu124, CUDA: True
+
+python -c "import demucs; print('demucs OK')"
+# 预期: demucs OK
+```
+
+### 4.5 测试人声分离效果（可选）
+
+```bash
+# 从视频提取 30 秒测试音频
+ffmpeg -y -ss 00:08:30 -t 30 -i "<视频>.mkv" -vn -ac 1 -ar 16000 _test_original.wav
+
+# 分离人声（GPU 加速，约 2 秒）
+python -m demucs --two-stems=vocals -o _test_sep _test_original.wav
+
+# 对比 Whisper 转录
+whisper-cli.exe -m <模型> -l ja -f _test_original.wav --no-timestamps
+whisper-cli.exe -m <模型> -l ja -f _test_sep/htdemucs/_test_original/vocals.wav --no-timestamps
+```
+
+> 对比两次输出：人声分离后的转录应更连贯，幻觉词（填词/英文碎片）更少。
+
+## 第五步：安装后用户需提供
 
 安装完成后，用户需要告诉 Claude 以下信息：
 
@@ -75,7 +128,7 @@ Claude 自动扫描系统中是否存在 whisper.cpp（CUDA 版）：
 | 原语言字幕目录 | `AI审查后/` | 乱码扫描输入 |
 | 视频↔字幕对应规则 | 文件名中的集号匹配 | 自动配对 |
 
-## 第五步：Claude 验证环境
+## 第六步：Claude 验证环境
 
 Claude 确认以下检查全部通过后，skill 方可进入校对流程：
 
@@ -91,4 +144,9 @@ whisper-cli.exe -m models/xxx.bin -f test.mp3 -l ja  # 输出应显示 CUDA devi
 
 # 4. ffmpeg 可用
 ffmpeg -version
+
+# 5. （可选）Python 3.12 + demucs 人声分离
+python --version                          # Python 3.12.x
+python -c "import torch; print(torch.cuda.is_available())"  # CUDA: True
+python -c "import demucs; print('OK')"    # demucs OK
 ```

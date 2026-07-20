@@ -2,12 +2,18 @@
 
 > 加载条件：视频文件 + whisper.cpp CLI + GGML 模型。
 > 入口脚本：`unified_scanner.py` 生成 per-episode issues → Whisper 三层递进修复。
+> **推荐**：搭配 `--separate-vocals`（需 Python 3.12 + PyTorch CUDA + demucs）减少 BGM 幻觉。
 
 ## 前置检查
 
 ```bash
 ls D:/software/video/whisper-cublas-*/whisper-cli.exe
 ls D:/software/video/whisper-cublas-*/models/ggml-kotoba-whisper-v2.0-q5_0.bin
+
+# 人声分离（可选但推荐）
+python --version                          # Python 3.12.x
+python -c "import torch; print(torch.cuda.is_available())"  # CUDA: True
+python -c "import demucs; print('OK')"    # demucs OK
 ```
 
 ## 执行流程
@@ -32,19 +38,26 @@ git add -A && git commit -m "备份：Whisper处理 {集号}"
 python whisper_transcribe.py <video> <srt> \
   --whisper-cli .../whisper-cli.exe --model .../kotoba-q5_0.bin \
   --retry-model .../large-v3-q5_0.bin \
-  --update-report reports/ --json
+  --update-report reports/ --json \
+  --separate-vocals
 
 # Tier 2: 整集重转录（碎片≥15条的集）
 python whisper_full_episode.py <video> <srt> \
   --whisper-cli ... --model .../kotoba-q5_0.bin \
-  --update-report reports/ --json
+  --update-report reports/ --json \
+  --separate-vocals
 
 # Tier 3: silencedetect 拆分修复（Tier 1+2 后仍有残留）
 python whisper_deep_fix.py \
   --report reports/问题解决报告.md --srt-dir AI审查后/ \
   --video-dir reports/manual-review/ \
-  --whisper-cli ... --model .../large-v3-q5_0.bin
+  --whisper-cli ... --model .../large-v3-q5_0.bin \
+  --separate-vocals
 ```
+
+> **`--separate-vocals`**：转录前先用 demucs 分离人声，去除 BGM/音效。
+> 实测可显著减少 Whisper 幻觉（BGM 是幻觉主要触发源）。需 Python 3.12 + PyTorch CUDA + demucs（见 `setup-guide.md` 第四步）。
+> 每 30 秒音频约需 2 秒分离（RTX 3080 Ti），不含分离的纯转录耗时不变。
 
 ### 步骤 3：审查 Whisper 输出
 
