@@ -1,5 +1,7 @@
 # Whisper 音频修复阶段
 
+> 📁 **本文档已整合到新架构中。** 精简版见 `references/whisper-pipeline.md`，完整工作流见 `SKILL.md` 分支 B。
+
 > 加载条件：用户提供了视频文件目录（路径 #4）+ whisper.cpp（路径 #5）。
 > 不依赖参考字幕或原语言字幕。
 

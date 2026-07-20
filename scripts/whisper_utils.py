@@ -54,12 +54,105 @@ def format_tc(seconds):
 
 
 # ═══════════════════════════════════════════════════════════════
-# 3. SRT 解析
+# 3. 统一乱码分类（全项目唯一检测逻辑源）
+# ═══════════════════════════════════════════════════════════════
+
+# 已知幻觉模式 — 时代错位词（AI 将噪声"听"成不可能出现的现代词汇）
+HALLUCINATION_PATTERNS = [
+    r'\b(i?phone|iphone)\b', r'\bgoogle\b', r'\byoutube\b', r'\btwitter\b',
+    r'\bfacebook\b', r'\binstagram\b', r'\btiktok\b', r'\bnetflix\b',
+    r'\bwindows\b', r'\bmicrosoft\b', r'\bamazon\b', r'\bgoogle\b',
+]
+
+HALLUCINATION_RE = re.compile('|'.join(HALLUCINATION_PATTERNS), re.IGNORECASE)
+
+# 有效日语内容检测（用于区分纯罗马字 vs 混合行）
+KANA_RE = re.compile(r'[぀-ヿ]')
+KANJI_RE = re.compile(r'[一-鿿]')
+LATIN_RE = re.compile(r'[a-zA-Z]{2,}')
+CYRILLIC_RE = re.compile(r'[А-Яа-яЁё]')
+NOISE_RE = re.compile(r'^[a-zA-Z\s\d\-\.\,\!\?\'\"\+]{1,2}$')  # ≤2 字符的纯拉丁噪声
+
+
+def classify_garbled_text(text):
+    """统一乱码分类 — 全项目唯一的字符层检测逻辑源。
+
+    替代分散在 bilingual_detect.py、source_lang_detect.py、
+    source_char_detect.py、issue_tracker.py、parse_srt() 中的重复正则。
+
+    Args:
+        text: 字幕文本（已 strip 标签）
+
+    Returns:
+        dict: {
+            'type': str,        # 分类标签
+            'is_garbled': bool, # 是否属于乱码（供 Whisper 阶段使用）
+            'is_deletable': bool, # 是否可直接删除（短噪声碎片）
+            'has_kana': bool,   # 是否含假名
+            'has_kanji': bool,  # 是否含汉字
+        }
+
+    type 分类:
+        'clean'                 — 无外文字符，正常文本
+        'pure_romaji'           — 纯拉丁字母，无假名/汉字（需词典修复或 Whisper）
+        'mixed_romaji'          — 拉丁字母 + 假名/汉字混合（需上下文修复）
+        'ai_noise'              — 极短拉丁碎片（≤2 字符），可直接删除
+        'hallucination'         — 时代错位幻觉词（iPhone, Google 等）
+        'cyrillic'              — 含西里尔字母残留
+        'music_tag'             — 以 [ 开头的音乐/音效标签（非乱码）
+    """
+    text = text.strip()
+    if not text:
+        return {'type': 'clean', 'is_garbled': False, 'is_deletable': False,
+                'has_kana': False, 'has_kanji': False}
+
+    # 音乐/音效标签（[音楽], [拍手] 等）
+    if text.startswith('['):
+        return {'type': 'music_tag', 'is_garbled': False, 'is_deletable': False,
+                'has_kana': False, 'has_kanji': False}
+
+    has_kana = bool(KANA_RE.search(text))
+    has_kanji = bool(KANJI_RE.search(text))
+    has_latin = bool(LATIN_RE.search(text))
+    has_cyrillic = bool(CYRILLIC_RE.search(text))
+
+    # 西里尔残留
+    if has_cyrillic:
+        return {'type': 'cyrillic', 'is_garbled': True, 'is_deletable': False,
+                'has_kana': has_kana, 'has_kanji': has_kanji}
+
+    # 无拉丁字符 → 干净
+    if not has_latin:
+        return {'type': 'clean', 'is_garbled': False, 'is_deletable': False,
+                'has_kana': has_kana, 'has_kanji': has_kanji}
+
+    # 时代错位幻觉
+    if HALLUCINATION_RE.search(text):
+        return {'type': 'hallucination', 'is_garbled': True, 'is_deletable': True,
+                'has_kana': has_kana, 'has_kanji': has_kanji}
+
+    # 纯拉丁字符（无日语内容）
+    if not has_kana and not has_kanji:
+        # 极短噪声（≤2 字符）
+        if NOISE_RE.match(text):
+            return {'type': 'ai_noise', 'is_garbled': True, 'is_deletable': True,
+                    'has_kana': False, 'has_kanji': False}
+        # 较长的纯罗马字
+        return {'type': 'pure_romaji', 'is_garbled': True, 'is_deletable': False,
+                'has_kana': False, 'has_kanji': False}
+
+    # 拉丁 + 日语混合
+    return {'type': 'mixed_romaji', 'is_garbled': True, 'is_deletable': False,
+            'has_kana': has_kana, 'has_kanji': has_kanji}
+
+
+# ═══════════════════════════════════════════════════════════════
+# 4. SRT 解析
 # ═══════════════════════════════════════════════════════════════
 
 def parse_srt(path, mark_garbled=True):
     """解析 SRT 文件，返回带时间戳的 cue 列表。
-    每个 cue: {start, end, start_s, end_s, text, line, is_garbled?}
+    每个 cue: {start, end, start_s, end_s, text, line, is_garbled?, garbled_type?}
     """
     from srt_utils import read_srt_file, parse_srt_cue
 
@@ -79,11 +172,9 @@ def parse_srt(path, mark_garbled=True):
             'end_s': to_seconds(cue['end']),
         }
         if mark_garbled:
-            c['is_garbled'] = bool(
-                c['text']
-                and not c['text'].startswith('[')
-                and re.search(r'[a-zA-Z]{2,}', c['text'])
-            )
+            classification = classify_garbled_text(c['text'])
+            c['is_garbled'] = classification['is_garbled']
+            c['garbled_type'] = classification['type']
         cues.append(c)
 
     # OP/ED 豁免（开头95s + 结尾120s 不标记为乱码）
@@ -92,6 +183,7 @@ def parse_srt(path, mark_garbled=True):
         for c in cues:
             if c.get('is_garbled') and (c['start_s'] < 95 or c['start_s'] > max_end_s - 120):
                 c['is_garbled'] = False
+                c['garbled_type'] = 'clean'
 
     return cues
 
@@ -123,7 +215,7 @@ def apply_fixes_to_srt(path, fixes):
 
 
 # ═══════════════════════════════════════════════════════════════
-# 4. Whisper CLI
+# 5. Whisper CLI
 # ═══════════════════════════════════════════════════════════════
 
 def run_whisper(audio_path, whisper_cli, model_path, language='ja',
@@ -183,7 +275,7 @@ def run_whisper(audio_path, whisper_cli, model_path, language='ja',
 
 
 # ═══════════════════════════════════════════════════════════════
-# 5. ffmpeg 音频
+# 6. ffmpeg 音频
 # ═══════════════════════════════════════════════════════════════
 
 def extract_audio_wav(video_path, output_path, ss=None, duration=None):
@@ -207,7 +299,7 @@ def get_audio_duration(audio_path):
 
 
 # ═══════════════════════════════════════════════════════════════
-# 6. 日语质量判断
+# 7. 日语质量判断
 # ═══════════════════════════════════════════════════════════════
 
 def is_valid_japanese(text):
