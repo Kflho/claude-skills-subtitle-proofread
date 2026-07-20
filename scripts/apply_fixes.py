@@ -61,7 +61,7 @@ from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from whisper_utils import setup_windows_utf8
+from whisper_utils import setup_windows_utf8, extract_ep_number
 
 from ass_utils import (
     parse_dialogue, build_dialogue_line,
@@ -322,8 +322,7 @@ def main():
 
     # 辅助：从文件名提取集数
     def _extract_ep(fname):
-        m = re.search(r'(?:EP)?(\d{3})', fname)
-        return f'EP{m.group(1)}' if m else fname[:20]
+        return extract_ep_number(fname)
 
     # 1. 全局替换（先执行，不依赖行号）
     if global_fixes:

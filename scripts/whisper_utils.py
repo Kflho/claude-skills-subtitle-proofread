@@ -25,19 +25,145 @@ def setup_windows_utf8():
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 
+# ═══════════════════════════════════════════════════════════════
+# 集号提取 — 多策略优先级匹配（通用，不绑定特定命名格式）
+# ═══════════════════════════════════════════════════════════════
+
+# 预处理：文件名中的干扰标签（分辨率/编码/来源/音轨/位深）
+_NOISE_TAGS = re.compile(
+    r'\b(?:360p?|480p?|540p?|720p?|1080p?|1440p?|2160p?|4320p?|4K|8K|'
+    r'x264|x265|H\.?264|H\.?265|HEVC|AVC|AV1|'
+    r'BluRay|Blu-ray|WEB-DL|WEBRip|BDRip|DVDRip|HDTVRip|HDTV|'
+    r'DVD|NF|AMZN|'
+    r'AAC|FLAC|DTS|AC3|MP3|Opus|'
+    r'8bit|10bit|Hi10p|Hi444PP)\b',
+    re.IGNORECASE
+)
+
+# 分辨率数字（独立出现时排除）
+_RESOLUTION_NUMS = frozenset({360, 480, 540, 720, 1080, 1440, 2160, 4320})
+
+# 集号范围：1-4位数字，上限9999（覆盖超长番如 One Piece/柯南）
+_EP_MIN = 1
+_EP_MAX = 9999
+
+# 分辨率上下文模式：数字出现在 "WxH" 或 "W×H" 附近
+_RESOLUTION_CTX = re.compile(r'\b(\d{3,4})\s*[x×]\s*\d{3,4}\b')
+
+
+def _is_valid_ep_number(num):
+    """排除分辨率、年份、CRC32 等假阳性集号。
+
+    排除：
+    - 常见分辨率：360/480/540/720/1080/1440/2160/4320
+    - 年份范围：1900-2099
+
+    Returns: bool
+    """
+    if num in _RESOLUTION_NUMS:
+        return False
+    if 1900 <= num <= 2099:
+        return False
+    return _EP_MIN <= num <= _EP_MAX
+
+
+def _clean_filename(basename):
+    """预处理文件名：剥离扩展名、干扰标签、方括号组名。"""
+    # 去扩展名
+    name = os.path.splitext(basename)[0]
+    # 去干扰标签（分辨率等）
+    name = _NOISE_TAGS.sub(' ', name)
+    # 去 CRC32 哈希 [XXXXXXXX]（8位十六进制）
+    name = re.sub(r'\[[0-9A-Fa-f]{8}\]', '', name)
+    # 去方括号组名 [GroupName]
+    name = re.sub(r'\[[^\]]+\]', ' ', name)
+    # 规范化分隔符
+    name = name.replace('_', ' ').replace('.', ' ')
+    # 合并多余空格
+    name = re.sub(r'\s+', ' ', name).strip()
+    return name
+
+
 def extract_ep_number(filepath):
-    """从 SRT/视频文件名提取集号，如 '철완...031 EP...srt' → 'EP031'。"""
+    """从视频/字幕文件名提取集号。
+
+    多策略优先级匹配，语言无关，不绑定特定命名格式。
+
+    支持的格式（按优先级）：
+    1. S01E01 / S1.E01  → 取 episode 部分
+    2. 数字 + EP/ep     → "031 EP.", "108EP.", "193 END EP."
+    2b. #数字           → "#193", "# 001"
+    3. EP/ep + 数字     → "EP031", "Episode 5"
+    4. 第X話/话/集/回   → 日/中编号
+    5. 分隔符包围的数字  → " - 031 .", "_01_"
+    6. 首个合理数字      → 兜底扫描
+
+    自动排除：分辨率(360/480/540/720/1080/...)、年份(1900-2099)、CRC32。
+    支持 1-9999 集号范围。3 位补零（4 位集号保持 4 位）。
+
+    Returns: "EPxxx" (e.g. "EP001", "EP108", "EP1234") 或 "???"
+    """
     basename = os.path.basename(filepath)
-    # 格式: ... - NNN EP. ...
-    m = re.search(r'\b(\d{3})\b', basename)
+
+    # ── 策略1: S01E01 / S1.E01 格式 ──
+    m = re.search(r'[Ss](\d{1,3})[\s.]*[Ee](\d{1,4})', basename)
     if m:
-        return f'EP{m.group(1)}'
-    # fallback: 用连字符后第一段
-    parts = basename.split('-')
-    if len(parts) >= 2:
-        num = parts[1].strip().split()[0]
-        if num.isdigit():
-            return f'EP{num}'
+        ep = int(m.group(2))
+        if _is_valid_ep_number(ep):
+            return f'EP{ep:03d}'
+
+    # ── 策略2: 数字 + EP/ep 标记 ("031 EP.", "108EP.", "001v2 EP.", "193 END EP.") ──
+    # (?<!\d) 防止匹配更大数字的后缀 (如 "21080EP" 不应取 "1080")
+    # \s* 允许 version 后缀（如 v2）直接附在数字后面
+    m = re.search(r'(?<!\d)(\d{1,4})(?:\s*\w+)?\s*[Ee][Pp]\b', basename)
+    if m:
+        ep = int(m.group(1))
+        if _is_valid_ep_number(ep):
+            return f'EP{ep:03d}'
+
+    # ── 策略2b: #数字 格式 ("#193", "# 193") ──
+    m = re.search(r'#\s*(\d{1,4})\b', basename)
+    if m:
+        ep = int(m.group(1))
+        if _is_valid_ep_number(ep):
+            return f'EP{ep:03d}'
+
+    # ── 策略3: EP/ep + 数字 ("EP031", "Episode 5", "Episode.5") ──
+    m = re.search(r'[Ee][Pp](?:isode)?\s*\.?\s*(\d{1,4})\b', basename)
+    if m:
+        ep = int(m.group(1))
+        if _is_valid_ep_number(ep):
+            return f'EP{ep:03d}'
+
+    # ── 策略4: 日/中编号 ("第01話", "第5集", "第3回") ──
+    m = re.search(r'第\s*(\d{1,4})\s*[話话集回]', basename)
+    if m:
+        ep = int(m.group(1))
+        if _is_valid_ep_number(ep):
+            return f'EP{ep:03d}'
+
+    # ── 策略5-6: 清理后扫描数字 ──
+    clean = _clean_filename(basename)
+
+    # 排除分辨率上下文中的数字（如 "1920x1080" 中的数字）
+    res_nums = set()
+    for rm in _RESOLUTION_CTX.finditer(clean):
+        res_nums.add(int(rm.group(1)))
+    for rm in _RESOLUTION_CTX.finditer(basename):
+        res_nums.add(int(rm.group(1)))
+
+    # ── 策略5: 分隔符包围的数字（空格/连字符/#号/方括号） ──
+    for m in re.finditer(r'(?:^|[\s\-\[\]#])(\d{1,4})(?=[\s\-\[\]#]|$)', clean):
+        ep = int(m.group(1))
+        if ep not in res_nums and _is_valid_ep_number(ep):
+            return f'EP{ep:03d}'
+
+    # ── 策略6: 任意位置的第一个有效数字（兜底） ──
+    for m in re.finditer(r'\b(\d{1,4})\b', clean):
+        ep = int(m.group(1))
+        if ep not in res_nums and _is_valid_ep_number(ep):
+            return f'EP{ep:03d}'
+
     return '???'
 
 
@@ -444,7 +570,10 @@ def extract_audio_wav(video_path, output_path, ss=None, duration=None):
     if duration is not None:
         cmd += ['-t', str(duration)]
     cmd += ['-i', video_path, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', output_path]
-    subprocess.run(cmd, capture_output=True, check=True)
+    # Windows: 确保 ffmpeg 子进程用 UTF-8 编码处理文件路径
+    env = os.environ.copy()
+    env['PYTHONIOENCODING'] = 'utf-8'
+    subprocess.run(cmd, capture_output=True, check=True, encoding='utf-8', errors='replace', env=env)
 
 
 def get_audio_duration(audio_path):

@@ -198,7 +198,7 @@ def generate_dict_fixes(findings_by_type, project_dict=None):
     if project_dict:
         # auto 条目：已确认的替换
         for word, info in project_dict.get('auto', {}).items():
-            if isinstance(info, dict) and info.get('replacement'):
+            if isinstance(info, dict) and 'replacement' in info:
                 merged_corrections[word] = info['replacement']
             elif isinstance(info, str):
                 merged_corrections[word] = info

@@ -331,6 +331,13 @@ def get_step_summary(data):
 
 if __name__ == '__main__':
     import sys
+    # Ensure UTF-8 output on Windows (fixes GBK emoji encoding errors)
+    if hasattr(sys.stdout, 'reconfigure'):
+        try:
+            sys.stdout.reconfigure(encoding='utf-8')
+        except Exception:
+            pass
+
     if len(sys.argv) < 2:
         print('用法: python update_report.py <报告路径> [--summary] [选项]')
         print('      python update_report.py <报告路径> --init')
