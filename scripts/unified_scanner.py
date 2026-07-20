@@ -181,16 +181,26 @@ def scan_file(filepath, skip_oped=True):
             'total_cues': 0,
         }
 
-    # 第二遍：分类每个 cue + 重复检测
+    # 第二遍：分类每个 cue + 重复检测 + 术语收集
     garbled_cues = []
     issues = []
     repeats = []
+    term_freq = defaultdict(int)  # {word: count} for glossary building
 
     for c in cues:
         classification = classify_garbled_text(c['text'])
         gtype = classification['type']
 
-        # ── 重复检测（所有 cue，不止 garbled） ──
+        # ── 术语收集：片假名词 + 汉字复合词（所有 cue） ──
+        text = c['text']
+        # Katakana words: 2-6 chars
+        for m in re.finditer(r'[゠-ヿ]{2,6}', text):
+            term_freq[m.group()] += 1
+        # Kanji compounds: 2-4 consecutive kanji
+        for m in re.finditer(r'[一-鿿]{2,4}', text):
+            term_freq[m.group()] += 1
+
+        # ── 重复检测（所有 cue） ──
         cue_repeats = _find_repeats(c['text'])
         for r in cue_repeats:
             repeats.append({
@@ -237,6 +247,7 @@ def scan_file(filepath, skip_oped=True):
         'garbled_cues': garbled_cues,
         'issues': issues,
         'repeats': repeats,
+        'term_freq': dict(term_freq),
         'total_cues': len(cues),
     }
 
@@ -254,6 +265,7 @@ def scan_all(target_dir, skip_oped=True):
     all_garbled = []
     all_issues = defaultdict(list)
     all_repeats = []
+    all_terms = defaultdict(int)
     total_cues = 0
     files_scanned = 0
 
@@ -265,6 +277,9 @@ def scan_all(target_dir, skip_oped=True):
         all_garbled.extend(result['garbled_cues'])
         all_repeats.extend(result.get('repeats', []))
 
+        for word, count in result.get('term_freq', {}).items():
+            all_terms[word] += count
+
         for issue in result['issues']:
             all_issues[issue['ep']].append(issue)
 
@@ -274,6 +289,7 @@ def scan_all(target_dir, skip_oped=True):
         'total_cues': total_cues,
         'garbled_count': len(all_garbled),
         'repeat_count': len(all_repeats),
+        'term_count': len(all_terms),
         'episodes_with_issues': len(all_issues),
     }
 
@@ -281,6 +297,7 @@ def scan_all(target_dir, skip_oped=True):
         'garbled_cues': all_garbled,
         'per_episode_issues': dict(all_issues),
         'repeats': all_repeats,
+        'term_frequencies': dict(all_terms),
         'summary': summary,
     }
 
