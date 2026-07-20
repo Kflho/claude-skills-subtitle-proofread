@@ -26,11 +26,75 @@ _script_dir = os.path.dirname(os.path.abspath(__file__))
 if _script_dir not in sys.path:
     sys.path.insert(0, _script_dir)
 
-# 从 generate_romaji_fixes.py 导入词典（复用现有词表，不重复定义）
-from generate_romaji_fixes import (
-    ROMAJI_TO_KANA, ROMAJI_TO_KATAKANA,
-    ENGLISH_OK, AI_NOISE,
-)
+
+# ═══════════════════════════════════════════════════════════════
+# Romaji → Kana 词典（从 generate_romaji_fixes.py 迁移）
+# ═══════════════════════════════════════════════════════════════
+
+ROMAJI_TO_KANA = {
+    # Vowels
+    'a': 'あ', 'i': 'い', 'u': 'う', 'e': 'え', 'o': 'お',
+    # K-row
+    'ka': 'か', 'ki': 'き', 'ku': 'く', 'ke': 'け', 'ko': 'こ',
+    # S-row
+    'sa': 'さ', 'shi': 'し', 'su': 'す', 'se': 'せ', 'so': 'そ',
+    # T-row
+    'ta': 'た', 'chi': 'ち', 'tsu': 'つ', 'te': 'て', 'to': 'と',
+    # N-row
+    'na': 'な', 'ni': 'に', 'nu': 'ぬ', 'ne': 'ね', 'no': 'の',
+    # H-row
+    'ha': 'は', 'hi': 'ひ', 'fu': 'ふ', 'he': 'へ', 'ho': 'ほ',
+    # M-row
+    'ma': 'ま', 'mi': 'み', 'mu': 'む', 'me': 'め', 'mo': 'も',
+    # Y-row
+    'ya': 'や', 'yu': 'ゆ', 'yo': 'よ',
+    # R-row
+    'ra': 'ら', 'ri': 'り', 'ru': 'る', 're': 'れ', 'ro': 'ろ',
+    # W-row
+    'wa': 'わ', 'wo': 'を', 'n': 'ん',
+    # Voiced variants
+    'ga': 'が', 'gi': 'ぎ', 'gu': 'ぐ', 'ge': 'げ', 'go': 'ご',
+    'za': 'ざ', 'ji': 'じ', 'zu': 'ず', 'ze': 'ぜ', 'zo': 'ぞ',
+    'da': 'だ', 'de': 'で', 'do': 'ど',
+    'ba': 'ば', 'bi': 'び', 'bu': 'ぶ', 'be': 'べ', 'bo': 'ぼ',
+    'pa': 'ぱ', 'pi': 'ぴ', 'pu': 'ぷ', 'pe': 'ぺ', 'po': 'ぽ',
+    # Common compound/diphthong patterns
+    'dai': 'だい', 'dare': 'だれ', 'dame': 'だめ',
+    'kara': 'から', 'koko': 'ここ', 'kore': 'これ',
+    'sore': 'それ', 'soko': 'そこ',
+    'demo': 'でも', 'doko': 'どこ',
+    'nani': 'なに', 'naze': 'なぜ',
+    'mada': 'まだ', 'mata': 'また',
+    'sugu': 'すぐ',
+    'hoka': 'ほか', 'toki': 'とき',
+    'mono': 'もの', 'koto': 'こと',
+    'naka': 'なか', 'mae': 'まえ',
+    'ato': 'あと', 'ushiro': 'うしろ',
+    'hayaku': 'はやく', 'sukoshi': 'すこし',
+    'ohayou': 'おはよう', 'konnichiwa': 'こんにちは',
+    'arigatou': 'ありがとう', 'gomen': 'ごめん',
+    'sumimasen': 'すみません', 'sayounara': 'さようなら',
+}
+
+ROMAJI_TO_KATAKANA = {
+    'atom': 'アトム',
+    'atomu': 'アトム',
+    'wan': 'ワン',
+}
+
+ENGLISH_OK = {
+    'ok', 'okay', 'yeah', 'hey', 'oh', 'wow', 'bye', 'hi',
+    'yes', 'no', 'go', 'stop', 'hello', 'good',
+}
+
+AI_NOISE = {
+    'wh', 'th', 'dj', 'w',
+}
+
+
+def is_romaji_only(text: str) -> bool:
+    """Check if text contains only Latin letters and spaces."""
+    return bool(re.fullmatch(r'[a-zA-Z\s\-\']+', text.strip()))
 
 
 # ═══════════════════════════════════════════════════════════════

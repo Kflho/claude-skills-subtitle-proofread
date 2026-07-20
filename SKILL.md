@@ -56,9 +56,6 @@ argument-hint: [目标目录] [参考字幕目录]
 | — | `romaji_fixer.py` | **[新]** 词典修复+删除 | **所有项目** |
 | 1 | `repeat_detect.py` | 卡死重复序列 | 所有项目 |
 | 2 | `trad_to_simp_detect.py` | 繁体→简体 | 中文目标语言 |
-| 3 | `bilingual_detect.py` | 双语混合行 | (被 unified_scanner 替代) |
-| 4 | `source_lang_detect.py` | 纯源语言行 | (被 unified_scanner 替代) |
-| 5 | `source_char_detect.py` | 多语言字符残留 | (被 unified_scanner 替代) |
 | 6 | `interjection_detect.py` | 感叹词残留 | 翻译项目 |
 | 7 | `names_detect.py` | Name字段扫描 | ASS only |
 | 8 | `styles_detect.py` | 样式异常 | ASS only |
@@ -69,8 +66,6 @@ argument-hint: [目标目录] [参考字幕目录]
 | 13 | `oped_detect.py` | OP/ED异常 | ASS + 多样式 |
 | 14 | `proper_noun_detect.py` | 专名变体 | 有参考字幕 |
 | 15 | `oped_timecode_detect.py` | OP/ED时间码 | 所有项目 |
-| 16 | `generate_romaji_fixes.py` | 罗马字→假名 | (被 romaji_fixer 替代) |
-| — | `issue_tracker.py` | Whisper问题清单 | (被 unified_scanner 替代) |
 
 ## 核心工作流
 
