@@ -12,7 +12,7 @@
 用法:
   python whisper_deep_fix.py \
     --report reports/问题解决报告.md \
-    --srt-dir 日语ai生成字幕/ \
+    --srt-dir AI审查后/ \
     --video-dir reports/manual-review/ \
     --whisper-cli D:/.../whisper-cli.exe \
     --model D:/.../large-v3-q5_0.bin \

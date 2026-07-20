@@ -29,7 +29,7 @@ ls whisper_transcribe.py
 ```json
 {
   "episode": "019",
-  "srt_file": "日语ai生成字幕/철완 아톰 (Astro Boy)1963 - 019 EP. ... .srt",
+  "srt_file": "AI审查后/철완 아톰 (Astro Boy)1963 - 019 EP. ... .srt",
   "video_file": "E:/Animation/TV/.../[Anonymoose] 鉄腕アトム - 019 - ... .mkv",
   "issues": [
     {
@@ -64,7 +64,7 @@ ls whisper_transcribe.py
 
 ```bash
 python scripts/issue_tracker.py \
-  --srt-dir ./日语ai生成字幕/ \
+  --srt-dir ./AI审查后/ \
   --video-dir "E:/Animation/TV/..." \
   --output-dir ./issues/
 ```
@@ -151,7 +151,7 @@ Claude 审查对比结果，判断：
 **Claude 必须询问用户是否删除**，列出建议删除项和保留项。用户同意后：
 
 ```bash
-python scripts/apply_fixes.py --target-dir ./日语ai生成字幕/ \
+python scripts/apply_fixes.py --target-dir ./AI审查后/ \
   --fixes reports/whisper_delete_candidates.json
 ```
 
@@ -184,7 +184,7 @@ EP019 | 00:08:10.569 ~ 00:08:42.810 | EP019_00-08-10_to_00-08-42.mp4
 **审查完成后**，运行批量应用脚本：
 
 ```bash
-python scripts/apply_review_fixes.py review-checklist.md --srt-dir ./日语ai生成字幕/
+python scripts/apply_review_fixes.py review-checklist.md --srt-dir ./AI审查后/
 ```
 
 脚本自动用 ffmpeg silencedetect 检测人声区间，为每行分配时间轴。修正行数 ≤ 人声段数时 1:1 分配，否则按比例均分。
@@ -234,7 +234,7 @@ git add -A && git commit -m "备份：深度碎片修复"
 
 python scripts/whisper_deep_fix.py \
   --report reports/问题解决报告.md \
-  --srt-dir 日语ai生成字幕/ \
+  --srt-dir AI审查后/ \
   --video-dir reports/manual-review/ \
   --whisper-cli ... \
   --model .../large-v3-q5_0.bin

@@ -72,7 +72,7 @@ Claude 自动扫描系统中是否存在 whisper.cpp（CUDA 版）：
 |------|------|------|
 | whisper.cpp 安装目录 | `D:/software/video/whisper-cublas-12.4.0-bin-x64` | 定位 CLI 和模型 |
 | 视频文件目录 | `E:/Animation/TV/[Anonymoose] 鉄腕アトム/` | 提取音频 |
-| 原语言字幕目录 | `日语ai生成字幕/` | 乱码扫描输入 |
+| 原语言字幕目录 | `AI审查后/` | 乱码扫描输入 |
 | 视频↔字幕对应规则 | 文件名中的集号匹配 | 自动配对 |
 
 ## 第五步：Claude 验证环境

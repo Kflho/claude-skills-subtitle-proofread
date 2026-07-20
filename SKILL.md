@@ -11,11 +11,11 @@ argument-hint: [目标目录] [参考字幕目录]
 ```
 项目/
 ├── 原始字幕/          ← 只读备份（.gitignore），只能手动 cp 恢复
-├── 日语ai生成字幕/     ← 工作目录（Git 管理）
+├── AI审查后/     ← 工作目录（Git 管理）
 └── reports/           ← 问题解决报告 + 审查清单
 ```
 
-**铁律**：修改 SRT 前 `git add -A && git commit -m "备份：..."`；回滚 `cp 原始字幕/XXX.srt 日语ai生成字幕/`
+**铁律**：修改 SRT 前 `git add -A && git commit -m "备份：..."`；回滚 `cp 原始字幕/XXX.srt AI审查后/`
 
 ## 启动：模式自动匹配
 
