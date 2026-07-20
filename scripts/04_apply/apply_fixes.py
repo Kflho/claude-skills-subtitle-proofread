@@ -65,7 +65,9 @@ import sys
 import os
 from collections import defaultdict
 
-sys.path.insert(0, _root_dir)
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT_DIR = os.path.dirname(os.path.dirname(_SCRIPT_DIR))  # scripts/
+sys.path.insert(0, _ROOT_DIR)
 
 from lib.whisper_utils import setup_windows_utf8, extract_ep_number
 
@@ -304,7 +306,7 @@ def main():
                         help='目标语言 (默认: ja)。zh 自动启用繁→简')
     parser.add_argument('--dry-run', action='store_true', help='仅预览，不实际写入')
     parser.add_argument('--log-to-report', help='统一问题解决报告路径（追加修复记录）')
-    parser.add_argument('--step', type=int, default=0, help='报告步骤编号（1-16），配合 --log-to-report 使用')
+    parser.add_argument('--step', type=str, default='0', help='报告层号（1/2/3/3.5/4/5/6），配合 --log-to-report 使用')
     args = parser.parse_args()
 
     # Step 0: 繁→简（--lang zh 自动启用）
@@ -479,9 +481,9 @@ def main():
 
     # ── 报告日志 ──
     if args.log_to_report and args.step and report_entries:
-        from workflow.update_report import upsert_entries as _upsert
+        from utils.update_report import upsert_entries as _upsert
         _upsert(args.log_to_report, step=args.step, entries=report_entries)
-        print(f'\n📋 已记录 {len(report_entries)} 条到问题解决报告步骤{args.step}')
+        print(f'\n📋 已记录 {len(report_entries)} 条到问题解决报告第{args.step}层')
 
     print(f"\n{'[DRY-RUN] ' if args.dry_run else ''}共应用 {total_applied} 项修复，跳过 {total_skipped} 项")
 

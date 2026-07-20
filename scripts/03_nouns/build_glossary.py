@@ -7,11 +7,7 @@ proper-nouns.md with terms grouped by type, frequency, and spelling variants.
 Usage:
   # Generate full glossary from scan results
   python build_glossary.py --findings temp/scans/findings.json \
-    --output reports/proper-nouns.md
-
-  # Merge with existing hand-curated entries
-  python build_glossary.py --findings temp/scans/findings.json \
-    --output reports/proper-nouns.md --merge reports/proper-nouns.md
+    --output reports/proper-nouns.md --lang ja
 """
 
 import argparse

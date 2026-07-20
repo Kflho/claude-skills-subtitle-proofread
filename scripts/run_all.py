@@ -79,7 +79,7 @@ def step_scan(project_dir, lang):
     issues = os.path.join(project_dir, 'temp', 'scans', 'issues')
     os.makedirs(os.path.dirname(findings), exist_ok=True)
 
-    scanner = os.path.join(_SCRIPT_DIR, 'unified_scanner.py')
+    scanner = os.path.join(_SCRIPT_DIR, '01_scan', 'unified_scanner.py')
     return _run([
         'python', scanner,
         '--target-dir', f'"{target}"',
@@ -155,7 +155,7 @@ def step_fix_episodes(project_dir, lang, mode, skip_whisper=False,
     if len(selected) > 10:
         print(f'[fix] First: {selected[0]}, Last: {selected[-1]}', file=sys.stderr)
 
-    ep_workflow = os.path.join(_SCRIPT_DIR, 'episode_workflow.py')
+    ep_workflow = os.path.join(_SCRIPT_DIR, '02_fix', 'episode_workflow.py')
     for i, ep in enumerate(selected):
         cmd = ['python', ep_workflow, ep, '--mode', mode, '--no-backup',
                f'--project-dir', f'"{project_dir}"']
@@ -170,7 +170,7 @@ def step_nouns(project_dir, lang):
     """Layer 3: noun_checker — proper nouns + OP/ED consistency."""
     target = os.path.join(project_dir, 'AI审查后')
     glossary = os.path.join(project_dir, 'reports', 'proper-nouns.md')
-    checker = os.path.join(_SCRIPT_DIR, 'noun_checker.py')
+    checker = os.path.join(_SCRIPT_DIR, '03_nouns', 'noun_checker.py')
 
     results = {}
 
@@ -217,7 +217,7 @@ def step_nouns(project_dir, lang):
 def step_apply_all(project_dir, lang):
     """Layer 4: apply_fixes — collect all fixes, apply at once."""
     target = os.path.join(project_dir, 'AI审查后')
-    apply_script = os.path.join(_SCRIPT_DIR, 'apply_fixes.py')
+    apply_script = os.path.join(_SCRIPT_DIR, '04_apply', 'apply_fixes.py')
 
     # Collect fixes from all sources
     all_fixes = []
@@ -263,7 +263,7 @@ def step_ass_repair(project_dir):
         return True
 
     target = os.path.join(project_dir, 'AI审查后')
-    repair = os.path.join(_SCRIPT_DIR, 'ass_repair.py')
+    repair = os.path.join(_SCRIPT_DIR, '05_ass', 'ass_repair.py')
     return _run(['python', repair, '--target-dir', f'"{target}"', '--check', 'all'],
                 project_dir, desc='ass')
 
@@ -271,7 +271,7 @@ def step_ass_repair(project_dir):
 def step_clean(project_dir):
     """Clean up empty cues."""
     target = os.path.join(project_dir, 'AI审查后')
-    cleaner = os.path.join(_SCRIPT_DIR, 'clean_empty_cues.py')
+    cleaner = os.path.join(_SCRIPT_DIR, 'utils', 'clean_empty_cues.py')
     return _run(['python', cleaner, '--target-dir', f'"{target}"'],
                 project_dir, desc='clean')
 

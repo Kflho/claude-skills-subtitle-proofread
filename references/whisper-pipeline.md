@@ -63,7 +63,7 @@ issues/ 目录包含 N 集 per-episode JSON →
 | Tier 1 后残留碎片 ≥ 15 | 升级到 Tier 2 |
 | Tier 1 后残留碎片 < 15 且类型为 pure_romaji | Claude 逐条审查，词典修复 |
 | Tier 2 后仍有残留 | 升级到 Tier 3 |
-| Tier 3 后仍有残留 | 标记为「音频质量差，无法自动修复」→ 步骤16 人工审查 |
+| Tier 3 后仍有残留 | 标记为「音频质量差，无法自动修复」→ 第6层 人工交付 |
 
 ### 分批建议
 
@@ -169,8 +169,8 @@ Claude 审查对比结果：
 ### 步骤 4：应用修复 + 导出审查清单
 
 `--update-report` 自动生成：
-- 已修复条目（步骤15 ✅）
-- 待人工审查条目（步骤16 ⬜）
+- 已修复条目（第2层 ✅）
+- 待人工审查条目（第6层 ⬜）
 - 视频切片 → `reports/manual-review/`
 - 删除候选 → `reports/whisper_delete_candidates.json`
 

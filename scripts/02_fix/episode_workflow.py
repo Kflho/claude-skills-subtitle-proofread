@@ -34,6 +34,7 @@ import os
 import re
 import subprocess
 import sys
+from datetime import datetime
 
 # UTF-8 safety on Windows
 if hasattr(sys.stdout, 'reconfigure'):
@@ -49,6 +50,7 @@ if _ROOT_DIR not in sys.path:
     sys.path.insert(0, _ROOT_DIR)
 
 from lib.srt_utils import read_srt_file, write_srt_file, parse_srt_cue, build_srt_cue_lines
+from lib.whisper_utils import to_seconds
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -556,11 +558,23 @@ def step_audio(project_dir, episode, scan_result, dry_run=False):
 
 
 # ═══════════════════════════════════════════════════════════════
-# Step: apply — apply fixes to the SRT file
+# Step: apply — apply fixes to the SRT file + AI confidence review
 # ═══════════════════════════════════════════════════════════════
 
+# Thresholds for flagging low-confidence Whisper output for AI review
+AI_REVIEW_AVG_LOGPROB_THRESHOLD = -1.0     # avg_logprob below this → uncertain
+AI_REVIEW_COMPRESSION_THRESHOLD = 2.0       # compression_ratio above this → hallucination risk
+AI_REVIEW_NO_SPEECH_THRESHOLD = 0.4         # no_speech_prob above this → might not be speech
+
+
 def step_apply(project_dir, episode, fixes, scan_result, no_backup=False):
-    """Log fixes to report. Whisper pipeline already wrote SRT — we just report."""
+    """Log fixes to report + generate AI confidence review for low-confidence items.
+
+    Reports:
+      Layer 2 (✅):  Whisper fixed, high confidence → applied
+      Layer 2.5 (🟡): Whisper fixed but low model confidence → AI review needed
+      Layer 6 (⬜):  Whisper failed → human review
+    """
     srt_name, srt_path = find_srt(project_dir, episode)
 
     if not fixes:
@@ -574,44 +588,140 @@ def step_apply(project_dir, episode, fixes, scan_result, no_backup=False):
     print(f'[apply] {len(fixed)} fixed, {len(unfixed)} unmatched '
           f'(already written to SRT by Whisper)', file=sys.stderr)
 
-    # Log to report
+    # ── Filter low-confidence items from "fixed" for AI review ──
+    ai_review_items = []
+    for f in fixed:
+        alp = f.get('avg_logprob')
+        cr = f.get('compression_ratio')
+        nsp = f.get('no_speech_prob', -1.0)
+        reasons = []
+        if alp is not None and alp < AI_REVIEW_AVG_LOGPROB_THRESHOLD:
+            reasons.append(f'avg_logprob={alp:.2f}')
+        if cr is not None and cr > AI_REVIEW_COMPRESSION_THRESHOLD:
+            reasons.append(f'compression_ratio={cr:.1f}')
+        if nsp >= 0 and nsp > AI_REVIEW_NO_SPEECH_THRESHOLD:
+            reasons.append(f'no_speech_prob={nsp:.2f}')
+        if reasons:
+            ai_review_items.append({**f, 'flag_reasons': reasons})
+
+    if ai_review_items:
+        print(f'[apply] ⚠ {len(ai_review_items)}/{len(fixed)} fixed items have low '
+              f'Whisper confidence → AI review needed', file=sys.stderr)
+
+    # ── Read context for AI review items ──
+    cues = None
+    if ai_review_items:
+        try:
+            from lib.srt_utils import read_srt_file, parse_srt_cue
+        except ImportError:
+            pass
+        else:
+            if srt_path and os.path.exists(srt_path):
+                cues = read_srt_file(srt_path)
+                if isinstance(cues, list) and cues and isinstance(cues[0], str):
+                    # Parse raw SRT lines into cue dicts
+                    cues = parse_srt_cue(cues)
+
+    # ── Generate AI review JSON ──
+    review_data = {
+        'episode': episode,
+        'generated': datetime.now().isoformat(),
+        'total': len(ai_review_items),
+        'items': [],
+    }
+    for f in ai_review_items:
+        item = {
+            'start': f.get('start', ''),
+            'end': f.get('end', ''),
+            'original': f.get('original', '')[:120],
+            'replacement': f.get('replacement', '')[:120],
+            'pipeline_confidence': f.get('confidence', '?'),
+            'model_tier': f.get('model', '?'),
+            'avg_logprob': f.get('avg_logprob'),
+            'no_speech_prob': f.get('no_speech_prob'),
+            'compression_ratio': f.get('compression_ratio'),
+            'flag_reasons': f.get('flag_reasons', []),
+        }
+        # Add context (previous/next cue text)
+        if cues:
+            try:
+                start_s = to_seconds(f.get('start', '00:00:00.000'))
+                prev_text, next_text = '', ''
+                for c in cues:
+                    cs = c.get('start_s', 0) if isinstance(c, dict) else 0
+                    ct = c.get('text', '') if isinstance(c, dict) else ''
+                    if cs < start_s - 1:
+                        prev_text = ct
+                    elif cs > start_s + 1 and not next_text:
+                        next_text = ct
+                item['context_before'] = prev_text[:100] if prev_text else None
+                item['context_after'] = next_text[:100] if next_text else None
+            except Exception:
+                pass
+        review_data['items'].append(item)
+
+    # Write AI review JSON
+    if ai_review_items:
+        review_dir = os.path.join(project_dir, 'temp', 'scans')
+        os.makedirs(review_dir, exist_ok=True)
+        review_path = os.path.join(review_dir, f'{episode}_ai_review.json')
+        with open(review_path, 'w', encoding='utf-8') as f:
+            json.dump(review_data, f, ensure_ascii=False, indent=2)
+        print(f'[apply] AI review data → {review_path}', file=sys.stderr)
+
+    # ── Log to report ──
     try:
         from utils.update_report import upsert_entries
         report_path = os.path.join(project_dir, 'reports', '问题解决报告.md')
 
-        # Step 15: applied Whisper fixes
-        step15_entries = []
-        for f in fixed:
-            step15_entries.append({
+        # Layer 2: applied Whisper fixes (high confidence → auto-applied)
+        high_conf = [f for f in fixed if f not in ai_review_items]
+        layer2_entries = []
+        for f in high_conf:
+            layer2_entries.append({
                 'ep': episode,
                 'time': f.get('start', ''),
                 'original': f.get('original', '')[:80],
                 'corrected': f.get('replacement', '')[:80],
                 'status': '✅',
             })
-        if step15_entries:
-            upsert_entries(report_path, step=15, entries=step15_entries)
+        if layer2_entries:
+            upsert_entries(report_path, step='2', entries=layer2_entries)
 
-        # Step 16: unfixable → human review
-        step16_entries = []
+        # Layer 2.5: AI confidence review needed
+        layer25_entries = []
+        for f in ai_review_items:
+            layer25_entries.append({
+                'ep': episode,
+                'time': f.get('start', ''),
+                'original': f.get('original', '')[:80],
+                'corrected': f.get('replacement', '')[:80],
+                'status': '⬜',
+            })
+        if layer25_entries:
+            upsert_entries(report_path, step='2.5', entries=layer25_entries)
+
+        # Layer 6: unfixable → human review
+        layer6_entries = []
         for f in unfixed:
-            step16_entries.append({
+            layer6_entries.append({
                 'ep': episode,
                 'time': f.get('start', ''),
                 'original': f.get('original', '')[:80],
                 'corrected': '',
                 'status': '⬜',
             })
-        if step16_entries:
-            upsert_entries(report_path, step=16, entries=step16_entries)
-            print(f'[apply] Report: +{len(step15_entries)} step15, '
-                  f'+{len(step16_entries)} step16 (needs human review)',
+        if layer6_entries:
+            upsert_entries(report_path, step='6', entries=layer6_entries)
+            print(f'[apply] Report: +{len(layer2_entries)} L2 (auto), '
+                  f'+{len(layer25_entries)} L2.5 (AI review), '
+                  f'+{len(layer6_entries)} L6 (human)',
                   file=sys.stderr)
 
     except Exception as e:
         print(f'[apply] Report update error: {e}', file=sys.stderr)
 
-    return fixed
+    return fixed, ai_review_items
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -675,6 +785,62 @@ def step_diff(project_dir, episode, scan_result, applied_fixes):
 
 
 # ═══════════════════════════════════════════════════════════════
+# Step: ai-review — print AI review prompt for Claude
+# ═══════════════════════════════════════════════════════════════
+
+def _print_ai_review_prompt(project_dir, episode, ai_review_items):
+    """Print a structured prompt for Claude to review low-confidence Whisper fixes.
+
+    Called via: python episode_workflow.py EPxxx --step ai-review
+    """
+    review_path = os.path.join(project_dir, 'temp', 'scans', f'{episode}_ai_review.json')
+    review_data = load_json(review_path)
+
+    if not review_data or not review_data.get('items'):
+        print('[ai-review] No items flagged for AI review.')
+        return
+
+    items = review_data['items']
+    print(f'\n{"="*55}')
+    print(f'  AI 置信度审查 — {episode} ({len(items)} items)')
+    print(f'{"="*55}\n')
+
+    print('以下是 Whisper 返回了结果但模型自身置信度偏低的条目。')
+    print('请逐条审查，判断 Whisper 的输出是否可信。\n')
+
+    for i, item in enumerate(items):
+        print(f'─── [{i+1}/{len(items)}] {item["start"]} ───')
+        print(f'原文:      {item["original"]}')
+        print(f'Whisper:   {item["replacement"]}')
+        print(f'置信度:    {item["pipeline_confidence"]} (tier={item["model_tier"]})')
+        flags = item.get('flag_reasons', [])
+        if flags:
+            print(f'⚠ 标记原因: {", ".join(flags)}')
+        if item.get('context_before'):
+            print(f'上文:      {item["context_before"]}')
+        if item.get('context_after'):
+            print(f'下文:      {item["context_after"]}')
+        print()
+
+    print(f'{"="*55}')
+    print('审查规则（逐条判断）：')
+    print()
+    print('  1. Whisper 输出通顺、上下文合理 → ✅ 保留（加入 L2 ✅ 报告）')
+    print('  2. Whisper 输出有问题但可修正 → ✏️  给出修正文本')
+    print('  3. Whisper 输出完全不对且无法修正 → ⬜ 升级到 L6 人工审查')
+    print()
+    print('输出格式（每行一条，| 分隔）：')
+    print('  状态 | 时间码 | 修正文本')
+    print('  ✅    | 00:02:00.490 | （保留原文则留空）')
+    print('  ✏️    | 00:02:05.120 | 正しいテキスト')
+    print('  ⬜    | 00:02:10.300 |')
+    print()
+    print('审查完成后运行 apply_fixes.py 应用修正。')
+    print(f'数据文件: {review_path}')
+    print(f'{"="*55}\n')
+
+
+# ═══════════════════════════════════════════════════════════════
 # Main
 # ═══════════════════════════════════════════════════════════════
 
@@ -687,7 +853,7 @@ def main():
     parser.add_argument('--mode', choices=['text', 'audio', 'auto'], default='auto',
                         help='Workflow mode: text=reference subs, audio=VAD+Whisper, '
                              'auto=detect from project (default)')
-    parser.add_argument('--step', choices=['scan', 'audio', 'review', 'translate', 'compare', 'apply', 'diff', 'clean', 'repair-ass'],
+    parser.add_argument('--step', choices=['scan', 'audio', 'review', 'translate', 'compare', 'apply', 'ai-review', 'diff', 'clean', 'repair-ass'],
                         help='Run a specific step only (default: all)')
     parser.add_argument('--repair-ass', action='store_true',
                         help='Run ASS format repair scripts (names/styles/drawing/comment/oped detect)')
@@ -765,6 +931,7 @@ def _run_pipeline(project_dir, episode, mode, args):
     scan_result = None
     fixes = []
     applied = []
+    ai_review_items = []
     translated_path = None
     diffs = []
 
@@ -797,7 +964,11 @@ def _run_pipeline(project_dir, episode, mode, args):
                 print(f'[apply] DRY RUN — {len(fixes)} fixes would be applied')
                 print(f'[apply] Would backup, then write to SRT')
             else:
-                applied = step_apply(project_dir, episode, fixes, scan_result, args.no_backup)
+                applied, ai_review_items = step_apply(project_dir, episode, fixes,
+                                                       scan_result, args.no_backup)
+
+        elif step == 'ai-review':
+            _print_ai_review_prompt(project_dir, episode, ai_review_items)
 
         elif step == 'diff':
             step_diff(project_dir, episode, scan_result, applied)
@@ -809,11 +980,14 @@ def _run_pipeline(project_dir, episode, mode, args):
             step_repair_ass(project_dir, dry_run=args.dry_run)
 
     # Final summary
-    if not args.dry_run and 'apply' in steps and applied:
-        remaining = len(scan_result.get('issues', [])) - len(applied) if scan_result else 0
+    if not args.dry_run and 'apply' in steps:
+        total_issues = len(scan_result.get('issues', [])) if scan_result else 0
         print()
         print('=' * 55)
-        print(f'  Done: {len(applied)} fixed, {remaining} pending')
+        print(f'  Done: {len(applied)} fixed, {len(ai_review_items)} AI review, '
+              f'{total_issues - len(applied)} pending')
+        if ai_review_items:
+            print(f'  Next: python episode_workflow.py {episode} --step ai-review')
         print('=' * 55)
 
 

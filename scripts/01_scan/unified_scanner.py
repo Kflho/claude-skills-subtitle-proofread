@@ -426,7 +426,7 @@ def main():
             os.getcwd(), 'reports', 'proper-nouns.md')
         print(f'\n→ 生成术语表: {glossary_out}', file=sys.stderr)
         import subprocess
-        build_script = os.path.join(_script_dir, 'build_glossary.py')
+        build_script = os.path.join(_root_dir, '03_nouns', 'build_glossary.py')
         subprocess.run([
             sys.executable, build_script,
             '--findings', args.output_findings,

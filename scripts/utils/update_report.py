@@ -2,7 +2,8 @@
 """统一问题解决报告读写工具。
 
 供所有脚本复用的核心模块。
-报告格式: reports/问题解决报告.md — 按 16 个处理步骤分类的修复记录。
+报告格式: reports/问题解决报告.md — 按 5 层工作流分类的修复记录。
+层号与 SKILL.md 的 5+1 层流水线一致。
 
 用法:
   from workflow.update_report import read_report, write_report, upsert_entries, update_entry_status
@@ -10,14 +11,14 @@
   # 读取
   data = read_report('reports/问题解决报告.md')
 
-  # 批量更新步骤条目（按 集数+时间 去重）
+  # 批量更新层条目（按 集数+时间 去重）
   entries = [
       {'ep': 'EP002', 'time': '00:02:00.490', 'original': 'me', 'corrected': '', 'status': '⬜'},
   ]
-  upsert_entries('reports/问题解决报告.md', step=15, entries=entries)
+  upsert_entries('reports/问题解决报告.md', step='2', entries=entries)
 
   # 单条状态更新
-  update_entry_status('reports/问题解决报告.md', step=16, ep='EP002',
+  update_entry_status('reports/问题解决报告.md', step='6', ep='EP002',
                       time='00:02:00.490', corrected='行くぞ', status='✅')
 """
 
@@ -27,27 +28,39 @@ import datetime
 from collections import OrderedDict
 
 # ═══════════════════════════════════════════════════════════════
-# 步骤定义（16步，与 SKILL.md 工作流一致）
+# 层定义（5层工作流 + AI审查 + 人工交付，与 SKILL.md 一致）
 # ═══════════════════════════════════════════════════════════════
 
-STEP_NAMES = OrderedDict([
-    (1,  '卡死重复清理'),
-    (2,  '繁体→简体'),
-    (3,  '双语混合清理'),
-    (4,  '纯源语言行处理'),
-    (5,  '多语言字符残留'),
-    (6,  '感叹词残留'),
-    (7,  'Name字段异常'),
-    (8,  'Comment行残留'),
-    (9,  '样式异常清理'),
-    (10, '绘图指令误译'),
-    (11, '固定格式变体'),
-    (12, '机翻幻觉检测'),
-    (13, 'OP/ED异常'),
-    (14, '专有名词变体'),
-    (15, 'Whisper乱码修复'),
-    (16, '人工审查修正'),
+LAYER_NAMES = OrderedDict([
+    ('1',   '字符扫描'),
+    ('2',   '语义修复'),
+    ('2.5', 'AI置信度审查'),
+    ('3',   '专名统一'),
+    ('3.5', 'AI专名抽样审查'),
+    ('4',   '批量修复'),
+    ('5',   '格式修补 [ASS only]'),
+    ('6',   '人工交付'),
 ])
+
+# 旧步骤名 → 新层号映射（用于迁移旧报告数据）
+STEP_TO_LAYER = {
+    1:  '1',     # 卡死重复清理 → 字符扫描
+    2:  '4',     # 繁体→简体 → 批量修复
+    3:  '1',     # 双语混合清理 → 字符扫描
+    4:  '1',     # 纯源语言行处理 → 字符扫描
+    5:  '1',     # 多语言字符残留 → 字符扫描
+    6:  '4',     # 感叹词残留 → 批量修复
+    7:  '5',     # Name字段异常 → 格式修补
+    8:  '5',     # Comment行残留 → 格式修补
+    9:  '5',     # 样式异常清理 → 格式修补
+    10: '5',     # 绘图指令误译 → 格式修补
+    11: '4',     # 固定格式变体 → 批量修复
+    12: '2',     # 机翻幻觉检测 → 语义修复
+    13: '5',     # OP/ED异常 → 格式修补
+    14: '3',     # 专有名词变体 → 专名统一
+    15: '2',     # Whisper乱码修复 → 语义修复
+    16: '6',     # 人工审查修正 → 人工交付
+}
 
 STATUS_MAP = {
     '✅': '已修复',
@@ -55,37 +68,29 @@ STATUS_MAP = {
     '🗑️': '已删除',
 }
 
-# 步骤与项目特征的关联（用于动态筛选）
-# 每个步骤的适用条件：None=始终适用，dict=需要这些特征才适用
-_STEP_REQUIRES = {
-    2:  {'target_lang': 'zh'},          # 繁体→简体：中文目标语言
-    3:  {'is_translation': True},        # 双语混合：翻译项目
-    4:  {'is_translation': True},        # 纯源语言行：翻译项目
-    6:  {'is_translation': True},        # 感叹词残留：翻译项目
-    7:  {'format': 'ass'},              # Name字段：ASS only
-    8:  {'format': 'ass'},              # Comment行：ASS only
-    9:  {'format': 'ass'},              # 样式异常：ASS only
-    10: {'format': 'ass'},              # 绘图指令：ASS only
-    12: {'target_lang': 'zh'},          # 机翻幻觉：中文目标语言
-    13: {'format': 'ass'},              # OP/ED异常：ASS + 多样式
-    14: {'has_reference': True},         # 专有名词：有参考字幕
+# 层与项目特征的关联（用于动态筛选）
+# None=始终适用，dict=需要这些特征才适用
+_LAYER_REQUIRES = {
+    '3.5': {'has_ai_review': True},      # AI审查：noun_checker unknown>0 时触发
+    '5':   {'format': 'ass'},            # 格式修补：ASS only
 }
 
 
-def get_relevant_steps(target_lang='ja', fmt='srt', has_reference=False,
-                       is_translation=False):
-    """根据项目特征返回适用的步骤列表。
+def get_relevant_layers(target_lang='ja', fmt='srt', has_reference=False,
+                        is_translation=False, has_ai_review=False):
+    """根据项目特征返回适用的层列表。
 
-    默认值对应本项目（日语原文 + SRT only + 无参考字幕）→ 仅 5-6 个步骤。
+    默认值对应本项目（日语原文 + SRT only + 无参考字幕）→ 5-6 层。
 
     Args:
         target_lang: 目标语言代码 ('ja'=日语, 'zh'=中文, ...)
         fmt: 字幕格式 ('srt' 或 'ass')
         has_reference: 是否有参考字幕
         is_translation: 是否为翻译项目（非原文转录）
+        has_ai_review: 是否触发了 AI 专名审查
 
     Returns:
-        OrderedDict: {step_num: step_name} 仅包含适用步骤
+        OrderedDict: {layer_id: layer_name} 仅包含适用层
     """
     from collections import OrderedDict as _OD
 
@@ -94,18 +99,18 @@ def get_relevant_steps(target_lang='ja', fmt='srt', has_reference=False,
         'format': fmt,
         'has_reference': has_reference,
         'is_translation': is_translation,
+        'has_ai_review': has_ai_review,
     }
 
     relevant = _OD()
-    for num, name in STEP_NAMES.items():
-        req = _STEP_REQUIRES.get(num)
+    for lid, name in LAYER_NAMES.items():
+        req = _LAYER_REQUIRES.get(lid)
         if req is None:
-            relevant[num] = name
+            relevant[lid] = name
             continue
-        # 检查所有条件是否满足
         match = all(features.get(k) == v for k, v in req.items())
         if match:
-            relevant[num] = name
+            relevant[lid] = name
 
     return relevant
 
@@ -116,17 +121,26 @@ def get_relevant_steps(target_lang='ja', fmt='srt', has_reference=False,
 REPORT_HEADER = """# 问题解决报告
 > 最后更新: {date}
 > 总览: {fixed}条已解决 / {pending}条待处理 / {deleted}条已删除
+>
+> 格式: 5层工作流（+ AI审查 + 人工交付）
 """
 
 # ═══════════════════════════════════════════════════════════════
 # 解析
 # ═══════════════════════════════════════════════════════════════
 
-def _parse_step_header(line):
-    """解析 '## 步骤N: 名称' 返回 (N, name) 或 None。"""
+def _parse_layer_header(line):
+    """解析 '## 第N层: 名称' 或旧格式 '## 步骤N: 名称'，返回 (layer_id, name) 或 None。"""
+    # 新格式: 第N层 或 第N.M层
+    m = re.match(r'^##\s*第([\d.]+)层:\s*(.+)', line)
+    if m:
+        return m.group(1), m.group(2).strip()
+    # 兼容旧格式: 步骤N
     m = re.match(r'^##\s*步骤(\d+):\s*(.+)', line)
     if m:
-        return int(m.group(1)), m.group(2).strip()
+        old_step = int(m.group(1))
+        layer_id = STEP_TO_LAYER.get(old_step, str(old_step))
+        return layer_id, m.group(2).strip()
     return None
 
 
@@ -156,7 +170,9 @@ def _parse_table_row(line):
 
 
 def read_report(path):
-    """读取统一报告，返回 {step_number: [entries]}。
+    """读取统一报告，返回 {layer_id: [entries]}。
+    layer_id 为字符串 ('1', '2', '3', '3.5', '4', '5', '6')。
+    兼容旧格式（步骤N → 自动映射到新层号）。
     如果文件不存在，返回空 dict。
     """
     if not os.path.exists(path):
@@ -166,23 +182,23 @@ def read_report(path):
         lines = f.readlines()
 
     data = OrderedDict()
-    current_step = None
+    current_layer = None
 
     for line in lines:
         line = line.rstrip('\n')
-        # 检测步骤标题
-        step_match = _parse_step_header(line)
-        if step_match:
-            current_step = step_match[0]
-            if current_step not in data:
-                data[current_step] = []
+        # 检测层标题
+        layer_match = _parse_layer_header(line)
+        if layer_match:
+            current_layer = layer_match[0]
+            if current_layer not in data:
+                data[current_layer] = []
             continue
 
-        # 在步骤内解析表格行
-        if current_step is not None:
+        # 在层内解析表格行
+        if current_layer is not None:
             entry = _parse_table_row(line)
             if entry:
-                data[current_step].append(entry)
+                data[current_layer].append(entry)
 
     return data
 
@@ -191,10 +207,11 @@ def read_report(path):
 # 写入
 # ═══════════════════════════════════════════════════════════════
 
-def _build_step_section(step_num, entries):
-    """构建单个步骤的 markdown 段落。"""
-    name = STEP_NAMES.get(step_num, f'步骤{step_num}')
-    lines = [f'\n## 步骤{step_num}: {name}\n']
+def _build_layer_section(layer_id, entries):
+    """构建单个层的 markdown 段落。"""
+    name = LAYER_NAMES.get(layer_id, f'第{layer_id}层')
+    header_num = f'第{layer_id}层'
+    lines = [f'\n## {header_num}: {name}\n']
 
     if not entries:
         lines.append('*（暂无记录）*\n')
@@ -238,10 +255,10 @@ def write_report(path, data):
     with open(path, 'w', encoding='utf-8') as f:
         f.write(REPORT_HEADER.format(date=today, fixed=fixed, pending=pending, deleted=deleted))
 
-        # 按步骤顺序输出
-        for step_num in STEP_NAMES:
-            entries = data.get(step_num, [])
-            f.write(_build_step_section(step_num, entries))
+        # 按层顺序输出
+        for layer_id in LAYER_NAMES:
+            entries = data.get(layer_id, [])
+            f.write(_build_layer_section(layer_id, entries))
 
     return path
 
@@ -256,15 +273,16 @@ def _entry_key(entry):
 
 
 def upsert_entries(path, step, entries):
-    """批量插入/更新某步骤的条目。按 (集数, 时间) 去重，后到的覆盖先到的。
+    """批量插入/更新某层的条目。按 (集数, 时间) 去重，后到的覆盖先到的。
 
     Args:
         path: 报告文件路径
-        step: 步骤编号 (1-16)
+        step: 层号字符串 ('1', '2', '3', '3.5', '4', '5', '6')
         entries: [{'ep': 'EP002', 'time': '00:02:00', 'original': 'me',
                     'corrected': '', 'status': '⬜'}, ...]
     """
     data = read_report(path)
+    step = str(step)  # normalize to string
     if step not in data:
         data[step] = []
 
@@ -288,7 +306,7 @@ def update_entry_status(path, step, ep, time, corrected=None, status=None):
 
     Args:
         path: 报告文件路径
-        step: 步骤编号
+        step: 层号字符串 ('1'-'6')
         ep: 集数标识，如 'EP002'
         time: 时间码，如 '00:02:00.490'
         corrected: 整改后字幕（None=不修改）
@@ -298,6 +316,7 @@ def update_entry_status(path, step, ep, time, corrected=None, status=None):
         True 如果找到并更新了条目，False 如果未找到。
     """
     data = read_report(path)
+    step = str(step)
     if step not in data:
         return False
 
@@ -313,15 +332,15 @@ def update_entry_status(path, step, ep, time, corrected=None, status=None):
     return False
 
 
-def get_step_summary(data):
-    """返回每个步骤的统计: {step: {'fixed': N, 'pending': N, 'deleted': N, 'total': N}}。"""
+def get_layer_summary(data):
+    """返回每个层的统计: {layer_id: {'fixed': N, 'pending': N, 'deleted': N, 'total': N}}。"""
     summary = {}
-    for step_num in STEP_NAMES:
-        entries = data.get(step_num, [])
+    for layer_id in LAYER_NAMES:
+        entries = data.get(layer_id, [])
         f = sum(1 for e in entries if e.get('status') == '✅')
         p = sum(1 for e in entries if e.get('status') == '⬜')
         d = sum(1 for e in entries if e.get('status') == '🗑️')
-        summary[step_num] = {'fixed': f, 'pending': p, 'deleted': d, 'total': len(entries)}
+        summary[layer_id] = {'fixed': f, 'pending': p, 'deleted': d, 'total': len(entries)}
     return summary
 
 
@@ -342,11 +361,12 @@ if __name__ == '__main__':
         print('用法: python update_report.py <报告路径> [--summary] [选项]')
         print('      python update_report.py <报告路径> --init')
         print()
-        print('--summary 选项（按项目特征过滤步骤）:')
+        print('--summary 选项（按项目特征过滤层）:')
         print('  --target-lang ja|zh     目标语言 (default: ja)')
         print('  --format srt|ass        字幕格式 (default: srt)')
         print('  --has-reference         有参考字幕')
         print('  --is-translation        翻译项目（非原文转录）')
+        print('  --has-ai-review         启用AI专名审查 (层3.5)')
         sys.exit(1)
 
     path = sys.argv[1]
@@ -360,6 +380,7 @@ if __name__ == '__main__':
         fmt = 'srt'
         has_reference = False
         is_translation = False
+        has_ai_review = False
         for i, arg in enumerate(sys.argv):
             if arg == '--target-lang' and i + 1 < len(sys.argv):
                 target_lang = sys.argv[i + 1]
@@ -369,25 +390,29 @@ if __name__ == '__main__':
                 has_reference = True
             elif arg == '--is-translation':
                 is_translation = True
+            elif arg == '--has-ai-review':
+                has_ai_review = True
 
         data = read_report(path)
-        relevant_steps = get_relevant_steps(
+        relevant_layers = get_relevant_layers(
             target_lang=target_lang, fmt=fmt,
-            has_reference=has_reference, is_translation=is_translation
+            has_reference=has_reference, is_translation=is_translation,
+            has_ai_review=has_ai_review
         )
-        summary = get_step_summary(data)
+        summary = get_layer_summary(data)
         total_f = total_p = total_d = total_all = 0
-        for step_num, s in summary.items():
-            if step_num not in relevant_steps:
-                continue  # 跳过不适用步骤
-            name = relevant_steps[step_num]
+        for layer_id, s in summary.items():
+            if layer_id not in relevant_layers:
+                continue  # 跳过不适用层
+            name = relevant_layers[layer_id]
             marker = '' if s['total'] > 0 else ' (空)'
-            print(f'步骤{step_num} {name}: {s["fixed"]}✅ {s["pending"]}⬜ {s["deleted"]}🗑️ (共{s["total"]}条){marker}')
+            print(f'第{layer_id}层 {name}: {s["fixed"]}✅ {s["pending"]}⬜ {s["deleted"]}🗑️ (共{s["total"]}条){marker}')
             total_f += s['fixed']; total_p += s['pending']; total_d += s['deleted']; total_all += s['total']
-        print(f'\n总计（仅适用步骤）: {total_f}✅ {total_p}⬜ {total_d}🗑️ (共{total_all}条)')
-        print(f'已过滤: {len(STEP_NAMES) - len(relevant_steps)} 个不适用步骤')
+        print(f'\n总计（仅适用层）: {total_f}✅ {total_p}⬜ {total_d}🗑️ (共{total_all}条)')
+        print(f'已过滤: {len(LAYER_NAMES) - len(relevant_layers)} 个不适用层')
     else:
         data = read_report(path)
-        print(f'步骤数: {len(data)}')
-        for step, entries in data.items():
-            print(f'  步骤{step}: {len(entries)}条')
+        print(f'层数: {len(data)}')
+        for layer_id, entries in data.items():
+            name = LAYER_NAMES.get(layer_id, f'第{layer_id}层')
+            print(f'  第{layer_id}层 {name}: {len(entries)}条')

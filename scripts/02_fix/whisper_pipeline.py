@@ -448,6 +448,10 @@ def match_whisper_to_cues(whisper_segs, cluster, offset):
                 'replacement': wh['text'],
                 'confidence': 'high', 'model': 'tier1',
                 'lines': [m.get('line') for m in matched if m.get('line')],
+                # Whisper confidence metadata for AI review (Layer 2.5)
+                'avg_logprob': wh.get('avg_logprob'),
+                'no_speech_prob': wh.get('no_speech_prob'),
+                'compression_ratio': wh.get('compression_ratio'),
             })
 
     # Round 2: ±3s wide window for missed cues
@@ -465,6 +469,10 @@ def match_whisper_to_cues(whisper_segs, cluster, offset):
                     'original': g['text'], 'replacement': wh['text'],
                     'confidence': 'retry', 'model': 'tier1',
                     'lines': [g.get('line')] if g.get('line') else [],
+                    # Whisper confidence metadata for AI review (Layer 2.5)
+                    'avg_logprob': wh.get('avg_logprob'),
+                    'no_speech_prob': wh.get('no_speech_prob'),
+                    'compression_ratio': wh.get('compression_ratio'),
                 })
                 covered.add(g['start'])
 
@@ -476,6 +484,7 @@ def match_whisper_to_cues(whisper_segs, cluster, offset):
                 'original': g['text'], 'replacement': None,
                 'confidence': 'none', 'model': 'tier1',
                 'lines': [g.get('line')] if g.get('line') else [],
+                'avg_logprob': None, 'no_speech_prob': None, 'compression_ratio': None,
             })
 
     return fixes, covered
@@ -483,39 +492,80 @@ def match_whisper_to_cues(whisper_segs, cluster, offset):
 
 def run_tier1(video_path, cues, clusters, whisper_cli, model, language, tmpdir,
               separate_vocals_flag=False):
-    """Tier 1: extract segments around garbled clusters, whisper each, match results."""
+    """Tier 1: extract garbled segments → concatenate → one Whisper call → map back.
+
+    Instead of running Whisper per-cluster (N model loads = slow), all cluster
+    audio is extracted, concatenated with silence gaps, and Whisper runs once.
+    Results are then mapped back to original timecodes using cumulative offsets.
+    """
+    if not clusters:
+        return [], []
+
     all_fixes = []
     all_covered = set()
+    seg_paths = []
+    cluster_offsets = []  # (cluster_idx, start_in_combined, original_ss)
 
+    # ── Step 1: Extract audio for all clusters ──
+    print(f'[Tier1] Extracting {len(clusters)} segments ...', file=sys.stderr)
     for i, cluster in enumerate(clusters):
         ss, es = cluster['ss'], cluster['es']
-        print(f'  [{i+1}/{len(clusters)}] segment {ss:.1f}s–{es:.1f}s '
-              f'({len(cluster["garbled"])} cues) ...', file=sys.stderr)
-
-        # Extract audio segment
         seg_audio = os.path.join(tmpdir, f'seg_{i:03d}.wav')
         extract_audio_wav(video_path, seg_audio, ss=ss, duration=es - ss)
+        seg_paths.append((i, seg_audio, cluster))
 
-        # Optional demucs vocal separation
-        whisper_input = seg_audio
-        if separate_vocals_flag:
-            vocals = separate_vocals(seg_audio, output_dir=tmpdir)
-            if vocals != seg_audio:
-                whisper_input = vocals
+    # ── Step 2: Concatenate into one WAV ──
+    combined_wav = os.path.join(tmpdir, 'combined.wav')
+    silence_s = 2.0
+    offsets, total_dur = _concat_wavs(seg_paths, combined_wav, silence_s=silence_s)
 
-        # Whisper
-        segs = run_whisper(whisper_input, whisper_cli, model, language)
-        if not segs:
-            print(f'    ⚠ no output', file=sys.stderr)
-            continue
+    print(f'[Tier1] Combined: {total_dur:.1f}s ({len(seg_paths)} segments + silence)',
+          file=sys.stderr)
 
-        # Match
-        fixes, covered = match_whisper_to_cues(segs, cluster, offset=segs[0].get('t0', 0))
-        all_fixes.extend(fixes)
-        all_covered.update(covered)
+    # ── Step 3: Optional demucs on combined audio (once, not per-segment) ──
+    whisper_input = combined_wav
+    if separate_vocals_flag:
+        print(f'[Tier1] Demucs vocal separation (once on combined audio) ...', file=sys.stderr)
+        vocals = separate_vocals(combined_wav, output_dir=tmpdir)
+        if vocals != combined_wav:
+            whisper_input = vocals
 
-        fixed = sum(1 for f in fixes if f['confidence'] in ('high', 'retry'))
-        print(f'    {fixed}/{len(fixes)} fixed', file=sys.stderr)
+    # ── Step 4: One Whisper call ──
+    segs = run_whisper(whisper_input, whisper_cli, model, language)
+    if not segs:
+        print(f'[Tier1] ⚠ Whisper produced no output', file=sys.stderr)
+        unmatched = [c for c in cues if c.get('is_garbled')]
+        return [], unmatched
+
+    print(f'[Tier1] Whisper returned {len(segs)} segments', file=sys.stderr)
+
+    # ── Step 5: Map Whisper segments back to original clusters ──
+    # offsets = [(cluster_idx, combined_start, combined_end, original_ss), ...]
+    for ci, combined_start, combined_end, orig_ss in offsets:
+        cluster = clusters[ci]
+        # Find Whisper segments that fall within this cluster's time range in combined audio
+        cluster_segs = []
+        for s in segs:
+            s_mid = (s['start_s'] + s['end_s']) / 2
+            if combined_start <= s_mid <= combined_end:
+                # Shift to cluster-local time (match_whisper_to_cues adds cluster['ss'])
+                cluster_segs.append({
+                    **s,
+                    'start_s': s['start_s'] - combined_start,
+                    'end_s': s['end_s'] - combined_start,
+                })
+
+        if cluster_segs:
+            # match_whisper_to_cues adds cluster['ss'] internally, so segs
+            # must use time offsets relative to cluster audio start.
+            fixes, covered = match_whisper_to_cues(cluster_segs, cluster, offset=0)
+            all_fixes.extend(fixes)
+            all_covered.update(covered)
+            fixed = sum(1 for f in fixes if f['confidence'] in ('high', 'retry'))
+            print(f'  [cluster {ci}] {fixed}/{len(fixes)} fixed from '
+                  f'{len(cluster_segs)} whisper segs', file=sys.stderr)
+        else:
+            print(f'  [cluster {ci}] no whisper segments matched', file=sys.stderr)
 
     # Collect unmatched cues
     unmatched = []
@@ -524,6 +574,61 @@ def run_tier1(video_path, cues, clusters, whisper_cli, model, language, tmpdir,
             unmatched.append(c)
 
     return all_fixes, unmatched
+
+
+def _concat_wavs(seg_paths, output_path, silence_s=2.0, sample_rate=16000):
+    """Concatenate WAV files with silence gaps. Returns offsets and total duration.
+
+    Args:
+        seg_paths: [(cluster_idx, wav_path, cluster_dict), ...]
+        output_path: where to write the combined WAV
+        silence_s: seconds of silence between segments
+        sample_rate: expected sample rate
+
+    Returns:
+        offsets: [(cluster_idx, start_s, end_s, original_ss), ...]
+        total_dur: total duration in seconds
+    """
+    import wave
+    import struct
+
+    all_frames = []
+    offsets = []
+    current_pos = 0.0
+
+    for ci, wav_path, cluster in seg_paths:
+        with wave.open(wav_path, 'rb') as wf:
+            rate = wf.getframerate()
+            nchannels = wf.getnchannels()
+            sampwidth = wf.getsampwidth()
+            frames = wf.readframes(wf.getnframes())
+
+        dur = len(frames) / (rate * nchannels * sampwidth)
+        offsets.append((ci, current_pos, current_pos + dur, cluster['ss']))
+
+        all_frames.append(frames)
+        current_pos += dur
+
+        # Add silence gap (except after last segment)
+        if ci != seg_paths[-1][0]:
+            silence_frames = int(silence_s * rate * nchannels * sampwidth)
+            all_frames.append(b'\x00' * silence_frames)
+            current_pos += silence_s
+
+    # Write combined WAV (use params from first segment)
+    with wave.open(seg_paths[0][1], 'rb') as ref:
+        ref_rate = ref.getframerate()
+        ref_nch = ref.getnchannels()
+        ref_sw = ref.getsampwidth()
+
+    with wave.open(output_path, 'wb') as out:
+        out.setnchannels(ref_nch)
+        out.setsampwidth(ref_sw)
+        out.setframerate(ref_rate)
+        out.writeframes(b''.join(all_frames))
+
+    total_dur = current_pos
+    return offsets, total_dur
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -562,6 +667,10 @@ def align_and_fix(cues, whisper_segs):
                 'confidence': 'high' if best_overlap >= 0.5 else 'retry',
                 'model': 'tier2',
                 'lines': [c.get('line')] if c.get('line') else [],
+                # Whisper confidence metadata for AI review (Layer 2.5)
+                'avg_logprob': best_seg.get('avg_logprob'),
+                'no_speech_prob': best_seg.get('no_speech_prob'),
+                'compression_ratio': best_seg.get('compression_ratio'),
             })
             stats['fixed'] += 1
         else:
@@ -572,6 +681,7 @@ def align_and_fix(cues, whisper_segs):
                 'confidence': 'none',
                 'model': 'tier2',
                 'lines': [c.get('line')] if c.get('line') else [],
+                'avg_logprob': None, 'no_speech_prob': None, 'compression_ratio': None,
             })
             stats['unmatched'] += 1
 

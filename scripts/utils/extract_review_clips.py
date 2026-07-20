@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Extract video clips for manual review of unfixable subtitle issues.
 
-Collects unfixable items from Whisper (confidence=none), report step 16,
+Collects unfixable items from Whisper (confidence=none), report layer 6 (人工交付),
 and noun_checker unresolved items → extracts short video clips via ffmpeg →
 generates review-checklist.md for human reviewer.
 
@@ -11,8 +11,8 @@ Usage:
       --video-dir "E:/Animation/TV/..." --srt-dir AI审查后/ \\
       --output reports/manual-review/
 
-  # From report step 16 (人工审查修正)
-  python extract_review_clips.py --report reports/问题解决报告.md --step 16 \\
+  # From report layer 6 (人工交付)
+  python extract_review_clips.py --report reports/问题解决报告.md --step 6 \\
       --video-dir "E:/Animation/TV/..." --srt-dir AI审查后/ \\
       --output reports/manual-review/
 
@@ -23,7 +23,7 @@ Usage:
   # All sources combined
   python extract_review_clips.py \\
       --fixes temp/scans/*_fixes.json \\
-      --report reports/问题解决报告.md --step 16 \\
+      --report reports/问题解决报告.md --step 6 \\
       --noun-check temp/scans/noun_check.json \\
       --video-dir "E:/Animation/TV/..." --srt-dir AI审查后/ \\
       --output reports/manual-review/
@@ -86,8 +86,8 @@ def collect_from_fixes(fixes_path):
     return items
 
 
-def collect_from_report(report_path, step=16):
-    """Extract ⬜ pending items from 问题解决报告.md."""
+def collect_from_report(report_path, step='6'):
+    """Extract ⬜ pending items from 问题解决报告.md Layer 6 (人工交付)."""
     if not os.path.exists(report_path):
         print(f'  [skip] {report_path} not found', file=sys.stderr)
         return []
@@ -331,8 +331,8 @@ def main():
     parser.add_argument('--fixes', nargs='*', default=[],
                         help='Whisper fixes.json file(s)')
     parser.add_argument('--report', help='问题解决报告.md path')
-    parser.add_argument('--step', type=int, default=16,
-                        help='Report step to collect from (default: 16=人工审查修正)')
+    parser.add_argument('--step', type=str, default='6',
+                        help='Report layer to collect from (default: 6=人工交付)')
     parser.add_argument('--noun-check', nargs='*', default=[],
                         help='Noun checker JSON output(s)')
     parser.add_argument('--findings', help='findings.json for per-episode issues')
