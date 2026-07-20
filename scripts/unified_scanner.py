@@ -363,6 +363,10 @@ def main():
     parser.add_argument('--output-issues', help='Per-episode issues 输出目录')
     parser.add_argument('--no-skip-oped', action='store_true',
                         help='不跳过 OP/ED 区域（默认跳过开头 95s + 结尾 120s）')
+    parser.add_argument('--build-glossary', action='store_true',
+                        help='扫描完成后自动生成术语表 proper-nouns.md')
+    parser.add_argument('--glossary-output', default=None,
+                        help='术语表输出路径（默认: reports/proper-nouns.md）')
     parser.add_argument('--project-lang', default='ja',
                         help='项目语言代码（ja=日语，zh=中文）— 保留供未来扩展')
     parser.add_argument('--format', choices=['srt', 'ass', 'auto'], default='auto',
@@ -402,6 +406,21 @@ def main():
     if not any([args.output_findings, args.output_issues]):
         json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
         sys.stdout.write('\n')
+
+    # 自动生成术语表
+    if args.build_glossary and args.output_findings:
+        # Default: reports/proper-nouns.md (from CWD, not temp/scans/)
+        glossary_out = args.glossary_output or os.path.join(
+            os.getcwd(), 'reports', 'proper-nouns.md')
+        print(f'\n→ 生成术语表: {glossary_out}', file=sys.stderr)
+        import subprocess
+        build_script = os.path.join(_script_dir, 'build_glossary.py')
+        subprocess.run([
+            sys.executable, build_script,
+            '--findings', args.output_findings,
+            '--output', glossary_out,
+        ], check=False)
+        print(f'→ 术语表完成', file=sys.stderr)
 
 
 if __name__ == '__main__':

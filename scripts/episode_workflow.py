@@ -148,6 +148,24 @@ def find_original_srt(project_dir, episode):
 
 
 # ═══════════════════════════════════════════════════════════════
+# Helpers
+# ═══════════════════════════════════════════════════════════════
+
+def _run_clean(project_dir):
+    """Run clean_empty_cues on the target directory."""
+    target = os.path.join(project_dir, 'AI审查后')
+    cmd = ' '.join([
+        'python', os.path.join(_SCRIPT_DIR, 'clean_empty_cues.py'),
+        f'--target-dir', f'"{target}"',
+    ])
+    print(f'[clean] Removing empty cues...')
+    try:
+        subprocess.run(cmd, cwd=project_dir, shell=True, timeout=120)
+    except Exception as e:
+        print(f'[clean] Error: {e}')
+
+
+# ═══════════════════════════════════════════════════════════════
 # Step: scan — extract issues for one episode
 # ═══════════════════════════════════════════════════════════════
 
@@ -576,30 +594,28 @@ def step_diff(project_dir, episode, scan_result, applied_fixes):
     fixed_count = 0
     still_count = 0
 
+    # Build timecode→text map from current SRT
+    current_map = {}
+    cue_pat = re.compile(
+        r'(\d{2}:\d{2}:\d{2}[.,]\d{3})\s*-->\s*\d{2}:\d{2}:\d{2}[.,]\d{3}\s*\n(.+?)(?:\n\n|\n?\Z)',
+        re.MULTILINE | re.DOTALL
+    )
+    for m in cue_pat.finditer('\n'.join(lines)):
+        tc = m.group(1).replace(',', '.')
+        txt = m.group(2).strip().replace('\n', ' ')
+        current_map[tc] = txt
+
     for item in sorted(issues, key=lambda x: x.get('start', x.get('timecode', ''))):
         ts = item.get('start', item.get('timecode', ''))
         orig = item.get('original_text', item.get('text', ''))
+        current = current_map.get(ts.replace(',', '.'), orig)
 
-        # Find current text at this timecode
-        current = orig  # default: unchanged
-        if lines:
-            for i, line in enumerate(lines):
-                if ts in line:
-                    # Text is typically 2 lines after the timecode
-                    for offset in [1, 2]:
-                        if i + offset < len(lines):
-                            txt = lines[i + offset].strip()
-                            if txt and '-->' not in txt:
-                                current = txt
-                                break
-                    break
-
-        if orig != current:
+        if current and current != orig:
             print(f'  [FIXED]  {ts}')
             print(f'    was: {orig[:80]}')
             print(f'    now: {current[:80]}')
             fixed_count += 1
-        else:
+        elif not current or current == orig:
             print(f'  [STILL]  {ts} | {orig[:80]}')
             still_count += 1
 
@@ -620,7 +636,7 @@ def main():
     parser.add_argument('--mode', choices=['text', 'audio', 'auto'], default='auto',
                         help='Workflow mode: text=reference subs, audio=VAD+Whisper, '
                              'auto=detect from project (default)')
-    parser.add_argument('--step', choices=['scan', 'audio', 'review', 'translate', 'compare', 'apply', 'diff'],
+    parser.add_argument('--step', choices=['scan', 'audio', 'review', 'translate', 'compare', 'apply', 'diff', 'clean'],
                         help='Run a specific step only (default: all)')
     parser.add_argument('--dry-run', action='store_true',
                         help='Preview only, no file changes')
@@ -628,6 +644,10 @@ def main():
                         help='Skip git backup before modifying SRT')
     parser.add_argument('--project-dir', default=None,
                         help='Project root directory (default: CWD)')
+    parser.add_argument('--all', action='store_true',
+                        help='Process all episodes with issues (batch mode)')
+    parser.add_argument('--limit', type=int, default=0,
+                        help='Max episodes to process in --all mode (0=unlimited)')
 
     args = parser.parse_args()
 
@@ -640,16 +660,42 @@ def main():
     else:
         mode = args.mode
 
+    # --all batch mode: process all episodes with issues
+    if args.all:
+        findings = load_json(os.path.join(project_dir, 'temp', 'scans', 'findings.json'))
+        if not findings:
+            print('No findings.json found. Run unified_scanner first.')
+            return
+        episodes = sorted(findings.get('per_episode_issues', {}).keys())
+        if args.limit > 0:
+            episodes = episodes[:args.limit]
+        print(f'Batch mode: {len(episodes)} episodes')
+        for i, ep in enumerate(episodes):
+            print(f'\n{"="*55}')
+            print(f'  [{i+1}/{len(episodes)}] {ep}')
+            print(f'{"="*55}')
+            _run_pipeline(project_dir, ep, mode, args)
+        # Final cleanup
+        print(f'\n{"="*55}')
+        print(f'  Cleanup — 清理空行')
+        _run_clean(project_dir)
+        return
+
+    # Single episode mode
     print('=' * 55)
     print(f'  {episode} — Proofread Workflow [{mode.upper()} mode]')
     print('=' * 55)
+    _run_pipeline(project_dir, episode, mode, args)
 
+
+def _run_pipeline(project_dir, episode, mode, args):
+    """Execute the proofread pipeline for one episode."""
     # Default pipeline per mode
     if args.step is None:
         if mode == 'text':
-            steps = ['scan', 'audio', 'review', 'translate', 'compare', 'apply', 'diff']
+            steps = ['scan', 'audio', 'review', 'translate', 'compare', 'apply', 'diff', 'clean']
         else:  # audio
-            steps = ['scan', 'audio', 'review', 'apply', 'diff']
+            steps = ['scan', 'audio', 'review', 'apply', 'diff', 'clean']
     else:
         steps = [args.step]
 
@@ -692,6 +738,9 @@ def main():
 
         elif step == 'diff':
             step_diff(project_dir, episode, scan_result, applied)
+
+        elif step == 'clean':
+            _run_clean(project_dir)
 
     # Final summary
     if not args.dry_run and 'apply' in steps and applied:
