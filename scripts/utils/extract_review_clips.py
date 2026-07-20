@@ -47,6 +47,9 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _ROOT_DIR = os.path.dirname(_SCRIPT_DIR)
+# Add both utils/ and scripts/ to path
+if _SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPT_DIR)
 if _ROOT_DIR not in sys.path:
     sys.path.insert(0, _ROOT_DIR)
 
@@ -89,7 +92,7 @@ def collect_from_report(report_path, step=16):
         print(f'  [skip] {report_path} not found', file=sys.stderr)
         return []
 
-    from utils.update_report import read_report
+    from update_report import read_report
 
     data = read_report(report_path)
     entries = data.get(step, [])
