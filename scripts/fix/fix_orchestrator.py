@@ -487,9 +487,12 @@ class Fixer:
                 replacement = f.get('replacement', '')
                 original = f.get('original', '')
 
-                # Unfixable → human
+                # Unfixable → check AI-fixable before routing to human
                 if confidence == 'none' or not replacement:
-                    human_items.append(f)
+                    if is_ai_fixable(original, self.target_lang):
+                        ai_short_fragments.append(f)
+                    else:
+                        human_items.append(f)
                     continue
 
                 # Readability-first: looks like Japanese → keep immediately
@@ -502,7 +505,7 @@ class Fixer:
                     proper_noun_items.append(f)
                 elif is_short_garbled_fragment(replacement, self.target_lang):
                     ai_short_fragments.append(f)
-                elif is_ai_fixable(replacement, self.target_lang):
+                elif is_ai_fixable(replacement, self.target_lang) or is_ai_fixable(original, self.target_lang):
                     ai_short_fragments.append(f)
                 else:
                     human_items.append(f)
