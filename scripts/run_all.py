@@ -483,7 +483,7 @@ def _append_to_glossary(project_dir, accepted_candidates):
 
     def _is_valid_proper_noun(name):
         """Quick validation: reject obvious non-proper-nouns."""
-        if name in _SOUND_RE or _SOUND_RE.match(name):
+        if _SOUND_RE.match(name):
             return False
         if name in _EXCLAMATION:
             return False
