@@ -3,10 +3,15 @@
 
 Runs after build_glossary.py.  Uses JMdict + heuristic patterns to find
 non-proper-noun entries in proper-nouns.md and suggest (or apply) additions
-to COMMON_KANJI.
+to COMMON_KANJI or COMMON_KATAKANA.
 
 This automates the manual "scan → classify → add to frozenset → re-run" loop
 that would otherwise take 3-5 rounds of human inspection.
+
+Now handles ALL sections uniformly:
+  - 角色名（自动提取）  — katakana character names
+  - 汉字复合词          — kanji compounds
+  - 其他片假名术语      — other katakana terms
 
 Usage:
   # Dry-run: show what would be added
@@ -19,15 +24,13 @@ Usage:
   python auto_clean_glossary.py --glossary reports/proper-nouns.md --apply --yes
 
 How it works:
-  1. Parses the 「汉字复合词」table from proper-nouns.md
+  1. Parses ALL tables from proper-nouns.md
   2. Checks each word against JMdict (in JMdict → common word → REJECT)
-  3. Applies heuristic patterns for fragments that JMdict misses:
-     - Verb stems (着替, 見捨, …)
-     - Time / number fragments (時間後, 日前, …)
-     - Modifier fragments (一番大, 全部聞, …)
-     - Pronoun / suffix fragments (僕行, 君僕, …)
-  4. Skips words matching name / place patterns (surnames, cities, etc.)
-  5. Outputs suggested additions to COMMON_KANJI
+  3. Applies heuristic patterns:
+     - Kanji: verb stems, time/number, modifier, pronoun fragments
+     - Katakana: sound effects, onomatopoeia, laughter, common words, fragments
+  4. Skips words matching name / place patterns
+  5. Outputs suggested additions to COMMON_KANJI / COMMON_KATAKANA
   6. With --apply: edits japanese_utils.py + re-runs build_glossary.py
 """
 
@@ -36,7 +39,7 @@ import json
 import os
 import re
 import sys
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 
 import lib._path  # noqa: F401
 
@@ -117,6 +120,45 @@ _ANIME_WHITELIST = frozenset({
     '三銃士', '黄金如来', '火星銀行', '火星探検', '物質縮小',
 })
 
+# ── Katakana-specific reject patterns ──
+
+# Sound effects / onomatopoeia (reduplicated syllables, short bursts)
+# NOTE: names ending in ー (アーサー, カーリー) are common in katakana, so we
+# only flagー+stop (ッ/ツ) or ー+ン, not bare ー endings.
+_KATAKANA_SOUND_RE = re.compile(
+    r'^([ア-ヾ]{2})\1+ン?$|'            # reduplication: ワンワン, ワンワンワン
+    r'^[ア-ヾ]{1,3}[ッっ]$|'            # short burst: パンッ, キュッ, ガッ
+    r'^[ア-ヾ]{1,3}ー[ッツ]$|'          # long vowel + stop: パーッ, バーッ
+    r'^[ア-ヾ]{2,3}ーン$|'              # ー + ン: ポカーン, ボカーン
+    r'^[ア-ヾ]{2,3}ョン$'               # -yon: ヒョン
+)
+
+# Common katakana words that are never proper nouns
+_KATAKANA_COMMON_WORDS = frozenset({
+    'パパ', 'ママ', 'パパママ',
+    'バイキン', 'アイスクリー', 'アイスクリーム',
+    'バイバイ', 'バイバーイ', 'パパー',
+    'エネルギ', 'ネルギー', 'エネルギータ',
+    'プロダクショ', 'リボリュー',
+})
+
+# Katakana fragments — words that look like they're missing their first/last kana
+# (often ASR artifacts where the first syllable was garbled)
+_KATAKANA_FRAGMENT_RE = re.compile(
+    r'^ー[ア-ヾ]'  # starts with long vowel mark: ートム (fragment of アトーム)
+)
+
+# Laughter / exclamation / animal sounds
+_KATAKANA_EXCLAMATION = frozenset({
+    'ハッハー', 'ハハハ', 'アハハ', 'イェーイ', 'ワーイ',
+    'エーッ', 'アーッ', 'キャー', 'ウワー', 'ヤッター',
+    'ハーイ',  # "はい" drawn out
+    'ニャー', 'ニャーニャー',  # cat meow
+    'チャー',  # shoo / charge sound
+    'モー', 'モーモー',  # cow moo
+    'ワンワン',  # dog bark (ワンワンワン caught by reduplication regex)
+})
+
 
 # ═══════════════════════════════════════════════════════════════
 # Core logic
@@ -163,7 +205,7 @@ def _is_likely_name(word):
 
 
 def _get_reject_reason(word):
-    """Determine why a word should be rejected. Returns reason string or None."""
+    """Determine why a kanji word should be rejected. Returns reason string or None."""
     # JMdict check (most reliable)
     if _in_jamdict(word):
         return 'in JMdict (common dictionary word)'
@@ -188,13 +230,76 @@ def _get_reject_reason(word):
     return None
 
 
+def _get_katakana_reject_reason(word):
+    """Determine why a katakana word should be rejected. Returns reason string or None."""
+    # JMdict check
+    if _in_jamdict(word):
+        return 'in JMdict (common dictionary word)'
+
+    # Hard-coded common words
+    if word in _KATAKANA_COMMON_WORDS:
+        return 'common non-name word'
+
+    # Sound effect / onomatopoeia
+    if _KATAKANA_SOUND_RE.match(word):
+        return 'sound effect / onomatopoeia'
+
+    # Laughter / exclamation
+    if word in _KATAKANA_EXCLAMATION:
+        return 'laughter / exclamation'
+
+    # Fragment (starts with long vowel)
+    if _KATAKANA_FRAGMENT_RE.match(word):
+        return 'fragment (starts with ー)'
+
+    # Fragment check: word is substring of a common longer word
+    # e.g. ネルギー is suffix of エネルギー
+    _FRAGMENT_PARENTS = {
+        'エネルギー': ['ネルギー', 'エネルギ'],
+        'アイスクリーム': ['アイスクリー'],
+    }
+    for parent, frags in _FRAGMENT_PARENTS.items():
+        if word in frags:
+            return f'fragment of {parent}'
+
+    return None
+
+
+def _parse_glossary_section(content, section_header, stop_headers):
+    """Parse a markdown table section from the glossary.
+
+    Args:
+        content: full glossary text
+        section_header: '## 角色名' or '## 汉字复合词' or '## 其他片假名'
+        stop_headers: list of '## ...' headers that mark the end of this section
+
+    Returns list of (word, freq) tuples.
+    """
+    sections = content.split(section_header)
+    if len(sections) < 2:
+        return []
+
+    body = sections[1]
+    # Truncate at the next section header
+    for stop in stop_headers:
+        if stop in body:
+            body = body.split(stop)[0]
+            break
+
+    words = []
+    for m in re.finditer(r'\| (.+?) \| (\d+) \|', body):
+        words.append((m.group(1), int(m.group(2))))
+
+    return words
+
+
 def scan_glossary(glossary_path):
-    """Scan proper-nouns.md for common words that should be filtered.
+    """Scan ALL sections of proper-nouns.md for common words that should be filtered.
 
     Returns:
         dict: {
-            'suggestions': [(word, freq, reason), ...],   # words to add to COMMON_KANJI
-            'kept': [(word, freq), ...],                  # words that look like genuine proper nouns
+            'suggestions': [(word, freq, reason, section), ...],
+            'kept': [(word, freq, section), ...],
             'total_scanned': int,
             'jamdict_available': bool,
         }
@@ -205,42 +310,73 @@ def scan_glossary(glossary_path):
     with open(glossary_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
-    # Parse kanji compounds table
-    sections = content.split('## 汉字复合词')
-    if len(sections) < 2:
-        return {'error': 'No 「汉字复合词」 section found in glossary'}
+    # Define sections to scan
+    sections_config = [
+        {
+            'header': '## 角色名',
+            'stop_headers': ['## 汉字复合词', '## 其他片假名', '## 使用方法'],
+            'is_katakana': True,
+            'name': '角色名（片假名）',
+        },
+        {
+            'header': '## 汉字复合词',
+            'stop_headers': ['## 其他片假名', '## 使用方法'],
+            'is_katakana': False,
+            'name': '汉字复合词',
+        },
+        {
+            'header': '## 其他片假名',
+            'stop_headers': ['## 使用方法'],
+            'is_katakana': True,
+            'name': '其他片假名术语',
+        },
+    ]
 
-    kanji_section = sections[1].split('## 其他')[0] if '## 其他' in sections[1] else sections[1]
+    all_suggestions = []
+    all_kept = []
+    total_scanned = 0
 
-    words = []
-    for m in re.finditer(r'\| (.+?) \| (\d+) \|', kanji_section):
-        words.append((m.group(1), int(m.group(2))))
-
-    suggestions = []
-    kept = []
-
-    for word, freq in words:
-        # Already in COMMON_KANJI → skip (shouldn't happen, but safety check)
-        if word in _COMMON_KANJI or word in _COMMON_KATAKANA:
+    for cfg in sections_config:
+        words = _parse_glossary_section(content, cfg['header'], cfg['stop_headers'])
+        if not words:
             continue
 
-        # Check if it looks like a genuine proper noun
-        if _is_likely_name(word):
-            kept.append((word, freq))
-            continue
+        for word, freq in words:
+            total_scanned += 1
 
-        # Check for common-word patterns
-        reason = _get_reject_reason(word)
-        if reason:
-            suggestions.append((word, freq, reason))
-        else:
-            # No pattern matched → keep (conservative)
-            kept.append((word, freq))
+            # Already in COMMON sets → skip
+            if word in _COMMON_KANJI or word in _COMMON_KATAKANA:
+                continue
+
+            # Check if it looks like a genuine proper noun
+            if _is_likely_name(word):
+                all_kept.append((word, freq, cfg['name']))
+                continue
+
+            # Apply language-appropriate reject patterns
+            if cfg['is_katakana']:
+                reason = _get_katakana_reject_reason(word)
+            else:
+                reason = _get_reject_reason(word)
+
+            if reason:
+                all_suggestions.append((word, freq, reason, cfg['name']))
+            else:
+                # No pattern matched → keep (conservative)
+                all_kept.append((word, freq, cfg['name']))
+
+    # Deduplicate across sections (same word appears in multiple sections)
+    seen_words = set()
+    unique_suggestions = []
+    for s in all_suggestions:
+        if s[0] not in seen_words:
+            seen_words.add(s[0])
+            unique_suggestions.append(s)
 
     return {
-        'suggestions': suggestions,
-        'kept': kept,
-        'total_scanned': len(words),
+        'suggestions': unique_suggestions,
+        'kept': all_kept,
+        'total_scanned': total_scanned,
         'jamdict_available': _JAMDICT_AVAILABLE,
     }
 
@@ -256,9 +392,9 @@ def _get_japanese_utils_path():
 
 
 def apply_suggestions(suggestions):
-    """Add suggested words to COMMON_KANJI in japanese_utils.py.
+    """Add suggested words to COMMON_KANJI / COMMON_KATAKANA in japanese_utils.py.
 
-    Appends each new word to the frozenset literal.
+    Katakana words go to COMMON_KATAKANA; kanji words go to COMMON_KANJI.
     Returns the number of words actually added.
     """
     utils_path = _get_japanese_utils_path()
@@ -270,40 +406,77 @@ def apply_suggestions(suggestions):
     with open(utils_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
-    # Find existing COMMON_KANJI words (from import + from file content)
+    # Find existing words in both frozensets
     existing = set(_COMMON_KANJI) | set(_COMMON_KATAKANA)
-    # Also scan file content for previously inserted words (handles same-process re-calls)
     for m in re.finditer(r"'([^']+)'", content):
         existing.add(m.group(1))
 
-    # Filter to genuinely new words
-    new_words = []
-    for word, freq, reason in suggestions:
-        if word not in existing:
-            new_words.append((word, freq, reason))
-            existing.add(word)
+    # Separate katakana from kanji suggestions
+    katakana_words = []
+    kanji_words = []
+    for s in suggestions:
+        word = s[0]
+        freq = s[1]
+        reason = s[2]
+        # s[3] is section name — used to determine type
+        section = s[3] if len(s) > 3 else ''
+        if word in existing:
+            continue
+        # Katakana check: has katakana range chars
+        if bool(re.search(r'[゠-ヿ]', word)):
+            katakana_words.append((word, freq, reason))
+        else:
+            kanji_words.append((word, freq, reason))
+        existing.add(word)
 
-    if not new_words:
-        print('All suggestions already in COMMON_KANJI — nothing to add.', file=sys.stderr)
-        return 0
+    total_added = 0
+    modified = content
 
-    # Build the insertion — find the last entry before the closing })
-    # We insert before the closing '})' of the COMMON_KANJI frozenset
-    insert_lines = []
-    insert_lines.append(f'    # ── auto_clean_glossary ({len(new_words)} words) ──')
-    for word, freq, reason in new_words:
-        insert_lines.append(f"    '{word}',  # {reason}")
+    # ── Insert into COMMON_KATAKANA ──
+    if katakana_words:
+        insert_lines = []
+        insert_lines.append(f'    # ── auto_clean_glossary ({len(katakana_words)} katakana words) ──')
+        for word, freq, reason in katakana_words:
+            insert_lines.append(f"    '{word}',  # {reason}")
+        insert_block = '\n'.join(insert_lines) + '\n'
 
-    insert_block = '\n'.join(insert_lines) + '\n'
+        result = _insert_into_frozenset(modified, 'COMMON_KATAKANA', insert_block)
+        if result:
+            modified = result
+            total_added += len(katakana_words)
+            print(f'Added {len(katakana_words)} words to COMMON_KATAKANA', file=sys.stderr)
 
-    # Find the end of the COMMON_KANJI frozenset:
-    # We look for a line that is just '})' after the COMMON_KANJI section.
-    # Strategy: find the start marker, then find the matching closing '})'
-    start_marker = 'COMMON_KANJI = frozenset({'
+    # ── Insert into COMMON_KANJI ──
+    if kanji_words:
+        insert_lines = []
+        insert_lines.append(f'    # ── auto_clean_glossary ({len(kanji_words)} kanji words) ──')
+        for word, freq, reason in kanji_words:
+            insert_lines.append(f"    '{word}',  # {reason}")
+        insert_block = '\n'.join(insert_lines) + '\n'
+
+        result = _insert_into_frozenset(modified, 'COMMON_KANJI', insert_block)
+        if result:
+            modified = result
+            total_added += len(kanji_words)
+            print(f'Added {len(kanji_words)} words to COMMON_KANJI', file=sys.stderr)
+
+    if total_added:
+        with open(utils_path, 'w', encoding='utf-8') as f:
+            f.write(modified)
+
+    return total_added
+
+
+def _insert_into_frozenset(content, var_name, insert_block):
+    """Insert lines before the closing }}) of a frozenset variable.
+
+    Returns modified content or None on error.
+    """
+    start_marker = f'{var_name} = frozenset({{'
     pos = content.find(start_marker)
     if pos == -1:
-        print('ERROR: Could not find COMMON_KANJI frozenset', file=sys.stderr)
-        return 0
+        print(f'ERROR: Could not find {var_name} frozenset', file=sys.stderr)
+        return None
 
     # Count braces from the opening
     brace_count = 0
@@ -314,49 +487,30 @@ def apply_suggestions(suggestions):
         elif content[i] == '}':
             brace_count -= 1
             if brace_count == 0:
-                end_pos = i + 1  # include the closing brace
+                end_pos = i + 1
                 break
 
     if brace_count != 0:
-        print('ERROR: Could not find closing brace of COMMON_KANJI', file=sys.stderr)
-        return 0
+        print(f'ERROR: Could not find closing brace of {var_name}', file=sys.stderr)
+        return None
 
-    # Find the closing '})' — it's at end_pos, content[end_pos-1] is '}'
-    # We need to find the last line before the closing. Look backwards from end_pos
-    # for the last non-empty, non-comment line before '})'.
-    # Actually, the frozenset ends with '})' — the '}' closes the set, ')' closes frozenset.
-    # We insert before the line that has just '})'.
-
-    # Walk backwards from end_pos to find the line start of '})'
-    insert_at = end_pos - 1  # right before the closing '}'
-    # Walk back past whitespace and the '}'
+    # Walk backwards to find the line start of '})'
+    insert_at = end_pos - 1
     while insert_at > pos and content[insert_at] in '}) \t':
         insert_at -= 1
-    insert_at += 1  # position right before '})'
+    insert_at += 1
 
-    # But we want to insert at line granularity. Find the beginning of the line
-    # containing '})':
     line_start = content.rfind('\n', 0, insert_at) + 1
-    # Check that this line is essentially just '})'
     line_content = content[line_start:end_pos].strip()
     if not line_content.startswith('})'):
-        print(f'WARNING: Expected \"}})\" but found \"{line_content[:20]}...\"', file=sys.stderr)
-        # Try to find it
         search_start = content.rfind('\n})', 0, end_pos + 10)
         if search_start != -1:
             line_start = search_start + 1
         else:
-            print('ERROR: Could not locate \"}})\" line', file=sys.stderr)
-            return 0
+            print(f'ERROR: Could not locate \"}})\" line for {var_name}', file=sys.stderr)
+            return None
 
-    # Insert before the closing line
-    new_content = content[:line_start] + insert_block + content[line_start:]
-
-    with open(utils_path, 'w', encoding='utf-8') as f:
-        f.write(new_content)
-
-    print(f'Added {len(new_words)} words to COMMON_KANJI in {utils_path}', file=sys.stderr)
-    return len(new_words)
+    return content[:line_start] + insert_block + content[line_start:]
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -374,23 +528,34 @@ def print_report(result):
     total = result['total_scanned']
 
     jamdict_status = '✅ available' if result['jamdict_available'] else '⚠️  NOT available'
-    print(f'Scanned {total} kanji compounds  (Jamdict: {jamdict_status})')
+    print(f'Scanned {total} entries across all sections  (Jamdict: {jamdict_status})')
     print()
 
     if suggestions:
-        print(f'⟳  Suggested REJECT ({len(suggestions)}):')
-        print(f'   {"Word":<16s} {"Freq":>5s}  Reason')
-        print(f'   {"-"*16} {"-"*5}  {"-"*40}')
-        for word, freq, reason in suggestions:
-            print(f'   {word:<16s} {freq:>5d}  {reason}')
+        # Group by section
+        by_section = defaultdict(list)
+        for word, freq, reason, section in suggestions:
+            by_section[section].append((word, freq, reason))
 
-    print()
-    print(f'✅ Would KEEP: {len(kept)}')
-    if kept:
-        for word, freq in kept[:15]:
+        for section, items in by_section.items():
+            print(f'⟳  [{section}] Suggested REJECT ({len(items)}):')
+            print(f'   {"Word":<20s} {"Freq":>5s}  Reason')
+            print(f'   {"-"*20} {"-"*5}  {"-"*40}')
+            for word, freq, reason in items:
+                print(f'   {word:<20s} {freq:>5d}  {reason}')
+            print()
+
+    # Kept summary by section
+    kept_by_section = defaultdict(list)
+    for word, freq, section in kept:
+        kept_by_section[section].append((word, freq))
+    for section, items in kept_by_section.items():
+        print(f'✅ [{section}] Would KEEP: {len(items)}')
+        for word, freq in items[:10]:
             print(f'   {word} ({freq})')
-        if len(kept) > 15:
-            print(f'   ... and {len(kept) - 15} more')
+        if len(items) > 10:
+            print(f'   ... and {len(items) - 10} more')
+        print()
 
     return 0
 
@@ -447,14 +612,16 @@ Examples:
         return
 
     if not args.apply:
-        print(f'\nRun with --apply to auto-add {len(suggestions)} words to COMMON_KANJI.')
+        print(f'\nRun with --apply to auto-add {len(suggestions)} words to COMMON_KANJI / COMMON_KATAKANA.')
         return
 
     # ── Apply mode ──
     if not args.yes:
-        print(f'\nAbout to add {len(suggestions)} words to COMMON_KANJI in japanese_utils.py:')
-        for word, freq, reason in suggestions:
-            print(f'  + {word}  ({reason})')
+        print(f'\nAbout to add {len(suggestions)} words to japanese_utils.py:')
+        for s in suggestions:
+            word, freq, reason = s[0], s[1], s[2]
+            target = 'KATAKANA' if bool(re.search(r'[゠-ヿ]', word)) else 'KANJI'
+            print(f'  + [{target}] {word}  ({reason})')
         response = input('\nProceed? [y/N] ')
         if response.lower() not in ('y', 'yes'):
             print('Aborted.')

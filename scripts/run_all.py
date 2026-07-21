@@ -449,35 +449,104 @@ def step_ass_repair(project_dir):
 
 
 def _append_to_glossary(project_dir, accepted_candidates):
-    """Append auto-accepted proper nouns to the glossary."""
+    """Append auto-classified proper nouns to the glossary — with validation.
+
+    Only appends entries that pass basic proper-noun checks (not sound effects,
+    not common words, not fragments).  This prevents the auto_classify →
+    glossary feedback loop from accumulating garbage.
+    """
     glossary_path = os.path.join(project_dir, 'reports', 'proper-nouns.md')
     if not accepted_candidates:
         return
 
-    # Read existing entries
+    # ── Validation helpers (same logic as auto_clean_glossary.py) ──
+    import re as _re
+
+    _SOUND_RE = _re.compile(
+        r'^([ア-ヾ]{2})\1+ン?$|'
+        r'^[ア-ヾ]{1,3}[ッっ]$|'
+        r'^[ア-ヾ]{1,3}ー[ッツ]$|'
+        r'^[ア-ヾ]{2,3}ーン$|'
+        r'^[ア-ヾ]{2,3}ョン$'
+    )
+    _EXCLAMATION = frozenset({
+        'ハッハー', 'ハハハ', 'アハハ', 'イェーイ', 'ワーイ',
+        'エーッ', 'アーッ', 'キャー', 'ウワー', 'ヤッター',
+        'ハーイ', 'ニャー', 'ニャーニャー', 'チャー',
+    })
+    _COMMON_WORDS = frozenset({
+        'パパ', 'ママ', 'パパママ', 'バイキン', 'アイスクリー',
+        'バイバイ', 'バイバーイ', 'パパー', 'エネルギ', 'ネルギー',
+        'プロダクショ', 'リボリュー',
+    })
+    _FRAGMENT_RE = _re.compile(r'^ー[ア-ヾ]')
+
+    def _is_valid_proper_noun(name):
+        """Quick validation: reject obvious non-proper-nouns."""
+        if name in _SOUND_RE or _SOUND_RE.match(name):
+            return False
+        if name in _EXCLAMATION:
+            return False
+        if name in _COMMON_WORDS:
+            return False
+        if _FRAGMENT_RE.match(name):
+            return False
+        if len(name) < 2:
+            return False
+        return True
+
+    # ── Read existing entries ──
     existing_names = set()
     if os.path.exists(glossary_path):
         with open(glossary_path, 'r', encoding='utf-8') as f:
             for line in f:
-                # Match table rows: | アトム | 866 | ... |
                 m = re.match(r'\|\s*([^\s|]+)\s*\|', line)
                 if m:
                     existing_names.add(m.group(1).strip())
 
+    # ── Filter and validate new entries ──
     new_entries = []
     for c in accepted_candidates:
         name = c.get('candidate', '')
-        if name and name not in existing_names:
-            count = c.get('count', 1)
-            new_entries.append(f'| {name} | {count} | — |')
-            existing_names.add(name)
+        if not name or name in existing_names:
+            continue
+        if not _is_valid_proper_noun(name):
+            print(f'[glossary] SKIP invalid: {name}', file=sys.stderr)
+            continue
+        count = c.get('count', 1)
+        new_entries.append((name, count))
+        existing_names.add(name)
 
-    if new_entries:
-        with open(glossary_path, 'a', encoding='utf-8') as f:
-            for entry in new_entries:
-                f.write(entry + '\n')
-        print(f'[glossary] {len(new_entries)} new proper nouns appended',
+    if not new_entries:
+        print('[glossary] All candidates rejected by validation — nothing appended.',
               file=sys.stderr)
+        return
+
+    # ── Append to correct section ──
+    # Find the 其他片假名术语 section (or 角色名 if honorific)
+    with open(glossary_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    # Default: append before ## 使用方法
+    insert_marker = '## 使用方法'
+    insert_pos = content.find(insert_marker)
+    if insert_pos == -1:
+        # Fallback: append at end of file
+        insert_pos = len(content)
+        content += '\n'
+
+    insert_lines = []
+    for name, count in new_entries:
+        insert_lines.append(f'| {name} | {count} | — |')
+
+    insert_block = '\n'.join(insert_lines) + '\n'
+    new_content = content[:insert_pos] + insert_block + content[insert_pos:]
+
+    with open(glossary_path, 'w', encoding='utf-8') as f:
+        f.write(new_content)
+
+    print(f'[glossary] {len(new_entries)} validated proper nouns appended',
+          file=sys.stderr)
 
 
 def step_clean(project_dir):

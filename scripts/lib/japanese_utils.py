@@ -36,6 +36,34 @@ COMMON_KATAKANA = frozenset({
     'バイク','バス','タクシー','ホテル','レストラン',
     'トイレ','シャワー','ベッド','ソファ',
     'コーヒー','ジュース','パン','ケーキ','アイスクリーム',
+    # ── auto_clean_glossary (27 katakana words) ──
+    'バカバカ',  # sound effect / onomatopoeia
+    'ハーイ',  # laughter / exclamation
+    'ハッハー',  # laughter / exclamation
+    'チャー',  # laughter / exclamation
+    'ニャー',  # laughter / exclamation
+    'イェーイ',  # laughter / exclamation
+    'パーッ',  # sound effect / onomatopoeia
+    'キュッ',  # sound effect / onomatopoeia
+    'ートム',  # fragment (starts with ー)
+    'ワンワンワン',  # sound effect / onomatopoeia
+    'エネルギータ',  # common non-name word
+    'アイスクリー',  # common non-name word
+    'ネルギー',  # common non-name word
+    'バンッ',  # sound effect / onomatopoeia
+    'クリッ',  # sound effect / onomatopoeia
+    'バーッ',  # sound effect / onomatopoeia
+    'パパママ',  # common non-name word
+    'プロダクショ',  # common non-name word
+    'バイキン',  # common non-name word
+    'ピーッ',  # sound effect / onomatopoeia
+    'リボリュー',  # common non-name word
+    'ポカーン',  # sound effect / onomatopoeia
+    'ポンッ',  # sound effect / onomatopoeia
+    'パンッ',  # sound effect / onomatopoeia
+    'パパー',  # common non-name word
+    'バイバーイ',  # common non-name word
+    'ボカーン',  # sound effect / onomatopoeia
 })
 
 # Common kanji compounds — expanded from build_glossary.py's _COMMON_KANJI.
@@ -123,6 +151,8 @@ COMMON_KANJI = frozenset({
     # ── L3.2 AI词库审查: 脚本漏网的常见词 ──
     '競技大会','腎臓細胞','通信機','瓜二','中毒患者',
     '女王様','慶応生','耳飾','出迎',
+    # ── auto_clean_glossary (1 kanji words) ──
+    '計画通',  # verb stem: ends with "通"
 })
 
 # Non-word patterns: dashes, repeated chars, breathing/filler sounds.
