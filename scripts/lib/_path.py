@@ -10,11 +10,14 @@ import os
 import sys
 
 
+# Absolute path to the scripts/ directory — exposed for scripts that need to
+# construct paths to sibling packages (e.g. os.path.join(SCRIPTS_DIR, 'nouns', ...)).
+SCRIPTS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
 def _setup():
-    _lib_dir = os.path.dirname(os.path.abspath(__file__))
-    _root_dir = os.path.dirname(_lib_dir)  # lib/ → scripts/
-    if _root_dir not in sys.path:
-        sys.path.insert(0, _root_dir)
+    if SCRIPTS_DIR not in sys.path:
+        sys.path.insert(0, SCRIPTS_DIR)
 
 
 _setup()
