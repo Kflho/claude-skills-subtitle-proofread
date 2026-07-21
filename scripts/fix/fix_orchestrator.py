@@ -489,7 +489,8 @@ class Fixer:
 
                 # Unfixable → check AI-fixable before routing to human
                 if confidence == 'none' or not replacement:
-                    if is_ai_fixable(original, self.target_lang):
+                    if (is_ai_fixable(original, self.target_lang)
+                            or is_short_garbled_fragment(original, self.target_lang)):
                         ai_short_fragments.append(f)
                     else:
                         human_items.append(f)
