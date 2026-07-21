@@ -379,6 +379,8 @@ def main():
                         help='扫描完成后自动生成术语表 proper-nouns.md')
     parser.add_argument('--glossary-output', default=None,
                         help='术语表输出路径（默认: reports/proper-nouns.md）')
+    parser.add_argument('--ai-nouns', default=None,
+                        help='AI WebSearch 补充的专名 JSON 路径')
     parser.add_argument('--project-lang', default='ja',
                         help='目标语言代码（ja=日语，zh=中文）。影响乱码判断逻辑。')
     parser.add_argument('--format', choices=['srt', 'ass', 'auto'], default='auto',
@@ -427,12 +429,15 @@ def main():
         print(f'\n→ 生成术语表: {glossary_out}', file=sys.stderr)
         import subprocess
         build_script = os.path.join(_ROOT_DIR, 'nouns', 'build_glossary.py')
-        subprocess.run([
+        cmd = [
             sys.executable, build_script,
             '--findings', args.output_findings,
             '--output', glossary_out,
             '--lang', args.project_lang,
-        ], check=False)
+        ]
+        if getattr(args, 'ai_nouns', None) and os.path.exists(args.ai_nouns):
+            cmd.extend(['--ai-nouns', args.ai_nouns])
+        subprocess.run(cmd, check=False)
         print(f'→ 术语表完成', file=sys.stderr)
 
 

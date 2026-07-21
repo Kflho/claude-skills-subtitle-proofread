@@ -386,22 +386,29 @@ def step_diff(project_dir, episode, scan_result, applied_fixes):
         txt = m.group(2).strip().replace('\n', ' ')
         current_map[tc] = txt
 
+    deleted_count = 0
     for item in sorted(issues, key=lambda x: x.get('start', x.get('timecode', ''))):
         ts = item.get('start', item.get('timecode', ''))
         orig = item.get('original_text', item.get('text', ''))
-        current = current_map.get(ts.replace(',', '.'), orig)
+        ts_key = ts.replace(',', '.')
+        current = current_map.get(ts_key)
 
-        if current and current != orig:
+        if current is None:
+            # Cue not found in current SRT → VAD-deleted
+            print(f'  [DELETED] {ts} | {orig[:80]}')
+            deleted_count += 1
+        elif current != orig:
             print(f'  [FIXED]  {ts}')
             print(f'    was: {orig[:80]}')
             print(f'    now: {current[:80]}')
             fixed_count += 1
-        elif not current or current == orig:
+        else:
             print(f'  [STILL]  {ts} | {orig[:80]}')
             still_count += 1
 
     print()
-    print(f'  Fixed: {fixed_count}  |  Still broken: {still_count}  |  Total: {len(issues)}')
+    print(f'  Fixed: {fixed_count}  |  Still broken: {still_count}  '
+          f'|  Deleted: {deleted_count}  |  Total: {len(issues)}')
 
 
 # ═══════════════════════════════════════════════════════════════

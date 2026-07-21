@@ -59,6 +59,26 @@ scripts/
 4. **所有修正走同一条嵌入路径。** Whisper/翻译/AI/人工 — 统一的 SRT 写入 + 报告更新。
 5. **幂等。** 已修复的 cue → 纯目标语言 → classify_garbled_text / looks_like_plausible_japanese → clean → 跳过。
 
+## 人工审查设计铁律（禁止负优化）
+
+1. **Whisper ≠ 人工审查 — 片段长度不同。**
+   - Whisper：需要相邻 clean cue 作为**声学上下文**提高转录质量
+     → 使用 `build_clusters()` 的完整区间（左clean cue + 乱码 + 右clean cue）
+   - 人工审查：只需要看到/听到**乱码段本身** + 少量前后空白
+     → 视频片段 = 乱码 cue 区间 + VAD 非人声 padding，**至多 5 秒**
+     → 节约成本（更短的视频文件）
+2. **必须保留视频片段。** 人需要画面辅助判断（口型、场景、字幕叠加）。
+   - `review()` 必须提取视频 clip（ffmpeg），不可改为纯音频
+   - 纯音频只作为 ffmpeg 不可用时的 fallback
+3. **VAD 时间对齐 + 稳健 fallback。**
+   - `apply()` 用 VAD 找到人声精确起止时间，替换 cue 的 start/end
+   - VAD 识别段数 ≠ 预期 → fallback：保持原始 cue 时间边界，只替换 text
+   - VAD 识别 0 段 → 标记无人声，建议删除
+   - webrtcvad 不可用 → fallback：保持原边界替换
+4. **统一审查清单。** `reports/manual-review/checklist.md` 一份文件覆盖所有集，按集分组。
+   - 不再生成 per-ep `EPxxx_checklist.md`
+5. **乱码 cue 零遗漏。** Whisper 无输出/无 cluster/VAD 删除 → 必须路由到 Layer 6 人工审查。
+
 ## 6 层工作流
 
 ```

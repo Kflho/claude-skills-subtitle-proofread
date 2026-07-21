@@ -22,18 +22,7 @@ _ROOT_DIR = os.path.dirname(_SCRIPT_DIR)  # scripts/
 if _ROOT_DIR not in sys.path:
     sys.path.insert(0, _ROOT_DIR)
 
-from lib.japanese_utils import COMMON_KATAKANA as _COMMON_KATAKANA
-
-# Common 2-kanji compounds that are NOT names
-_COMMON_KANJI = frozenset({
-    '今日', '明日', '昨日', '今年', '来年', '毎日', '一度', '一番',
-    '自分', '相手', '人間', '世界', '地球', '宇宙', '時間', '場所',
-    '電話', '手紙', '約束', '説明', '質問', '返事', '関係', '意味',
-    '本当', '大体', '全部', '半分', '一緒', '大丈夫', '可能性',
-    '人数', '方向', '速度', '温度', '距離', '重量', '電力',
-    '攻撃', '防御', '破壊', '発見', '開発', '製造', '修理',
-    '到着', '出発', '通過', '移動', '停止', '開始', '終了',
-})
+from lib.japanese_utils import COMMON_KATAKANA as _COMMON_KATAKANA, COMMON_KANJI as _COMMON_KANJI
 
 # Minimum frequency to include in glossary
 _MIN_FREQ = 3
@@ -96,34 +85,51 @@ def group_katakana_variants(terms):
 # Main processing
 # ═══════════════════════════════════════════════════════════════
 
-def build_glossary(term_freq, min_freq=_MIN_FREQ, lang='ja', use_jamdict=True):
+def build_glossary(term_freq, min_freq=_MIN_FREQ, lang='ja', use_jamdict=True,
+                   ai_nouns_path=None):
     """Process raw term frequencies into structured glossary.
 
     Args:
         lang: 'ja' = katakana + kanji glossary; 'zh' = hanzi only (no katakana)
         use_jamdict: if True, use Jamdict to filter common words (non-proper-nouns)
+        ai_nouns_path: optional path to ai_nouns.json from WebSearch enrichment.
+                       AI-sourced names bypass min_freq threshold.
 
     Returns dict with keys: characters, places, organizations, terms, kanji_compounds.
     """
     # ── Jamdict pre-filter (if available) ──
     _jam = None
+    _jamdict_warned = False
     if use_jamdict:
         try:
             from jamdict import Jamdict
             _jam = Jamdict()
-        except (ImportError, Exception):
-            pass
+        except (ImportError, Exception) as e:
+            if not _jamdict_warned:
+                print(f'WARNING: Jamdict unavailable ({e}) — '
+                      f'falling back to COMMON_KANJI frozenset only.',
+                      file=sys.stderr)
+                _jamdict_warned = True
 
     def _is_common_word(word):
-        """Check if a word is a common (non-proper-noun) entry in JMdict."""
-        if not _jam:
-            return False
-        try:
-            result = _jam.lookup(word.strip())
-            # In JMdict as common word AND NOT in JMnedict as proper name
-            return len(result.entries) > 0 and len(result.names) == 0
-        except Exception:
-            return False
+        """Check if a word is a common (non-proper-noun) entry.
+
+        Uses Jamdict (JMdict + JMnedict) when available.
+        Falls back to COMMON_KANJI frozenset + COMMON_KATAKANA.
+        """
+        # Jamdict path
+        if _jam:
+            try:
+                result = _jam.lookup(word.strip())
+                # In JMdict as common word AND NOT in JMnedict as proper name
+                if len(result.entries) > 0 and len(result.names) == 0:
+                    return True
+                return False
+            except Exception:
+                pass  # fall through to frozenset fallback
+
+        # Fallback: frozenset check
+        return word in _COMMON_KANJI or word in _COMMON_KATAKANA
 
     # Non-word patterns to skip
     _NON_WORD_RE = re.compile(
@@ -186,13 +192,85 @@ def build_glossary(term_freq, min_freq=_MIN_FREQ, lang='ja', use_jamdict=True):
         else:
             other_terms.append(g)
 
-    return {
+    result = {
         'characters': characters,
         'places': places,
         'organizations': organizations,
         'other_terms': other_terms,
         'kanji_compounds': [{'word': w, 'freq': f} for w, f in kanji_terms],
     }
+
+    # ── Merge AI-enriched nouns (bypass min_freq, mark source) ──
+    if ai_nouns_path and os.path.exists(ai_nouns_path):
+        result = _merge_ai_nouns(result, ai_nouns_path, lang)
+
+    return result
+
+
+def _merge_ai_nouns(glossary, ai_nouns_path, lang='ja'):
+    """Merge AI-web-search-enriched proper nouns into the glossary.
+
+    AI-sourced names:
+    - Appear even if they have zero corpus frequency
+    - Are marked with [AI] source tag
+    - Don't duplicate existing entries (matched by canonical name)
+    """
+    try:
+        with open(ai_nouns_path, 'r', encoding='utf-8') as f:
+            ai_data = json.load(f)
+    except Exception as e:
+        print(f'WARNING: Failed to read AI nouns: {e}', file=sys.stderr)
+        return glossary
+
+    # Build lookup of existing names
+    existing_chars = {g['canonical'] for g in glossary['characters']}
+    for g in glossary['characters']:
+        for v in g.get('variants', []):
+            existing_chars.add(v['word'])
+
+    existing_kanji = {k['word'] for k in glossary['kanji_compounds']}
+
+    # Merge AI characters
+    for name in ai_data.get('characters', []):
+        if name not in existing_chars and len(name) >= 2:
+            glossary['characters'].append({
+                'canonical': name,
+                'variants': [{'word': name, 'freq': 0}],
+                'total_freq': 0,
+                'source': '[AI]',
+            })
+            existing_chars.add(name)
+
+    # Merge AI places & organizations (if any)
+    for name in ai_data.get('places', []):
+        if name not in existing_kanji:
+            glossary['kanji_compounds'].append({
+                'word': name, 'freq': 0, 'source': '[AI]',
+            })
+            existing_kanji.add(name)
+
+    for name in ai_data.get('organizations', []):
+        if name not in existing_kanji:
+            glossary['kanji_compounds'].append({
+                'word': name, 'freq': 0, 'source': '[AI]',
+            })
+            existing_kanji.add(name)
+
+    for name in ai_data.get('terms', []):
+        if name not in existing_chars:
+            glossary['other_terms'].append({
+                'canonical': name,
+                'variants': [{'word': name, 'freq': 0}],
+                'total_freq': 0,
+                'source': '[AI]',
+            })
+
+    n_added = sum(1 for g in glossary['characters'] if g.get('source') == '[AI]')
+    print(f'[AI nouns] +{n_added} characters, '
+          f'+{sum(1 for k in glossary["kanji_compounds"] if k.get("source") == "[AI]")} '
+          f'kanji/places from web search', file=sys.stderr)
+
+    return glossary
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -264,6 +342,8 @@ def main():
                         help=f'Minimum frequency to include (default: {_MIN_FREQ})')
     parser.add_argument('--lang', default='ja', choices=['ja', 'zh'],
                         help='Target language (default: ja). ja=katakana+kanji glossary, zh=hanzi only')
+    parser.add_argument('--ai-nouns',
+                        help='Path to ai_nouns.json from WebSearch enrichment')
     args = parser.parse_args()
 
     # Load term frequencies
@@ -280,7 +360,9 @@ def main():
     print(f'Raw terms: {total_terms}', file=sys.stderr)
 
     # Build glossary
-    glossary = build_glossary(term_freq, min_freq=args.min_freq, lang=args.lang)
+    ai_nouns = args.ai_nouns if hasattr(args, 'ai_nouns') else None
+    glossary = build_glossary(term_freq, min_freq=args.min_freq, lang=args.lang,
+                              ai_nouns_path=ai_nouns)
     glossary['_source'] = args.findings
 
     char_count = len(glossary['characters'])

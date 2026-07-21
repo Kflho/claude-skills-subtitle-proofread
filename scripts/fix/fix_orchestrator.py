@@ -351,6 +351,7 @@ class Fixer:
             deleted_count = 0
 
             # Step 1: VAD clean
+            speech_segs = []
             if not skip_vad_clean:
                 from fix.whisper_pipeline import vad_delete_nonspeech
                 vad_audio = os.path.join(tmpdir, 'vad_full.wav')
@@ -359,6 +360,8 @@ class Fixer:
                     cues, deleted, speech_segs = vad_delete_nonspeech(
                         vad_audio, cues, self._srt_path)
                     deleted_count = len(deleted)
+                    # Persist speech_segs for later use (human review VAD alignment)
+                    self._save_speech_segs(speech_segs)
                 except Exception as e:
                     print(f'[whisper] VAD audio extraction failed: {e}',
                           file=sys.stderr)
@@ -482,6 +485,18 @@ class Fixer:
                     ai_short_fragments.append(f)
                 else:
                     human_items.append(f)
+
+            # Fallback: if Whisper produced no fixes but garbled cues remain
+            # (e.g. single isolated cue, no audio output), route to human review.
+            if not fixes and garbled:
+                print(f'[whisper] No Whisper output — {len(garbled)} garbled '
+                      f'cue(s) → L6 human review', file=sys.stderr)
+                for g in garbled:
+                    human_items.append({
+                        'start': g['start'], 'end': g['end'],
+                        'original': g['text'], 'replacement': None,
+                        'confidence': 'none', 'model': 'tier1',
+                    })
 
             # Layer 2: auto-kept (readable) → ✅
             if auto_keep:
@@ -619,9 +634,9 @@ class Fixer:
     def review(self, output_dir: str = None) -> str | None:
         """Generate manual review checklist + video clips.
 
-        Reads Layer 6 ⬜ entries from the report. For each entry,
-        extracts a video clip with context wrapping (adjacent clean
-        cues as acoustic context).
+        Uses the same build_clusters() as Whisper for context wrapping
+        (left clean cue → garbled cues → right clean cue).  Extracts
+        video clips for human judgment (口型/场景/字幕叠加).
 
         Args:
             output_dir: where to write clips + checklist
@@ -643,9 +658,15 @@ class Fixer:
             print(f'[{self.episode}] review: nothing pending', file=sys.stderr)
             return None
 
-        # Load cues for context wrapping
+        # Load cues and build clusters (same logic as Whisper)
         cues = self._load_cues() or parse_srt(
-            self._srt_path, mark_garbled=False)
+            self._srt_path, mark_garbled=True, target_lang=self.target_lang)
+        clusters = self._build_review_clusters(cues, pending)
+
+        if not clusters:
+            print(f'[{self.episode}] review: could not build clusters',
+                  file=sys.stderr)
+            return None
 
         os.makedirs(out_dir, exist_ok=True)
         today = datetime.now().strftime('%Y-%m-%d')
@@ -653,27 +674,24 @@ class Fixer:
         extracted = 0
         skipped = 0
 
-        for item in pending:
-            start_ts = item.get('time', '')
-            end_ts = ''
-            start_s = to_seconds(start_ts) if start_ts else 0
-            end_s = start_s + 5.0
-
-            # Build safe filename
+        for cl in clusters:
+            # Use the first garbled cue's timecode as the entry key
+            first_g = cl['garbled'][0]
+            last_g = cl['garbled'][-1]
+            start_ts = first_g['start']
             safe_start = start_ts.replace(':', '-').replace(',', '-').replace('.', '-')
             clip_name = f'{self.episode}_{safe_start}.mp4'
             clip_path = os.path.join(out_dir, clip_name)
 
-            # Find adjacent clean cues for context wrapping
-            left, right = self._find_adjacent_cues(cues, start_ts)
+            # ── Human review clip: garbled cue + VAD non-speech padding, max 5s ──
+            # Whisper needs adjacent clean cues for acoustic context, but humans
+            # only need to see/hear the garbled segment itself.  Use VAD speech_segs
+            # to find non-speech padding around the garbled cues.
+            garbled_start = first_g['start_s']
+            garbled_end = last_g['end_s']
+            clip_start, clip_end = self._compute_review_clip_bounds(
+                garbled_start, garbled_end, cl.get('ss'), cl.get('es'))
 
-            clip_start = left['start_s'] if left else max(0, start_s - 3.0)
-            clip_end = right['end_s'] if right else end_s + 3.0
-            # Clamp to reasonable range
-            clip_dur = min(clip_end - clip_start, 30.0)
-            clip_end = clip_start + clip_dur
-
-            # Extract clip
             if not os.path.exists(clip_path) and self._video_path:
                 ok = self._extract_clip(self._video_path, clip_start,
                                         clip_end, clip_path)
@@ -684,22 +702,39 @@ class Fixer:
             elif os.path.exists(clip_path):
                 extracted += 1
 
-            entries_md.append(CHECKLIST_ENTRY.format(
-                ep=self.episode,
-                start=start_ts,
-                end=end_ts or '?',
-                clip_file=clip_name,
-                source='Whisper unfixable',
-                original=item.get('original', ''),
-            ))
+            # Build context text from cluster
+            left_text = cl.get('left_text', '')
+            right_text = cl.get('right_text', '')
+            garbled_texts = ' | '.join(g['text'][:60] for g in cl['garbled'])
+
+            entries_md.append(
+                f'{self.episode} | {start_ts} ~ {first_g.get("end", "?")}\n'
+                f'来源: Whisper unfixable\n'
+                f'上文: {left_text[:120] if left_text else "(无)"}\n'
+                f'残留: {garbled_texts}\n'
+                f'下文: {right_text[:120] if right_text else "(无)"}\n'
+                f'片段: {clip_name}\n'
+                f'修正:\n'
+                f'\n---\n'
+            )
 
         # Write checklist
         checklist_path = os.path.join(out_dir, f'{self.episode}_checklist.md')
         with open(checklist_path, 'w', encoding='utf-8') as f:
-            f.write(CHECKLIST_HEADER.format(
-                episode=self.episode, date=today, count=len(entries_md)))
+            f.write(f'# 人工审查清单 — {self.episode}\n'
+                    f'> 导出: {today}\n'
+                    f'> 共 {len(entries_md)} 条待审查\n'
+                    f'> version: 2\n'
+                    f'>\n'
+                    f'> **填写方法**：看视频 + 读上下文 → 写出正确台词。\n'
+                    f'> 写「删除」移除该 cue。填完运行 --apply-checklist。\n'
+                    f'>\n'
+                    f'---\n\n')
             for entry_md in entries_md:
                 f.write(entry_md)
+
+        # Save cluster info for apply() VAD alignment
+        self._save_review_clusters(clusters)
 
         print(f'[{self.episode}] review: {len(entries_md)} entries → '
               f'{checklist_path} ({extracted} clips, {skipped} skipped)',
@@ -807,6 +842,13 @@ class Fixer:
         - '修正:' = text → VAD time-align → replace in SRT → report ✅
         - '修正:' = empty → skip, keep ⬜
 
+        VAD alignment with robust fallbacks:
+        1. Extract cluster audio → VAD → 1 speech segment → use VAD boundaries
+        2. VAD returns 0 segments → mark as likely non-speech, suggest deletion
+        3. VAD returns N≠1 segments → fallback: keep original cue time, replace text
+        4. VAD unavailable (no webrtcvad / no audio) → fallback: keep original
+        5. No video/cluster info → fallback: find by timecode, replace text
+
         Returns count of applied corrections.
         Idempotent: only processes ⬜ entries.
         """
@@ -824,45 +866,67 @@ class Fixer:
             print(f'[apply] No corrections found in checklist', file=sys.stderr)
             return 0
 
-        # Load current SRT
+        # Load current SRT and pre-compute VAD / cluster data
         cues = parse_srt(self._srt_path, mark_garbled=False)
+        speech_segs = self._load_speech_segs()
+        review_clusters = self._load_review_clusters()
         applied = 0
 
         for corr in corrections:
             timecode = corr['time']
             text = corr['text']  # may be '删除' or empty or corrected text
 
-            # Find the cue by timecode
-            target_idx = None
-            for i, cue in enumerate(cues):
-                if cue['start'] == timecode:
-                    target_idx = i
-                    break
+            if not text or not text.strip():
+                continue  # Empty → skip
 
+            if text.strip() == '删除':
+                # Find and remove cue
+                target_idx = self._find_cue_index(cues, timecode)
+                if target_idx is None:
+                    print(f'[apply] Cue not found for delete: {timecode}',
+                          file=sys.stderr)
+                    continue
+                removed = cues.pop(target_idx)
+                print(f'[apply] Deleted: {timecode} "{removed["text"][:60]}"',
+                      file=sys.stderr)
+                self._mark_checklist_done(corrections, timecode, '✅')
+                applied += 1
+                continue
+
+            # ── VAD time-alignment ──
+            target_idx = self._find_cue_index(cues, timecode)
             if target_idx is None:
                 print(f'[apply] Cue not found: {timecode} — may already be fixed',
                       file=sys.stderr)
                 self._mark_checklist_done(corrections, timecode, '✅')
                 continue
 
-            if not text or not text.strip():
-                # Empty → skip
-                continue
+            corrected_text = text.strip()
+            cluster = self._find_cluster_for_timecode(review_clusters, timecode)
 
-            if text.strip() == '删除':
-                # Remove cue
-                removed = cues.pop(target_idx)
-                print(f'[apply] Deleted: {timecode} "{removed["text"][:60]}"',
-                      file=sys.stderr)
-                self._mark_checklist_done(corrections, timecode, '✅')
-                applied += 1
+            if cluster and speech_segs and self._video_path:
+                # Try VAD alignment within the cluster
+                aligned = self._vad_align_correction(
+                    cluster, speech_segs, corrected_text,
+                    cues[target_idx])
+                if aligned:
+                    cues[target_idx]['start'] = aligned['start']
+                    cues[target_idx]['end'] = aligned['end']
+                    cues[target_idx]['text'] = aligned['text']
+                    tag = '[VAD]'
+                else:
+                    # Fallback: keep original boundaries
+                    cues[target_idx]['text'] = corrected_text
+                    tag = '[fallback:orig]'
             else:
-                # Replace with corrected text (keep original time boundaries)
-                cues[target_idx]['text'] = text.strip()
-                print(f'[apply] Fixed: {timecode} → "{text.strip()[:60]}"',
-                      file=sys.stderr)
-                self._mark_checklist_done(corrections, timecode, '✅')
-                applied += 1
+                # No cluster/VAD data → simple text replace
+                cues[target_idx]['text'] = corrected_text
+                tag = '[text-only]'
+
+            print(f'[apply] {tag} {timecode} → "{corrected_text[:60]}"',
+                  file=sys.stderr)
+            self._mark_checklist_done(corrections, timecode, '✅')
+            applied += 1
 
         # Write back SRT
         if applied > 0:
@@ -871,6 +935,139 @@ class Fixer:
                   f'{os.path.basename(self._srt_path)}', file=sys.stderr)
 
         return applied
+
+    def _find_cue_index(self, cues, timecode):
+        """Find cue index by start timecode (tolerant of comma/dot)."""
+        tc = timecode.replace(',', '.').replace('。', '.')
+        for i, cue in enumerate(cues):
+            ct = cue.get('start', '').replace(',', '.').replace('。', '.')
+            if ct == tc:
+                return i
+        return None
+
+    def _find_cluster_for_timecode(self, clusters, timecode):
+        """Find the review cluster containing a given cue timecode."""
+        if not clusters:
+            return None
+        tc = timecode.replace(',', '.').replace('。', '.')
+        for cl in clusters:
+            for g in cl.get('garbled', []):
+                gt = g.get('start', '').replace(',', '.').replace('。', '.')
+                if gt == tc:
+                    return cl
+        return None
+
+    def _vad_align_correction(self, cluster, speech_segs, corrected_text, cue):
+        """Use VAD to find precise speech boundaries for corrected text.
+
+        Returns dict {start, end, text} if alignment succeeds, None if fallback needed.
+        """
+        # Find speech segments that overlap with this cluster
+        cluster_ss = cluster['ss']
+        cluster_es = cluster['es']
+        overlapping = []
+        for ss, es in speech_segs:
+            overlap = min(es, cluster_es) - max(ss, cluster_ss)
+            if overlap > 0.3:  # at least 300ms overlap
+                overlapping.append((ss, es))
+
+        n = len(overlapping)
+        n_garbled = len(cluster.get('garbled', []))
+
+        if n == 0:
+            print(f'[VAD] 0 speech segments in cluster → likely non-speech, '
+                  f'keeping original boundaries', file=sys.stderr)
+            return None  # Fallback: keep original boundaries
+
+        elif n == 1:
+            # Perfect: single speech segment → use VAD boundaries
+            ss, es = overlapping[0]
+            return {
+                'start': self._seconds_to_tc(ss),
+                'end': self._seconds_to_tc(es),
+                'text': corrected_text,
+            }
+
+        elif n == n_garbled:
+            # VAD segments match garbled cue count → use corresponding segment
+            # Find which garbled cue we're fixing
+            cue_start_s = cue.get('start_s', 0)
+            garbled_list = cluster.get('garbled', [])
+            g_idx = None
+            for i, g in enumerate(garbled_list):
+                if abs(g.get('start_s', 0) - cue_start_s) < 0.5:
+                    g_idx = i
+                    break
+            if g_idx is not None and g_idx < len(overlapping):
+                ss, es = overlapping[g_idx]
+                return {
+                    'start': self._seconds_to_tc(ss),
+                    'end': self._seconds_to_tc(es),
+                    'text': corrected_text,
+                }
+            else:
+                print(f'[VAD] {n} segments = garbled count but '
+                      f'could not match cue → fallback', file=sys.stderr)
+                return None
+
+        else:
+            print(f'[VAD] {n} speech segments ≠ {n_garbled} garbled cues '
+                  f'→ fallback (keep original boundaries)', file=sys.stderr)
+            return None
+
+    @staticmethod
+    def _seconds_to_tc(seconds):
+        """Convert float seconds to SRT timecode HH:MM:SS,mmm."""
+        h = int(seconds // 3600)
+        m = int((seconds % 3600) // 60)
+        s = seconds % 60
+        return f'{h:02d}:{m:02d}:{s:06.3f}'.replace('.', ',')
+
+    def _compute_review_clip_bounds(self, garbled_start, garbled_end,
+                                     cluster_ss, cluster_es, max_dur=5.0):
+        """Compute video clip boundaries for human review.
+
+        Unlike Whisper (needs adjacent clean cues for context), humans only
+        need the garbled segment + VAD non-speech padding, capped at 5s.
+        """
+        speech_segs = self._load_speech_segs()
+        pad_before = 0.0
+        pad_after = 0.0
+
+        if speech_segs:
+            last_speech_end = None
+            for ss, es in speech_segs:
+                if es <= garbled_start:
+                    last_speech_end = es
+            if last_speech_end is not None:
+                pad_before = min(garbled_start - last_speech_end, 2.0)
+            else:
+                pad_before = min(garbled_start - cluster_ss, 1.0)
+
+            first_speech_after = None
+            for ss, es in speech_segs:
+                if ss >= garbled_end:
+                    first_speech_after = ss
+                    break
+            if first_speech_after is not None:
+                pad_after = min(first_speech_after - garbled_end, 2.0)
+            else:
+                pad_after = min(cluster_es - garbled_end, 1.0)
+        else:
+            pad_before = 0.5
+            pad_after = 0.5
+
+        clip_start = max(cluster_ss, garbled_start - pad_before)
+        clip_end = min(cluster_es, garbled_end + pad_after)
+
+        dur = clip_end - clip_start
+        if dur > max_dur:
+            excess = dur - max_dur
+            trim_each = excess / 2.0
+            clip_start = max(garbled_start - 0.3, clip_start + trim_each)
+            clip_end = min(garbled_end + 0.3, clip_end - trim_each)
+
+        return clip_start, clip_end
 
     # ═══════════════════════════════════════════════════════════
     # Internal helpers
@@ -884,6 +1081,86 @@ class Fixer:
         except Exception as e:
             print(f'[report] Failed to update Layer {step}: {e}',
                   file=sys.stderr)
+
+    # ── VAD & review cluster persistence ──
+
+    def _vad_path(self):
+        """Path to per-episode VAD speech segments JSON."""
+        return os.path.join(self._temp_dir, f'{self.episode}_vad.json')
+
+    def _save_speech_segs(self, speech_segs):
+        """Persist VAD speech_segs for later use (human review apply)."""
+        try:
+            os.makedirs(self._temp_dir, exist_ok=True)
+            with open(self._vad_path(), 'w', encoding='utf-8') as f:
+                json.dump({'speech_segs': speech_segs}, f, ensure_ascii=False)
+        except Exception as e:
+            print(f'[vad] Failed to save speech_segs: {e}', file=sys.stderr)
+
+    def _load_speech_segs(self):
+        """Load persisted VAD speech_segs, or empty list."""
+        path = self._vad_path()
+        if os.path.exists(path):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    return json.load(f).get('speech_segs', [])
+            except Exception:
+                pass
+        return []
+
+    def _review_clusters_path(self):
+        return os.path.join(self._temp_dir, f'{self.episode}_review_clusters.json')
+
+    def _build_review_clusters(self, cues, pending_items):
+        """Build review clusters using the same logic as Whisper's build_clusters().
+
+        Groups garbled cues by proximity, expands to adjacent clean cue
+        boundaries.  Returns clusters with left_text/right_text for context
+        display and ss/es for video clip extraction.
+        """
+        from fix.whisper_pipeline import build_clusters
+
+        # Mark garbled cues that match pending items, unmark the rest
+        pending_starts = {e.get('time', '') for e in pending_items}
+        for c in cues:
+            if c.get('start', '') in pending_starts:
+                c['is_garbled'] = True
+            elif not c.get('is_garbled'):
+                pass  # keep existing garbled marks
+
+        return build_clusters(cues)
+
+    def _save_review_clusters(self, clusters):
+        """Save cluster info as JSON for apply() to use in VAD alignment."""
+        try:
+            os.makedirs(self._temp_dir, exist_ok=True)
+            # Strip non-serializable fields
+            serializable = []
+            for cl in clusters:
+                serializable.append({
+                    'ss': cl['ss'], 'es': cl['es'],
+                    'garbled': [{'start': g['start'], 'end': g['end'],
+                                 'text': g['text'][:80],
+                                 'start_s': g['start_s'], 'end_s': g['end_s']}
+                                for g in cl['garbled']],
+                    'left_text': cl.get('left_text', ''),
+                    'right_text': cl.get('right_text', ''),
+                })
+            with open(self._review_clusters_path(), 'w', encoding='utf-8') as f:
+                json.dump(serializable, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f'[review] Failed to save clusters: {e}', file=sys.stderr)
+
+    def _load_review_clusters(self):
+        """Load persisted review clusters."""
+        path = self._review_clusters_path()
+        if os.path.exists(path):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return []
 
     def _find_adjacent_cues(self, cues: list, timecode: str):
         """Find clean cues immediately before and after a given timecode.
