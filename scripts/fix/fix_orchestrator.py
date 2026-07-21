@@ -1003,7 +1003,8 @@ class Fixer:
 
             print(f'[apply] {tag} {timecode} → "{corrected_text[:60]}"',
                   file=sys.stderr)
-            self._mark_checklist_done(corrections, timecode, '✅', step=report_step)
+            self._mark_checklist_done(corrections, timecode, '✅',
+                                      step=report_step, corrected=corrected_text)
             applied += 1
 
         # Write back SRT
@@ -1475,10 +1476,12 @@ class Fixer:
         return corrections
 
     def _mark_checklist_done(self, corrections: list, timecode: str,
-                             status: str, step: str = '6'):
+                             status: str, step: str = '6',
+                             corrected: str = None):
         """Update report entry for a single applied correction.
 
-        Updates the report Layer entry from ⬜ → ✅.
+        Updates the report Layer entry from ⬜ → ✅, and updates
+        corrected text if provided.
         """
         try:
             from utils.update_report import update_entry_status
@@ -1486,6 +1489,7 @@ class Fixer:
                 self._report_path, step=step,
                 ep=self.episode, time=timecode,
                 status=status,
+                corrected=corrected,
             )
         except Exception as e:
             print(f'[report] Failed to update status: {e}', file=sys.stderr)
