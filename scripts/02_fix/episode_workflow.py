@@ -149,24 +149,24 @@ def detect_format(project_dir):
     }
 
 
-def find_video(project_dir, episode):
+def find_video(project_dir, episode, video_dir=None):
     """Find video file for an episode. Returns path or None.
 
-    Searches common video directories and filename patterns.
+    Searches: explicit video_dir > project/video > project/videos.
     """
     ep_num = episode[2:]  # '064' from 'EP064'
-
-    # Candidate directories
-    video_dirs = [
-        os.path.join(project_dir, 'video'),
-        os.path.join(project_dir, 'videos'),
-        r'D:\Video\Animation\TV\[Anonymoose] 鉄腕アトム (DVD, 10bit)',
-    ]
-
-    # Common extensions
     exts = ('.mkv', '.mp4', '.avi', '.mov')
 
-    for vdir in video_dirs:
+    # Candidate directories (explicit first, then project-local)
+    candidates = []
+    if video_dir:
+        candidates.append(video_dir)
+    candidates.extend([
+        os.path.join(project_dir, 'video'),
+        os.path.join(project_dir, 'videos'),
+    ])
+
+    for vdir in candidates:
         if not os.path.isdir(vdir):
             continue
         for fname in os.listdir(vdir):
@@ -472,7 +472,7 @@ def step_review(project_dir, episode, dry_run=False):
 # Step: audio — VAD + Whisper for audio-only mode (no reference subs)
 # ═══════════════════════════════════════════════════════════════
 
-def step_audio(project_dir, episode, scan_result, dry_run=False):
+def step_audio(project_dir, episode, scan_result, dry_run=False, video_dir=None):
     """Audio mode: dispatch garbled cues to VAD + Whisper Tier 1.
 
     Does NOT guess or use dictionaries — audio is the only source of truth.
@@ -485,7 +485,7 @@ def step_audio(project_dir, episode, scan_result, dry_run=False):
     print(f'[audio] {len(issues)} garbled cue(s) → VAD + Whisper')
 
     # Find video
-    video_path = find_video(project_dir, episode)
+    video_path = find_video(project_dir, episode, video_dir=video_dir)
     if not video_path:
         print('[audio] WARNING: No video found. Cannot run Whisper.')
         print('[audio] Garbled cues (manual review needed):')
@@ -863,6 +863,8 @@ def main():
                         help='Skip git backup before modifying SRT')
     parser.add_argument('--project-dir', default=None,
                         help='Project root directory (default: CWD)')
+    parser.add_argument('--video-dir', default=None,
+                        help='Video directory (default: auto-detect from project/video, project/videos)')
     parser.add_argument('--all', action='store_true',
                         help='Process all episodes with issues (batch mode)')
     parser.add_argument('--limit', type=int, default=0,
@@ -940,7 +942,8 @@ def _run_pipeline(project_dir, episode, mode, args):
             scan_result = step_scan(project_dir, episode)
 
         elif step == 'audio':
-            fixes = step_audio(project_dir, episode, scan_result, dry_run=args.dry_run)
+            fixes = step_audio(project_dir, episode, scan_result,
+                               dry_run=args.dry_run, video_dir=args.video_dir)
 
         elif step == 'review':
             step_review(project_dir, episode, dry_run=args.dry_run)

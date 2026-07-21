@@ -124,8 +124,8 @@ def _filter_by_start(episodes, start_from):
     return [ep for ep in episodes if ep >= start_ep]
 
 
-def step_fix_episodes(project_dir, lang, mode, skip_whisper=False,
-                      episodes=None, limit=0, start_from=None):
+def step_fix_episodes(project_dir, lang, mode, video_dir=None,
+                      skip_whisper=False, episodes=None, limit=0, start_from=None):
     """Layer 2: episode_workflow for selected episodes."""
     findings = _load_json(os.path.join(project_dir, 'temp', 'scans', 'findings.json'))
 
@@ -159,6 +159,8 @@ def step_fix_episodes(project_dir, lang, mode, skip_whisper=False,
     for i, ep in enumerate(selected):
         cmd = ['python', ep_workflow, ep, '--mode', mode,
                f'--project-dir', f'"{project_dir}"']
+        if video_dir:
+            cmd.extend(['--video-dir', f'"{video_dir}"'])
         if skip_whisper:
             cmd.append('--skip-whisper')
         _run(cmd, project_dir, desc=f'ep {i+1}/{len(selected)} {ep}')
@@ -276,7 +278,8 @@ def step_clean(project_dir):
                 project_dir, desc='clean')
 
 
-def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True):
+def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True,
+                 video_dir=None):
     """Layer 6: extract review clips for human delivery.
 
     Partial runs (--limit, --episodes, --start-from): only collects fixes JSONs
@@ -288,6 +291,7 @@ def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True):
     Args:
         processed_episodes: list of episode IDs processed in this run (for filtering)
         is_full_run: if True, also scan report + noun check (cross-episode sources)
+        video_dir: explicit video directory (from --video-dir or auto-detected)
     """
     report_path = os.path.join(project_dir, 'reports', '问题解决报告.md')
     fixes_dir = os.path.join(project_dir, 'temp', 'scans')
@@ -295,9 +299,6 @@ def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True):
     srt_dir = os.path.join(project_dir, 'AI审查后')
     output_dir = os.path.join(project_dir, 'reports', 'manual-review')
     extractor = os.path.join(_SCRIPT_DIR, 'utils', 'extract_review_clips.py')
-
-    # Auto-detect video directory
-    video_dir = _detect_video_dir(project_dir)
 
     cmd = [
         'python', extractor,
@@ -348,14 +349,11 @@ def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True):
     return _run(cmd, project_dir, timeout=1800, desc='deliver')
 
 
-def _detect_video_dir(project_dir):
-    """Auto-detect video directory from common locations."""
-    candidates = [
-        os.path.join(project_dir, 'video'),
-        os.path.join(project_dir, 'videos'),
-        r'D:\Video\Animation\TV\[Anonymoose] 鉄腕アトム (DVD, 10bit)',
-    ]
-    for d in candidates:
+def _detect_video_dir(project_dir, explicit=None):
+    """Resolve video directory: explicit arg > project-local > None."""
+    if explicit and os.path.isdir(explicit):
+        return explicit
+    for d in [os.path.join(project_dir, 'video'), os.path.join(project_dir, 'videos')]:
         if os.path.isdir(d):
             return d
     return None
@@ -415,6 +413,8 @@ Examples:
                         help='Max episodes to process (0=all)')
     parser.add_argument('--start-from', default=None,
                         help='Start from this episode (e.g., EP050 or 50)')
+    parser.add_argument('--video-dir', default=None,
+                        help='Video directory (default: auto-detect from project/video, project/videos)')
     parser.add_argument('--skip-whisper', action='store_true', help='Skip Whisper pipeline')
     parser.add_argument('--resume', action='store_true',
                         help='Resume after AI review (skip scan, re-run nouns+apply)')
@@ -429,6 +429,9 @@ Examples:
 
     # Parse episode selection
     episodes = _parse_episodes(args.episodes) if args.episodes else None
+
+    # Resolve video directory (explicit arg > auto-detect)
+    video_dir = _detect_video_dir(project_dir, explicit=args.video_dir)
 
     # Detect partial vs full run (affects Layer 6 delivery scope)
     is_full_run = (args.limit == 0 and not args.episodes and not args.start_from
@@ -470,7 +473,8 @@ Examples:
     print(f'\n{"─"*40}', file=sys.stderr)
     print('  Layer 2/6: Semantic fix (translate/Whisper)', file=sys.stderr)
     print(f'{"─"*40}', file=sys.stderr)
-    processed = step_fix_episodes(project_dir, args.lang, mode, skip_whisper=args.skip_whisper,
+    processed = step_fix_episodes(project_dir, args.lang, mode, video_dir=video_dir,
+                                  skip_whisper=args.skip_whisper,
                                   episodes=episodes, limit=args.limit, start_from=args.start_from)
 
     # ── Layer 3: Proper nouns ──
@@ -499,7 +503,7 @@ Examples:
     print('  Layer 6/6: Human review delivery', file=sys.stderr)
     print(f'{"─"*40}', file=sys.stderr)
     step_deliver(project_dir, args.lang, processed_episodes=processed,
-                 is_full_run=is_full_run)
+                 is_full_run=is_full_run, video_dir=video_dir)
 
     # ── Clean ──
     step_clean(project_dir)
