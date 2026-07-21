@@ -76,13 +76,6 @@ class FixReport:
 # Fixer
 # ═══════════════════════════════════════════════════════════════
 
-# Whisper confidence thresholds (for AI review flagging)
-from lib.whisper_utils import (
-    AI_REVIEW_AVG_LOGPROB_THRESHOLD,
-    AI_REVIEW_COMPRESSION_THRESHOLD,
-    AI_REVIEW_NO_SPEECH_THRESHOLD,
-)
-
 # Default Whisper paths (can be overridden in constructor)
 DEFAULT_WHISPER_CLI = r'D:/software/video/whisper-cublas-12.4.0-bin-x64/whisper-cli.exe'
 DEFAULT_WHISPER_MODEL = r'D:/software/video/whisper-cublas-12.4.0-bin-x64/models/ggml-kotoba-whisper-v2.0-q5_0.bin'
@@ -452,64 +445,93 @@ class Fixer:
             if applied_fixes:
                 apply_fixes_to_srt(self._srt_path, applied_fixes)
 
-            # Step 4: Build report
+            # Step 4: Build report with readability-first auto_triage
             report = FixReport(source='whisper', tier=tier,
                               deleted=deleted_count)
 
-            # Separate by confidence
-            fixed = [f for f in fixes
-                     if f['confidence'] in ('high', 'retry')]
-            unfixed = [f for f in fixes
-                       if f['confidence'] == 'none']
+            from lib.whisper_utils import (
+                looks_like_plausible_japanese,
+                is_short_garbled_fragment,
+                is_proper_noun_pattern,
+            )
 
-            # Filter low-confidence for AI review
-            ai_review_items = []
-            for f in fixed:
-                alp = f.get('avg_logprob')
-                cr = f.get('compression_ratio')
-                nsp = f.get('no_speech_prob', -1.0)
-                if ((alp is not None and alp < AI_REVIEW_AVG_LOGPROB_THRESHOLD) or
-                    (cr is not None and cr > AI_REVIEW_COMPRESSION_THRESHOLD) or
-                    (nsp >= 0 and nsp > AI_REVIEW_NO_SPEECH_THRESHOLD)):
-                    ai_review_items.append(f)
+            auto_keep = []
+            ai_short_fragments = []   # → L2.5 AI上下文补全
+            proper_noun_items = []    # → L3 专名审查
+            human_items = []          # → L6 人工
 
-            # Layer 2: fixed with high confidence → ✅
-            high_conf = [f for f in fixed if f not in ai_review_items]
-            if high_conf:
+            for f in fixes:
+                confidence = f.get('confidence', 'none')
+                replacement = f.get('replacement', '')
+                original = f.get('original', '')
+
+                # Unfixable → human
+                if confidence == 'none' or not replacement:
+                    human_items.append(f)
+                    continue
+
+                # Readability-first: looks like Japanese → keep immediately
+                if looks_like_plausible_japanese(replacement, self.target_lang):
+                    auto_keep.append(f)
+                    continue
+
+                # Not readable → classify
+                if is_proper_noun_pattern(original):
+                    proper_noun_items.append(f)
+                elif is_short_garbled_fragment(replacement, self.target_lang):
+                    ai_short_fragments.append(f)
+                else:
+                    human_items.append(f)
+
+            # Layer 2: auto-kept (readable) → ✅
+            if auto_keep:
                 self._upsert_layer('2', [
                     {'ep': self.episode, 'time': f['start'],
                      'original': f.get('original', '')[:80],
                      'corrected': f.get('replacement', '')[:80],
                      'status': '✅'}
-                    for f in high_conf
+                    for f in auto_keep
                 ])
 
-            # Layer 2.5: low confidence → AI review
-            if ai_review_items:
+            # Layer 2.5: short fragments → AI completion
+            if ai_short_fragments:
                 self._upsert_layer('2.5', [
                     {'ep': self.episode, 'time': f['start'],
                      'original': f.get('original', '')[:80],
                      'corrected': f.get('replacement', '')[:80],
                      'status': '⬜'}
-                    for f in ai_review_items
+                    for f in ai_short_fragments
                 ])
 
-            # Layer 6: unfixable → human
-            if unfixed:
+            # Layer 3: proper noun pattern → noun pipeline
+            if proper_noun_items:
+                self._upsert_layer('3', [
+                    {'ep': self.episode, 'time': f['start'],
+                     'original': f.get('original', '')[:80],
+                     'corrected': f.get('replacement', '')[:80],
+                     'status': '⬜'}
+                    for f in proper_noun_items
+                ])
+
+            # Layer 6: unfixable/long-garbled → human
+            if human_items:
                 self._upsert_layer('6', [
                     {'ep': self.episode, 'time': f['start'],
                      'original': f.get('original', '')[:80],
                      'corrected': '',
                      'status': '⬜'}
-                    for f in unfixed
+                    for f in human_items
                 ])
 
-            report.applied = len(high_conf)
-            report.failed = len(unfixed)
-            report.ai_review = len(ai_review_items)
+            report.applied = len(auto_keep)
+            report.failed = len(human_items)
+            report.ai_review = len(ai_short_fragments)
+            report.details = []
 
-            print(f'[whisper] {report.applied} fixed, {report.ai_review} '
-                  f'AI review, {report.failed} unfixable', file=sys.stderr)
+            print(f'[whisper] {report.applied} auto-keep, '
+                  f'{report.ai_review} AI complete, '
+                  f'{len(proper_noun_items)} → L3, '
+                  f'{report.failed} → L6', file=sys.stderr)
 
             return report
 
@@ -682,6 +704,99 @@ class Fixer:
         print(f'[{self.episode}] review: {len(entries_md)} entries → '
               f'{checklist_path} ({extracted} clips, {skipped} skipped)',
               file=sys.stderr)
+        return checklist_path
+
+    # ═══════════════════════════════════════════════════════════
+    # Source 3b: AI short fragment completion (Layer 2.5)
+    # ═══════════════════════════════════════════════════════════
+
+    def review_ai(self, output_dir: str = None) -> str | None:
+        """Generate AI-review checklist for short garbled fragments.
+
+        Like review() but WITHOUT video clips — AI infers text from
+        surrounding dialogue context rather than listening to audio.
+        Reuses the same checklist markdown format so apply() works unchanged.
+
+        Reads Layer 2.5 ⬜ entries from the report.
+
+        Returns:
+            Path to ai_review.md, or None if nothing to review
+        """
+        out_dir = output_dir or self._review_dir
+
+        from utils.update_report import read_report
+        data = read_report(self._report_path)
+        entries = data.get('2.5', [])
+        pending = [e for e in entries
+                   if e.get('status') == '⬜' and e.get('ep') == self.episode]
+
+        if not pending:
+            print(f'[{self.episode}] review_ai: nothing pending',
+                  file=sys.stderr)
+            return None
+
+        cues = self._load_cues() or parse_srt(
+            self._srt_path, mark_garbled=False)
+
+        os.makedirs(out_dir, exist_ok=True)
+        today = datetime.now().strftime('%Y-%m-%d')
+        entries_md = []
+
+        for item in pending:
+            start_ts = item.get('time', '')
+            end_ts = item.get('end', '')
+            original = item.get('original', '')
+            corrected = item.get('corrected', '')
+
+            # Find adjacent clean cues for context
+            start_s = to_seconds(start_ts) if start_ts else 0
+            end_s = to_seconds(end_ts) if end_ts else start_s + 5.0
+
+            context_before = []
+            context_after = []
+            for cue in sorted(cues, key=lambda c: c['start_s']):
+                cs = cue.get('start_s', 0)
+                ct = cue.get('text', '').strip()
+                if ct and not cue.get('is_garbled'):
+                    if cs < start_s - 1:
+                        # Keep last 2 cues before target
+                        context_before.append(ct)
+                        if len(context_before) > 2:
+                            context_before.pop(0)
+                    elif cs > end_s + 1 and len(context_after) < 2:
+                        context_after.append(ct)
+
+            safe_start = start_ts.replace(':', '-').replace(',', '-').replace('.', '-')
+
+            entries_md.append(
+                f'{self.episode} | {start_ts} ~ {end_ts or "?"}\n'
+                f'来源: short garbled fragment\n'
+                f'残留: {original}\n'
+                f'Whisper尝试: {corrected}\n'
+                f'上文: {"  |  ".join(context_before) if context_before else "(无)"}\n'
+                f'下文: {"  |  ".join(context_after) if context_after else "(无)"}\n'
+                f'修正:\n'
+                f'\n---\n'
+            )
+
+        checklist_path = os.path.join(out_dir,
+                                       f'{self.episode}_ai_review.md')
+        header = (f'# AI 短碎片补全清单 — {self.episode}\n'
+                  f'> 导出: {today}\n'
+                  f'> 共 {len(entries_md)} 条\n'
+                  f'> version: 2\n'
+                  f'>\n'
+                  f'> **AI任务**：读上下文，推测正确台词填入「修正:」后。\n'
+                  f'> 不确定则留空，不要猜。格式与人工清单相同，apply() 自动应用。\n'
+                  f'>\n'
+                  f'---\n\n')
+        with open(checklist_path, 'w', encoding='utf-8') as f:
+            f.write(header)
+            for entry_md in entries_md:
+                f.write(entry_md)
+
+        print(f'[{self.episode}] review_ai: {len(entries_md)} entries → '
+              f'{checklist_path}', file=sys.stderr)
         return checklist_path
 
     def apply(self, checklist_path: str) -> int:

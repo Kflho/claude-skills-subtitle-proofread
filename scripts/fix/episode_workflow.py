@@ -562,17 +562,33 @@ def _run_pipeline(project_dir, episode, mode, args):
         elif step == 'diff':
             step_diff(project_dir, episode, scan_result, applied)
 
-    # Final summary
+    # Final summary + auto-generate checklists for unfixable items
     if not args.dry_run and 'apply' in steps:
         total_issues = len(scan_result.get('issues', [])) if scan_result else 0
-        n_fixed = len(applied) if isinstance(applied, list) else 0
-        n_ai = len(ai_review_items) if isinstance(ai_review_items, list) else 0
+        n_fixed = fixes.applied if hasattr(fixes, 'applied') else (len(applied) if isinstance(applied, list) else 0)
+        n_ai = fixes.ai_review if hasattr(fixes, 'ai_review') else (len(ai_review_items) if isinstance(ai_review_items, list) else 0)
+        n_failed = fixes.failed if hasattr(fixes, 'failed') else 0
+
+        # Auto-generate checklists for unfixable items
+        from fix.fix_orchestrator import Fixer
+        fixer = Fixer(episode, project_dir, video_dir=args.video_dir)
+
+        if n_ai > 0:
+            print(f'\n[auto] Generating AI review checklist for {n_ai} short fragments...')
+            fixer.review_ai()
+
+        if n_failed > 0:
+            print(f'\n[auto] Generating human review checklist for {n_failed} unfixable items...')
+            fixer.review()
+
         print()
         print('=' * 55)
-        print(f'  Done: {n_fixed} fixed, {n_ai} AI review, '
-              f'{total_issues - n_fixed} pending')
+        print(f'  Done: {n_fixed} auto-keep, {n_ai} AI complete, '
+              f'{n_failed} → L6 human')
         if n_ai:
-            print(f'  Next: python episode_workflow.py {episode} --step ai-review')
+            print(f'  AI review: reports/manual-review/{episode}_ai_review.md')
+        if n_failed:
+            print(f'  Human review: reports/manual-review/{episode}_checklist.md')
         print('=' * 55)
 
 

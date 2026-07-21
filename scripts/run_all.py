@@ -198,25 +198,94 @@ def step_nouns(project_dir, lang):
               '-o', os.path.join(project_dir, 'temp', 'scans', 'noun_check.json')],
              project_dir, desc='nouns')
 
-        # Check for AI review candidates
+        # Auto-classify unknown/mismatch candidates before AI review
         noun_json = load_json(os.path.join(project_dir, 'temp', 'scans', 'noun_check.json'))
         if noun_json:
             unknowns = [r for r in noun_json.get('results', [])
                        if r.get('status') in ('unknown', 'mismatch')]
-            results['ai_review_count'] = len(unknowns)
+            results['total_unknown'] = len(unknowns)
+
             if unknowns:
                 # Deduplicate and rank by frequency
                 from collections import Counter
                 cands = Counter(r['candidate'] for r in unknowns)
-                results['ai_candidates'] = [
-                    {'candidate': c, 'count': n}
-                    for c, n in cands.most_common(20)
+
+                # Run auto_classify to pre-filter
+                candidates_for_classify = [
+                    {'candidate': c, 'count': n,
+                     'context': next((r.get('context', '') for r in unknowns
+                                      if r['candidate'] == c), '')}
+                    for c, n in cands.most_common(50)
                 ]
-                # Save for AI review
-                ai_path = os.path.join(project_dir, 'temp', 'scans', 'ai_review_candidates.json')
-                with open(ai_path, 'w', encoding='utf-8') as f:
-                    json.dump(results['ai_candidates'], f, ensure_ascii=False, indent=2)
-                results['ai_review_file'] = ai_path
+
+                classified_path = os.path.join(
+                    project_dir, 'temp', 'scans', 'noun_classified.json')
+                _run([
+                    'python',
+                    os.path.join(_SCRIPT_DIR, 'nouns', 'auto_classify.py'),
+                    '--candidates',
+                    f'"{os.path.join(project_dir, "temp", "scans", "noun_candidates.json")}"',
+                    '--lang', lang,
+                    '--output', f'"{classified_path}"',
+                ], project_dir, desc='auto_classify')
+
+                # Save candidates for auto_classify
+                cand_path = os.path.join(project_dir, 'temp', 'scans',
+                                        'noun_candidates.json')
+                os.makedirs(os.path.dirname(cand_path), exist_ok=True)
+                with open(cand_path, 'w', encoding='utf-8') as f:
+                    json.dump(candidates_for_classify, f, ensure_ascii=False, indent=2)
+
+                # Run auto_classify inline (don't rely on subprocess)
+                try:
+                    from nouns.auto_classify import classify_batch
+                    classified = classify_batch(candidates_for_classify, lang=lang)
+
+                    # Accepted → add to fixes
+                    if classified['accepted']:
+                        accepted_fixes = [
+                            {'action': 'replace_global',
+                             'original': c['candidate'],
+                             'replacement': c['candidate'],
+                             'note': f'auto_classify: {c["reason"]}'}
+                            for c in classified['accepted']
+                        ]
+                        fixes_path = os.path.join(
+                            project_dir, 'temp', 'scans', 'noun_accepted_fixes.json')
+                        with open(fixes_path, 'w', encoding='utf-8') as f:
+                            json.dump(accepted_fixes, f, ensure_ascii=False, indent=2)
+                        # Append to proper-nouns.md
+                        _append_to_glossary(project_dir, classified['accepted'])
+
+                    # Rejected → log only
+                    if classified['rejected']:
+                        results['auto_rejected'] = len(classified['rejected'])
+
+                    # Needs AI → save for AI review
+                    if classified['needs_ai']:
+                        results['ai_review_count'] = len(classified['needs_ai'])
+                        results['ai_candidates'] = [
+                            {'candidate': c['candidate'], 'count': c.get('count', 1),
+                             'reason': c.get('reason', '')}
+                            for c in classified['needs_ai']
+                        ]
+                        ai_path = os.path.join(
+                            project_dir, 'temp', 'scans', 'ai_review_candidates.json')
+                        with open(ai_path, 'w', encoding='utf-8') as f:
+                            json.dump(results['ai_candidates'], f, ensure_ascii=False, indent=2)
+                        results['ai_review_file'] = ai_path
+                except ImportError:
+                    # Fallback: if auto_classify not available, all go to AI
+                    results['ai_review_count'] = len(unknowns)
+                    results['ai_candidates'] = [
+                        {'candidate': c, 'count': n}
+                        for c, n in cands.most_common(20)
+                    ]
+                    ai_path = os.path.join(
+                        project_dir, 'temp', 'scans', 'ai_review_candidates.json')
+                    with open(ai_path, 'w', encoding='utf-8') as f:
+                        json.dump(results['ai_candidates'], f, ensure_ascii=False, indent=2)
+                    results['ai_review_file'] = ai_path
     else:
         print('\n[nouns] No proper-nouns.md — skipping noun table check.', file=sys.stderr)
         print('[nouns] Run unified_scanner --build-glossary first to generate.', file=sys.stderr)
@@ -276,6 +345,38 @@ def step_ass_repair(project_dir):
     repair = os.path.join(_SCRIPT_DIR, 'ass', 'ass_repair.py')
     return _run(['python', repair, '--target-dir', f'"{target}"', '--check', 'all'],
                 project_dir, desc='ass')
+
+
+def _append_to_glossary(project_dir, accepted_candidates):
+    """Append auto-accepted proper nouns to the glossary."""
+    glossary_path = os.path.join(project_dir, 'reports', 'proper-nouns.md')
+    if not accepted_candidates:
+        return
+
+    # Read existing entries
+    existing_names = set()
+    if os.path.exists(glossary_path):
+        with open(glossary_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                # Match table rows: | アトム | 866 | ... |
+                m = re.match(r'\|\s*([^\s|]+)\s*\|', line)
+                if m:
+                    existing_names.add(m.group(1).strip())
+
+    new_entries = []
+    for c in accepted_candidates:
+        name = c.get('candidate', '')
+        if name and name not in existing_names:
+            count = c.get('count', 1)
+            new_entries.append(f'| {name} | {count} | — |')
+            existing_names.add(name)
+
+    if new_entries:
+        with open(glossary_path, 'a', encoding='utf-8') as f:
+            for entry in new_entries:
+                f.write(entry + '\n')
+        print(f'[glossary] {len(new_entries)} new proper nouns appended',
+              file=sys.stderr)
 
 
 def step_clean(project_dir):
@@ -368,31 +469,43 @@ def _detect_video_dir(project_dir, explicit=None):
 # ── AI Review flagging ──
 
 def print_ai_review_notice(noun_results, project_dir, lang):
-    """Print AI review instructions if candidates found."""
+    """Print AI review instructions if candidates found after auto_classify."""
     count = noun_results.get('ai_review_count', 0)
+    total = noun_results.get('total_unknown', 0)
+    auto_ok = noun_results.get('auto_accepted', 0)
+    auto_rej = noun_results.get('auto_rejected', 0)
+
     if count == 0:
-        print('\n[AI review] All proper nouns matched — nothing to review.', file=sys.stderr)
+        if total > 0:
+            print(f'\n[AI review] {total} candidates → auto_classify handled all '
+                  f'({auto_ok} accepted, {auto_rej} rejected). '
+                  f'Nothing needs AI review.', file=sys.stderr)
+        else:
+            print('\n[AI review] All proper nouns matched — nothing to review.',
+                  file=sys.stderr)
         return
 
     candidates = noun_results.get('ai_candidates', [])
     ai_file = noun_results.get('ai_review_file', '')
 
     print(f'\n{"="*60}', file=sys.stderr)
-    print(f'  AI REVIEW NEEDED: {count} unknown proper noun candidates', file=sys.stderr)
+    print(f'  AI REVIEW NEEDED: {count} proper noun candidates '
+          f'(out of {total} total, {auto_ok} auto-accepted, {auto_rej} auto-rejected)',
+          file=sys.stderr)
     print(f'{"="*60}', file=sys.stderr)
     print(f'\n  Candidates saved to: {ai_file}', file=sys.stderr)
-    print(f'\n  Top {len(candidates)} candidates:', file=sys.stderr)
+    print(f'\n  Candidates:', file=sys.stderr)
     for c in candidates:
-        print(f'    {c["candidate"]} ({c["count"]}x)', file=sys.stderr)
+        print(f'    {c["candidate"]} ({c["count"]}x) — {c.get("reason", "")}',
+              file=sys.stderr)
 
-    print(f'\n  To complete AI review:', file=sys.stderr)
-    print(f'  1. Claude reads {ai_file}', file=sys.stderr)
-    print(f'  2. For each candidate, determine:', file=sys.stderr)
-    print(f'     - Is it a real proper noun? If not → add to exclude list', file=sys.stderr)
-    print(f'     - What is the canonical form?', file=sys.stderr)
-    print(f'  3. Output fixes to: temp/scans/ai_review_fixes.json', file=sys.stderr)
-    print(f'     Format: [{{"action":"replace_global","original":"...","replacement":"..."}},...]', file=sys.stderr)
-    print(f'  4. New proper nouns → append to reports/proper-nouns.md', file=sys.stderr)
+    print(f'\n  AI任务（只审候选项，不读名词表全文）：', file=sys.stderr)
+    print(f'  1. 判断每个候选项是否为专有名词', file=sys.stderr)
+    print(f'  2. 是 → 给出规范形式', file=sys.stderr)
+    print(f'  3. 否 → 标记排除', file=sys.stderr)
+    print(f'  4. 输出到: temp/scans/ai_review_fixes.json', file=sys.stderr)
+    print(f'     Format: [{{"action":"replace_global","original":"...","replacement":"..."}},...]',
+          file=sys.stderr)
     print(f'  5. Re-run: python run_all.py --lang {lang} --resume', file=sys.stderr)
     print(f'', file=sys.stderr)
 
@@ -496,6 +609,7 @@ Examples:
 
     if args.dry_run:
         print('\n[DRY RUN] — no files will be modified\n', file=sys.stderr)
+        return
 
     # ── Fast path: AI review apply only ──
     if args.apply_ai_review:

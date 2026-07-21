@@ -205,8 +205,14 @@ def vad_delete_nonspeech(audio_path, cues, srt_path):
             continue
 
         # Tier B: text cues — delete only if NO speech at all AND short
+        # Safety filter: if text looks like readable dialogue, keep it even
+        # if VAD says no speech (VAD can miss short/spoken lines).
         has_speech = cue_overlaps_speech(c, speech_segs, min_overlap_s=0.0)
         if not has_speech:
+            from lib.whisper_utils import looks_like_plausible_japanese
+            if looks_like_plausible_japanese(text):
+                kept.append(c)
+                continue
             cue_dur = c['end_s'] - c['start_s']
             if cue_dur < 3.0:
                 deleted.append(c)

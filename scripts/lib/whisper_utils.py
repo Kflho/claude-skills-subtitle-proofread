@@ -469,7 +469,7 @@ def vad_filter_audio(input_audio, output_audio, silence_db=-30, min_silence=0.8,
         ['ffmpeg', '-i', input_audio,
          '-af', f'silencedetect=n={silence_db}dB:d={min_silence}',
          '-f', 'null', '-'],
-        capture_output=True, text=True)
+        capture_output=True, text=True, encoding='utf-8', errors='replace')
 
     dur = get_audio_duration(input_audio)
 
@@ -567,7 +567,7 @@ def get_audio_duration(audio_path):
     probe = subprocess.run(
         ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration',
          '-of', 'csv=p=0', audio_path],
-        capture_output=True, text=True)
+        capture_output=True, text=True, encoding='utf-8', errors='replace')
     return float(probe.stdout.strip()) if probe.stdout.strip() else None
 
 
@@ -600,7 +600,8 @@ def separate_vocals(audio_path, output_dir=None, python_exe=None):
         proc = subprocess.run(
             [python_exe, '-m', 'demucs', '--two-stems=vocals',
              '-o', out_dir, audio_path],
-            capture_output=True, text=True, timeout=600)
+            capture_output=True, text=True, encoding='utf-8', errors='replace',
+            timeout=600)
     except (subprocess.TimeoutExpired, FileNotFoundError):
         print('⚠ demucs 不可用或超时，跳过人声分离', file=sys.stderr)
         return audio_path
@@ -630,3 +631,68 @@ def is_valid_japanese(text):
     has_kanji = bool(re.search(r'[一-鿿]', text))
     is_pure_romaji = bool(re.fullmatch(r'[a-zA-Z\s\d.,!?\'\"\-]+', text))
     return (has_kana or has_kanji) and not is_pure_romaji
+
+
+def looks_like_plausible_japanese(text, target_lang='ja'):
+    """可读性优先判断 — 文本是否像一句可读的目标语言。
+
+    比 classify_garbled_text 更宽松：只要看起来像正常台词就通过。
+    不要求完美正确 — Whisper 听错一两个音但仍可读的句子也放行。
+
+    日语条件：含假名或汉字 + 不含拉丁字母 + 长度≥3 + 非纯数字/符号
+    中文条件：含汉字 + 不含假名 + 含拉丁也算可读（如英文名）
+
+    Returns True if the text looks like readable target-language content.
+    """
+    text = text.strip()
+    if not text or len(text) < 3:
+        return False
+
+    has_kana = bool(re.search(r'[぀-ヿ]', text))
+    has_kanji = bool(re.search(r'[一-鿿]', text))
+    has_latin = bool(re.search(r'[a-zA-Z]', text))
+    has_cyrillic = bool(re.search(r'[А-яЁё]', text))
+    has_hanzi = bool(re.search(r'[一-鿿㐀-䶿]', text))
+
+    if target_lang == 'zh':
+        # 中文：有汉字即通过（允许拉丁共存，如英文名）
+        if has_hanzi and not has_cyrillic:
+            return True
+        # 纯拉丁但在中文语境中也可能是正常的（如"OK"）
+        if has_latin and not has_cyrillic and len(text) <= 10:
+            return True
+        return False
+    else:
+        # 日语：有假名或汉字 + 无拉丁 + 无西里尔
+        if (has_kana or has_kanji) and not has_latin and not has_cyrillic:
+            return True
+        # 纯假名也算（语气词如「ああ」「えっ」）
+        if has_kana and not has_latin and not has_cyrillic:
+            return True
+        return False
+
+
+def is_short_garbled_fragment(text, target_lang='ja'):
+    """判断是否为短碎片（AI 可根据上下文补全）。"""
+    text = text.strip()
+    if not text:
+        return False
+    if target_lang == 'ja':
+        latin_chars = re.findall(r'[a-zA-Z]', text)
+        return len(latin_chars) <= 5 and len(text) <= 15
+    else:
+        return len(text) <= 8 and not re.search(r'[一-鿿]', text)
+
+
+def is_proper_noun_pattern(text):
+    """判断文本是否符合专名模式（片假名/汉字名 → 应送 L3 而非 AI 补全）。"""
+    # 纯片假名 → 可能是人名/角色名
+    if re.fullmatch(r'[゠-ヿー]{2,}', text):
+        return True
+    # 汉字组合 → 可能是日本人名
+    if re.fullmatch(r'[一-鿿]{2,4}', text):
+        return True
+    # 片假名+拉丁混合 → 可能是外来语专名
+    if re.search(r'[゠-ヿ]', text) and re.search(r'[a-zA-Z]', text):
+        return True
+    return False

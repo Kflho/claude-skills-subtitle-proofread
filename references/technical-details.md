@@ -270,9 +270,9 @@ Tier 1/2 修复时，Whisper 置信度从 whisper segment **透传到 fix 条目
 ```
 ## 第1层: 字符扫描
 ## 第2层: 语义修复
-## 第2.5层: AI置信度审查
+## 第2.5层: AI短碎片补全
 ## 第3层: 专名统一
-## 第3.5层: AI专名抽样审查
+## 第3.5层: AI专名审查
 ## 第4层: 批量修复
 ## 第5层: 格式修补 [ASS only]
 ## 第6层: 人工交付
@@ -296,33 +296,30 @@ update_entry_status(path, step='6', ep=..., ...)  # 单条状态更新
 
 ## 10. AI 审查层
 
-### L2.5: AI 置信度审查
+### L2.5: AI 短碎片补全
 
-**数据流**：`step_apply()` → 筛选低置信度 fixed 条目 → `temp/scans/{EP}_ai_review.json`
+**触发**：VAD有人声 + Whisper输出不可读 + 短碎片(≤5拉丁字符) + 非专名。
 
-**AI 审查条目格式**：
-```json
-{
-  "start": "00:02:00.490",
-  "original": "garbled text",
-  "replacement": "Whisper's guess",
-  "avg_logprob": -1.8,
-  "flag_reasons": ["avg_logprob=-1.80"],
-  "context_before": "previous cue text",
-  "context_after": "next cue text"
-}
+**数据流**：`fix_by_whisper()` → auto_triage → `looks_like_plausible_japanese()` → 短碎片 → `review_ai()` → checklist
+
+**AI 审查条目格式**（复用现有 checklist，`apply()` 自动解析）：
+```markdown
+EP003 | 00:25:32.160 ~
+来源: short garbled fragment
+残留: pa n
+Whisper尝试: pants
+上文: xxx  |  yyy
+下文: zzz
+修正:
 ```
 
-**审查方式**：`python episode_workflow.py EP064 --step ai-review`
+AI 看上下文推测，填入「修正:」。不确定则留空。
 
-三种结论：
-- ✅ 保留 → 写入 L2 报告
-- ✏️ 修正 → 给出文本，走 apply_fixes
-- ⬜ 升级 → L6 人工交付
+### L3.5: AI 专名审查
 
-### L3.5: AI 专名抽样审查
+noun_checker → auto_classify（Jamdict+规则）→ NEEDS_AI 候选项 → AI 判断 → fixes.json 或 proper-nouns.md。
 
-noun_checker 输出中 `unknown/mismatch > 0` → 抽样 top 20 高频候选 → AI 判断是专名还是普通词汇 → fixes.json 或 proper-nouns.md。
+**AI 不读名词表全文**，只收候选项 + 所在 cue 上下文。
 
 ---
 
@@ -330,11 +327,13 @@ noun_checker 输出中 `unknown/mismatch > 0` → 抽样 top 20 高频候选 →
 
 ### fix_orchestrator.py (Fixer)
 
-`Fixer` 类统一了原来的 Layer 2（Whisper 修复）和 Layer 6（人工审查），三级降级：
+`Fixer` 类统一了 Layer 2（Whisper 修复）、Layer 2.5（AI 短碎片补全）和 Layer 6（人工审查），四级降级：
 
-1. **参考字幕翻译对照**（`fix_by_reference`）— 有参考字幕时优先，比较+采纳
-2. **Whisper 人声转录**（`fix_by_whisper`）— 提取音频（上下文包裹）+ Tier 1/2 转录
-3. **人工审查**（`review` + `apply`）— checklist 生成 + 人工修正应用
+1. **参考字幕翻译对照**（`fix_by_reference`）— 有参考字幕时优先
+2. **Whisper 人声转录**（`fix_by_whisper`）— VAD + Tier 1/2 转录
+3. **auto_triage 分诊**（嵌入 `fix_by_whisper`）— 可读→保留/短碎片→AI补/专名→L3/长乱码→L6
+4. **AI 短碎片补全**（`review_ai`）— 无视频片段，AI 看上下文推测
+5. **人工审查**（`review` + `apply`）— checklist + 视频片段 + 人工修正
 
 所有修正通过统一的 SRT 写入 + 报告更新路径。SRT 是唯一真相源。
 

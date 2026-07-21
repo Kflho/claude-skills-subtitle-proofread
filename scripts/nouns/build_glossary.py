@@ -96,14 +96,42 @@ def group_katakana_variants(terms):
 # Main processing
 # ═══════════════════════════════════════════════════════════════
 
-def build_glossary(term_freq, min_freq=_MIN_FREQ, lang='ja'):
+def build_glossary(term_freq, min_freq=_MIN_FREQ, lang='ja', use_jamdict=True):
     """Process raw term frequencies into structured glossary.
 
     Args:
         lang: 'ja' = katakana + kanji glossary; 'zh' = hanzi only (no katakana)
+        use_jamdict: if True, use Jamdict to filter common words (non-proper-nouns)
 
     Returns dict with keys: characters, places, organizations, terms, kanji_compounds.
     """
+    # ── Jamdict pre-filter (if available) ──
+    _jam = None
+    if use_jamdict:
+        try:
+            from jamdict import Jamdict
+            _jam = Jamdict()
+        except (ImportError, Exception):
+            pass
+
+    def _is_common_word(word):
+        """Check if a word is a common (non-proper-noun) entry in JMdict."""
+        if not _jam:
+            return False
+        try:
+            result = _jam.lookup(word.strip())
+            # In JMdict as common word AND NOT in JMnedict as proper name
+            return len(result.entries) > 0 and len(result.names) == 0
+        except Exception:
+            return False
+
+    # Non-word patterns to skip
+    _NON_WORD_RE = re.compile(
+        r'^[-ー―]{2,}$|'           # long dashes
+        r'^(.)\1{2,}$|'             # same char repeated 3+
+        r'^(ハァ|フー|ウー|アー|エー|オー|へへ|ふふ)+$'  # breathing/filler
+    )
+
     # Separate katakana and kanji, filter noise
     katakana_terms = []
     kanji_terms = []
@@ -112,12 +140,20 @@ def build_glossary(term_freq, min_freq=_MIN_FREQ, lang='ja'):
         if count < min_freq:
             continue
 
-        is_katakana = bool(re.search(r'[゠-ヿ]', word))
-        is_kanji = bool(re.search(r'[一-鿿]', word))
+        # Skip non-word patterns
+        if _NON_WORD_RE.match(word):
+            continue
 
         # Skip OP/ED bracket labels
         if word in _BRACKET_LABEL_WORDS:
             continue
+
+        # Skip common dictionary words (not proper nouns)
+        if _is_common_word(word):
+            continue
+
+        is_katakana = bool(re.search(r'[゠-ヿ]', word))
+        is_kanji = bool(re.search(r'[一-鿿]', word))
 
         # Katakana filtering: only for Japanese
         if lang == 'ja' and is_katakana and not is_kanji:
