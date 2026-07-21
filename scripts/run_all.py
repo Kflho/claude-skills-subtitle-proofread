@@ -157,7 +157,7 @@ def step_fix_episodes(project_dir, lang, mode, skip_whisper=False,
 
     ep_workflow = os.path.join(_SCRIPT_DIR, '02_fix', 'episode_workflow.py')
     for i, ep in enumerate(selected):
-        cmd = ['python', ep_workflow, ep, '--mode', mode, '--no-backup',
+        cmd = ['python', ep_workflow, ep, '--mode', mode,
                f'--project-dir', f'"{project_dir}"']
         if skip_whisper:
             cmd.append('--skip-whisper')

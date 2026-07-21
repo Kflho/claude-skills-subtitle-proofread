@@ -66,7 +66,7 @@ import os
 from collections import defaultdict
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_ROOT_DIR = os.path.dirname(os.path.dirname(_SCRIPT_DIR))  # scripts/
+_ROOT_DIR = os.path.dirname(_SCRIPT_DIR)  # scripts/
 sys.path.insert(0, _ROOT_DIR)
 
 from lib.whisper_utils import setup_windows_utf8, extract_ep_number
