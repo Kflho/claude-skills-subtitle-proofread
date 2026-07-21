@@ -109,15 +109,15 @@ def classify_candidate(candidate_text, context_cue='', episode_count=1, lang='ja
         return {'verdict': 'REJECT', 'reason': 'latin-only (not JP proper noun)'}
 
     # ── Jamdict check (if available) ──
+    # Aggressive: in JMdict → common word → REJECT (ignore JMnedict).
+    # User only cares about character names & anime-specific concepts.
 
-    # If it's a known common word → REJECT
+    # If it's a known common word → REJECT unconditionally
     if _in_jamdict_common(text):
-        # But also check if it could be both (e.g., はな = flower/nose AND a name)
-        if not _in_jamdict_names(text):
-            return {'verdict': 'REJECT',
-                    'reason': 'in JMdict (common word), not in JMnedict'}
+        return {'verdict': 'REJECT',
+                'reason': 'in JMdict (common word)'}
 
-    # If in proper names dictionary → ACCEPT
+    # If in proper names dictionary (and NOT in JMdict) → ACCEPT
     if _in_jamdict_names(text):
         return {'verdict': 'ACCEPT', 'reason': 'in JMnedict (proper name dictionary)'}
 

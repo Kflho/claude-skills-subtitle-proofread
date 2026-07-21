@@ -111,26 +111,23 @@ def build_glossary(term_freq, min_freq=_MIN_FREQ, lang='ja', use_jamdict=True,
     def _is_common_word(word):
         """Check if a word is a common (non-proper-noun) entry.
 
-        Uses Jamdict (JMdict + JMnedict) when available.
-        Falls back to COMMON_KANJI frozenset + COMMON_KATAKANA.
+        Aggressive strategy: if it's in JMdict at all → common word → reject.
+        The user only cares about character names and anime-specific concepts
+        (not real-world terms like 日本/東京/火星).
 
-        IMPORTANT: COMMON_KANJI is always consulted as a HARD override.
-        Many common Japanese words (世紀, 戦争, 宝石, …) are in BOTH
-        JMdict and JMnedict (as rare surnames/place names).  Without the
-        frozenset override, they would leak into the proper-noun glossary.
+        COMMON_KANJI/COMMON_KATAKANA serve as hard override + fallback when
+        Jamdict is unavailable.
         """
-        # Hard override: frozensets always apply regardless of Jamdict
+        # Hard override: frozensets always apply
         if word in _COMMON_KANJI or word in _COMMON_KATAKANA:
             return True
 
-        # Jamdict path
+        # Jamdict: in JMdict → common word (ignore JMnedict entirely)
         if _jam:
             try:
                 result = _jam.lookup(word.strip())
-                # In JMdict as common word AND NOT in JMnedict as proper name
-                if len(result.entries) > 0 and len(result.names) == 0:
+                if len(result.entries) > 0:
                     return True
-                return False
             except Exception:
                 pass  # fall through
 
