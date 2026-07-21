@@ -26,7 +26,10 @@ L2 错误修复  → Fixer: 参考字幕 → Whisper → auto_triage
                 ├─ 专名模式 → L3
                 └─ 长乱码 → L6人工
 L2.5 AI补全 → VAD有人声+不可读+短碎片 → AI上下文推测
-L3 专名统一  → noun_checker + auto_classify (Jamdict+规则)
+L3 专名统一  → build_glossary → auto_clean_glossary → noun_checker + auto_classify
+                ├─ 激进策略: 在 JMdict 就删（不管 JMnedict）
+                ├─ 启发式: 动词词干/时间碎片/修饰语片段 → 自动过滤
+                └─ 只保留人名 + 动画特有概念
 L3.5 AI审查 → auto_classify拿不准的 → AI判断
 L4 批量修复  → apply_fixes: 繁→简 + 翻译腔 + fixes
 L5 格式修补  → ASS only, 本项目跳过
@@ -53,6 +56,11 @@ python scripts/run_all.py --lang ja                    # 一键全流程
 python scripts/run_all.py --lang ja --limit 5           # 前5集
 python scripts/run_all.py --lang ja -e EP001-EP010      # 指定范围
 python scripts/run_all.py --lang ja --apply-checklist   # 应用人工审查
+
+# 专名表维护
+python nouns/build_glossary.py --findings temp/scans/findings.json -o reports/proper-nouns.md
+python nouns/auto_clean_glossary.py --glossary reports/proper-nouns.md          # dry-run
+python nouns/auto_clean_glossary.py --glossary reports/proper-nouns.md --apply  # 自动清理
 ```
 
 ## 项目感知

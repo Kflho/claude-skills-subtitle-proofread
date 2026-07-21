@@ -295,7 +295,7 @@ def format_glossary_markdown(glossary):
         lines.append('## 汉字复合词\n')
         lines.append('| 日语 | 出现次数 |')
         lines.append('|------|---------|')
-        for k in kanji[:60]:
+        for k in kanji:
             lines.append(f'| {k["word"]} | {k["freq"]} |')
         lines.append('')
 

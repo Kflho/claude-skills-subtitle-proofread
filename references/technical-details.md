@@ -325,26 +325,53 @@ Tier 1/2 修复时，Whisper 置信度从 whisper segment **透传到 fix 条目
 
 ## 7. 专名统一
 
-### noun_checker.py
+### 数据流（改进后）
 
-语境感知匹配，避免误报：
+```
+build_glossary.py                    ← 从 findings.json 生成词表
+  │  JMdict 激进过滤: 在 JMdict → 普通词 → 删 (不管 JMnedict)
+  │  COMMON_KANJI frozenset: 硬覆盖 (fallback + 已知常见词)
+  └─→ proper-nouns.md
 
-- **敬称语境**：`〜さん/くん/様/ちゃん` → 大概率是专名
-- **呼唤语境**：`おい〜`、`〜!` → 可能是角色名
-- **介绍语境**：`〜です/だ/である` → 可能是人名
-- **排除**：常用外来语不触发（`ゲーム`、`ロボット` 等）
+auto_clean_glossary.py               ← 自动清理漏网之鱼
+  │  JMdict lookup + 启发式规则:
+  │    · 动词词干 (着替/見捨/怒鳴…)
+  │    · 时间碎片 (時間後/日前/万年後…)
+  │    · 修饰语片段 (一番大/全部聞…)
+  │    · 代词/后缀片段 (僕行/君僕…)
+  │  KEEP: 姓氏/地名/动画特有概念 → 不误删
+  └─→ COMMON_KANJI 自动扩充 → 重新生成 clean proper-nouns.md
 
-跨集 OP/ED 一致性（`--oped`）：
-1. 按时码分桶（OP/ED 固定时间窗口）
-2. 相同位置的文本变体 → 发现拼写差异
-3. 最高频形式作为规范 → 其他集统一
+noun_checker.py                      ← 用 clean 词表扫描 SRT
+auto_classify.py                     ← ACCEPT/REJECT/NEEDS_AI
+```
 
 ### build_glossary.py
 
-从 `findings.json` 的术语频率数据自动生成 proper-nouns.md：
-- 片假名序列 → 候选术语
-- 跨集频率统计 → 去重排序
-- 智能分组（同一词根的变体合并）
+过滤策略（三级）：
+
+| 层级 | 机制 | 说明 |
+|------|------|------|
+| Tier 1 | `COMMON_KANJI` / `COMMON_KATAKANA` frozensets | 硬覆盖，始终生效 |
+| Tier 2 | Jamdict (JMdict) | 在 JMdict → 普通词 → 删 |
+| Tier 3 | 启发式模式匹配 | 动词词干/时间碎片/修饰语/代词片段 → 删 |
+
+激进策略原理：
+- JMnedict 包含大量稀有姓氏（如「世紀」「戦争」也是姓）
+- 用户只关心中人名 + 动画特有概念（万馬力/電子相撲…）
+- 日本/東京/火星 等现实概念也不需要追踪
+- → 在 JMdict 就删，不查 JMnedict
+
+### auto_clean_glossary.py
+
+自动化原本需要 3-5 轮人工肉眼扫描的「审表→加 COMMON_KANJI→重新生成」循环。
+
+```bash
+python nouns/auto_clean_glossary.py --glossary reports/proper-nouns.md          # dry-run
+python nouns/auto_clean_glossary.py --glossary reports/proper-nouns.md --apply  # 自动清理
+```
+
+### noun_checker.py
 
 ---
 
