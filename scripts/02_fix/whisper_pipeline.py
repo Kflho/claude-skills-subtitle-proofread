@@ -353,6 +353,40 @@ def add_placeholder_cues(gaps, cues, srt_path):
 # Tier 1: segment-based fix
 # ═══════════════════════════════════════════════════════════════
 
+def _is_context_text(whisper_text, left_text, right_text, threshold=0.5):
+    """Check if whisper output is likely a transcription of a known context cue.
+
+    When cluster audio is expanded to include adjacent clean cues (left/right),
+    Whisper will transcribe them. This function detects those context
+    transcriptions by character overlap ratio, preventing them from being
+    incorrectly matched to garbled cues in Round 2 (wide-window retry).
+
+    Args:
+        whisper_text: whisper segment text
+        left_text: known text of the clean cue before the garbled cluster
+        right_text: known text of the clean cue after the garbled cluster
+        threshold: minimum character overlap ratio to classify as context
+
+    Returns:
+        True if whisper_text is likely a transcription of left or right context
+    """
+    if not left_text and not right_text:
+        return False
+    wh_chars = set(whisper_text.replace(' ', ''))
+    if not wh_chars:
+        return False
+    for ctx_text in (left_text, right_text):
+        if not ctx_text:
+            continue
+        ctx_chars = set(ctx_text.replace(' ', ''))
+        if not ctx_chars:
+            continue
+        overlap = len(wh_chars & ctx_chars) / len(wh_chars)
+        if overlap >= threshold:
+            return True
+    return False
+
+
 def build_clusters(cues):
     """Cluster garbled cues by proximity, expand to clean cue boundaries."""
     garbled_cues = [c for c in cues if c.get('is_garbled')]
@@ -379,15 +413,19 @@ def build_clusters(cues):
         right = next((cues[k] for k in range(right_idx + 1, len(cues))
                       if not cues[k].get('is_garbled') and cues[k]['text']), None)
 
-        ss = left['end_s'] if left else max(0, first['start_s'] - GAP_SEC)
-        es = right['start_s'] if right else last['end_s'] + GAP_SEC
+        # Expand to include adjacent clean cues as acoustic context.
+        # Using left['start_s'] (not left['end_s']) means Whisper hears
+        # the full preceding sentence before attempting the garbled one.
+        ss = left['start_s'] if left else max(0, first['start_s'] - GAP_SEC)
+        es = right['end_s'] if right else last['end_s'] + GAP_SEC
         ss, es = min(ss, first['start_s']), max(es, last['end_s'])
 
         clusters.append({
             'ss': ss, 'es': es, 'dur': es - ss,
             'garbled': g_group,
-            'left_text': left['text'][:60] if left else '(无)',
-            'right_text': right['text'][:60] if right else '(无)',
+            # Full text stored for _is_context_text() filtering in match_whisper_to_cues
+            'left_text': left['text'] if left else '',
+            'right_text': right['text'] if right else '',
         })
     return clusters
 
@@ -424,6 +462,13 @@ def match_whisper_to_cues(whisper_segs, cluster, offset):
 
     # Round 2: ±3s wide window for missed cues
     for wh in whisper_segs:
+        # Skip whisper segments that are transcribing known context cues
+        # (the clean left/right sentences we added for acoustic context).
+        # Without this guard, a context transcription could be incorrectly
+        # matched to a garbled cue when Whisper fails to transcribe it.
+        if _is_context_text(wh['text'], cluster.get('left_text', ''),
+                            cluster.get('right_text', '')):
+            continue
         wh_abs_s = ss + (wh['start_s'] - offset) - 3
         wh_abs_e = ss + (wh.get('end_s', wh['start_s'] + 8) - offset) + 3
         if wh_abs_e <= wh_abs_s:

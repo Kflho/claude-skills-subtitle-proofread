@@ -1,5 +1,20 @@
 #!/usr/bin/env python3
-"""Extract video clips for manual review of unfixable subtitle issues.
+"""DEPRECATED — functionality merged into fix_orchestrator.py (Layer 2).
+
+This module is kept for backward compatibility. All new code should use:
+
+  from fix_orchestrator import Fixer
+
+  fixer = Fixer('EP002', project_dir)
+  fixer.review()   # generates checklist + video clips
+  fixer.apply()    # applies human corrections from checklist
+
+See scripts/02_fix/fix_orchestrator.py for the unified implementation.
+
+Original docstring follows:
+---
+
+Extract video clips for manual review of unfixable subtitle issues.
 
 Collects unfixable items from Whisper (confidence=none), report layer 6 (人工交付),
 and noun_checker unresolved items → extracts short video clips via ffmpeg →

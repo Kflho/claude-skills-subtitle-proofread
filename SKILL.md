@@ -50,18 +50,23 @@ scripts/
 
 1. **所有语言走相同工作流。** 脚本通过 `--lang ja|zh` 自适应。
 2. **ASS 格式额外修补。** SRT 跳过，ASS 运行 `ass_repair.py --check all`。
+3. **修复优先级（逐级降级，不可配置）。**
+   1. 参考字幕翻译对照（最可靠）
+   2. Whisper 人声转录（参考不可用时或参考无法匹配时）
+   3. 人工审查修正（前两级都无法修复时）
+4. **所有修正走同一条嵌入路径。** Whisper/翻译/人工 — 统一的 SRT 写入 + 报告更新。
+5. **幂等。** 已修复的 cue → 纯目标语言 → classify_garbled_text → clean → 跳过。
 
-## 7 层工作流
+## 6 层工作流
 
 ```
 第1层   字符扫描     unified_scanner → VAD 删非人声 cue → 乱码/重复检测
-第2层   语义修复     episode_workflow → Whisper Tier 1 (拼接) / Tier 2 (整集)
+第2层   错误修复     Fixer.run_auto() → 参考字幕 → Whisper → 人工（逐级降级）
 第2.5层 AI置信度审查 筛选 Whisper 低置信度条目 → AI 保留/修正/升级
 第3层   专名统一     noun_checker → 语境感知匹配 + 跨集 OP/ED 一致性
 第3.5层 AI专名审查   unknown/mismatch → 抽样 top 20 → AI 判断 → fixes 或词表
 第4层   批量修复     apply_fixes → 繁→简 + 翻译腔 + 所有 fixes 一次性应用
 第5层   格式修补     ass_repair --check all  [ASS only]
-第6层   人工交付     extract_review_clips → 视频片段 + 审查清单
 ```
 
 ## 常用命令
