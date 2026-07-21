@@ -26,6 +26,13 @@ import time
 import urllib.request
 import urllib.parse
 
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT_DIR = os.path.dirname(_SCRIPT_DIR)  # scripts/
+if _ROOT_DIR not in sys.path:
+    sys.path.insert(0, _ROOT_DIR)
+
+from lib.whisper_utils import write_srt
+
 
 # ═══════════════════════════════════════════════════════════════
 # Credentials
@@ -128,40 +135,9 @@ def baidu_translate(text, appid, secret, source='auto', target='ja', endpoint=No
 # ═══════════════════════════════════════════════════════════════
 
 def parse_srt_cues(path):
-    """Parse SRT into list of {index, start, end, text}."""
-    cues = []
-    with open(path, 'r', encoding='utf-8-sig') as f:
-        content = f.read()
-
-    # Match SRT blocks
-    pattern = re.compile(
-        r'(\d+)\s*\n'
-        r'(\d{2}:\d{2}:\d{2}[.,]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[.,]\d{3})\s*\n'
-        r'((?:.+\n?)+?)(?=\n\d+\n|\n*\Z)',
-        re.MULTILINE
-    )
-
-    for m in pattern.finditer(content):
-        cues.append({
-            'index': int(m.group(1)),
-            'start': m.group(2).replace(',', '.'),
-            'end': m.group(3).replace(',', '.'),
-            'text': m.group(4).strip(),
-        })
-
-    return cues
-
-
-def write_srt(path, cues):
-    """Write cues to SRT file. Signature matches lib.whisper_utils.write_srt."""
-    os.makedirs(os.path.dirname(path) if os.path.dirname(path) else '.', exist_ok=True)
-    with open(path, 'w', encoding='utf-8-sig') as f:
-        for i, cue in enumerate(cues, 1):
-            start = cue['start'].replace('.', ',')
-            end = cue['end'].replace('.', ',')
-            f.write(f'{i}\n')
-            f.write(f'{start} --> {end}\n')
-            f.write(f'{cue["text"]}\n\n')
+    """Parse SRT into list of {start, end, start_s, end_s, text, ...}."""
+    from lib.whisper_utils import parse_srt as _parse
+    return _parse(path, mark_garbled=False)
 
 
 # ═══════════════════════════════════════════════════════════════

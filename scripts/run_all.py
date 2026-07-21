@@ -23,6 +23,9 @@ _ROOT_DIR = _SCRIPT_DIR
 if _ROOT_DIR not in sys.path:
     sys.path.insert(0, _ROOT_DIR)
 
+from lib.project_utils import load_json, detect_mode, detect_format
+
+
 # ── Helpers ──
 
 def _run(cmd_parts, cwd, timeout=600, desc=''):
@@ -43,31 +46,6 @@ def _run(cmd_parts, cwd, timeout=600, desc=''):
     except Exception as e:
         print(f'{label} ERROR: {e}', file=sys.stderr)
         return False
-
-
-def _load_json(path):
-    if not os.path.exists(path):
-        return None
-    with open(path, 'r', encoding='utf-8') as f:
-        return json.load(f)
-
-
-def _detect_format(project_dir):
-    """Detect subtitle format (SRT/ASS)."""
-    target = os.path.join(project_dir, 'AI审查后')
-    if not os.path.isdir(target):
-        return 'srt'
-    ass = sum(1 for f in os.listdir(target) if f.endswith('.ass'))
-    srt = sum(1 for f in os.listdir(target) if f.endswith('.srt'))
-    return 'ass' if ass >= srt else 'srt'
-
-
-def _detect_mode(project_dir):
-    """Detect text vs audio mode."""
-    ref = os.path.join(project_dir, '参考字幕')
-    if os.path.isdir(ref) and os.listdir(ref):
-        return 'text'
-    return 'audio'
 
 
 # ── Pipeline steps ──
@@ -137,7 +115,7 @@ def step_fix_episodes(project_dir, lang, mode, video_dir=None,
     With --skip-if-clean (default), episodes with no garbled cues are skipped
     without invoking Whisper or ffmpeg.
     """
-    findings = _load_json(os.path.join(project_dir, 'temp', 'scans', 'findings.json'))
+    findings = load_json(os.path.join(project_dir, 'temp', 'scans', 'findings.json'))
 
     # Determine episode list
     if episodes:
@@ -221,7 +199,7 @@ def step_nouns(project_dir, lang):
              project_dir, desc='nouns')
 
         # Check for AI review candidates
-        noun_json = _load_json(os.path.join(project_dir, 'temp', 'scans', 'noun_check.json'))
+        noun_json = load_json(os.path.join(project_dir, 'temp', 'scans', 'noun_check.json'))
         if noun_json:
             unknowns = [r for r in noun_json.get('results', [])
                        if r.get('status') in ('unknown', 'mismatch')]
@@ -255,7 +233,7 @@ def step_apply_all(project_dir, lang):
     all_fixes = []
     for src in ['oped_fixes.json', 'noun_check.json']:
         path = os.path.join(project_dir, 'temp', 'scans', src)
-        data = _load_json(path)
+        data = load_json(path)
         if data:
             fixes = data.get('fixes', [])
             if fixes:
@@ -263,7 +241,7 @@ def step_apply_all(project_dir, lang):
                 print(f'[apply] {len(fixes)} fixes from {src}', file=sys.stderr)
 
     # Also check ai_review_fixes.json if it exists
-    ai_fixes = _load_json(os.path.join(project_dir, 'temp', 'scans', 'ai_review_fixes.json'))
+    ai_fixes = load_json(os.path.join(project_dir, 'temp', 'scans', 'ai_review_fixes.json'))
     if ai_fixes:
         all_fixes.extend(ai_fixes)
         print(f'[apply] {len(ai_fixes)} fixes from AI review', file=sys.stderr)
@@ -289,8 +267,8 @@ def step_apply_all(project_dir, lang):
 
 def step_ass_repair(project_dir):
     """Layer 5: ASS format repair (ASS only)."""
-    fmt = _detect_format(project_dir)
-    if fmt != 'ass':
+    fmt = detect_format(project_dir)
+    if fmt['primary'] != 'ass':
         print('[ass] SRT project — skipping.', file=sys.stderr)
         return True
 
@@ -419,6 +397,40 @@ def print_ai_review_notice(noun_results, project_dir, lang):
     print(f'', file=sys.stderr)
 
 
+# ── Progress ──
+
+def _print_progress(project_dir, label='Progress'):
+    """Print concise progress summary from findings.json and report."""
+    findings = load_json(os.path.join(project_dir, 'temp', 'scans', 'findings.json'))
+    report_path = os.path.join(project_dir, 'reports', '问题解决报告.md')
+
+    print(f'\n{"─"*40}', file=sys.stderr)
+    print(f'  {label}', file=sys.stderr)
+    print(f'{"─"*40}', file=sys.stderr)
+
+    if findings:
+        s = findings.get('summary', {})
+        per_ep = findings.get('per_episode_issues', {})
+        eps_with = [ep for ep, v in per_ep.items() if v]
+        print(f'  Episodes with issues: {len(eps_with)}/{len(per_ep)}', file=sys.stderr)
+        print(f'  Garbled cues:        {s.get("garbled_count", "?")}', file=sys.stderr)
+        if s.get('repeat_count'):
+            print(f'  Repeat patterns:     {s["repeat_count"]}', file=sys.stderr)
+    else:
+        print(f'  (no findings.json)', file=sys.stderr)
+
+    if os.path.exists(report_path):
+        import re as _re
+        with open(report_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        nums = _re.findall(r'(\d+)', content.split('\n')[0]) if content else []
+        if len(nums) >= 3:
+            print(f'  Report: {nums[0]} fixed, {nums[1]} pending, {nums[2]} deleted',
+                  file=sys.stderr)
+    else:
+        print(f'  (no report yet)', file=sys.stderr)
+
+
 # ── Main ──
 
 def main():
@@ -456,8 +468,8 @@ Examples:
     args = parser.parse_args()
 
     project_dir = args.target_dir or os.getcwd()
-    mode = _detect_mode(project_dir)
-    fmt = _detect_format(project_dir)
+    mode = detect_mode(project_dir)
+    fmt = detect_format(project_dir)
 
     # Parse episode selection
     episodes = _parse_episodes(args.episodes) if args.episodes else None
@@ -470,7 +482,7 @@ Examples:
                    and not args.apply_ai_review)
 
     print(f'{"="*55}', file=sys.stderr)
-    print(f'  Subtitle Proofread — {mode.upper()} mode, {fmt.upper()} format, '
+    print(f'  Subtitle Proofread — {mode.upper()} mode, {(fmt["primary"] or "NONE").upper()} format, '
           f'--lang {args.lang}', file=sys.stderr)
     print(f'  Project: {project_dir}', file=sys.stderr)
     if episodes:
@@ -510,6 +522,8 @@ Examples:
         print('  Layer 1/6: Character scan', file=sys.stderr)
         print(f'{"─"*40}', file=sys.stderr)
         step_scan(project_dir, args.lang)
+
+    _print_progress(project_dir, 'Status: after scan')
 
     # ── Layer 2: Fix episodes ──
     print(f'\n{"─"*40}', file=sys.stderr)
@@ -555,6 +569,8 @@ Examples:
 
     # ── Clean ──
     step_clean(project_dir)
+
+    _print_progress(project_dir, 'Status: final')
 
     # ── Done ──
     if noun_results.get('ai_review_count', 0) > 0:

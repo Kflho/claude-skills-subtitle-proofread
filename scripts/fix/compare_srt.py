@@ -13,7 +13,6 @@ Usage:
 import argparse
 import json
 import os
-import re
 import sys
 from difflib import SequenceMatcher
 
@@ -31,29 +30,8 @@ from lib.whisper_utils import to_seconds as _to_seconds
 
 def parse_srt(path):
     """Parse SRT into list of {start, end, start_s, end_s, text}."""
-    cues = []
-    with open(path, 'r', encoding='utf-8-sig') as f:
-        content = f.read()
-
-    pattern = re.compile(
-        r'(\d+)\s*\n'
-        r'(\d{2}:\d{2}:\d{2}[.,]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[.,]\d{3})\s*\n'
-        r'((?:.+\n?)+?)(?=\n\d+\n|\n*\Z)',
-        re.MULTILINE
-    )
-
-    for m in pattern.finditer(content):
-        start = m.group(2).replace(',', '.')
-        end = m.group(3).replace(',', '.')
-        cues.append({
-            'start': start,
-            'end': end,
-            'start_s': _to_seconds(start),
-            'end_s': _to_seconds(end),
-            'text': m.group(4).strip(),
-        })
-
-    return cues
+    from lib.whisper_utils import parse_srt as _parse
+    return _parse(path, mark_garbled=False)
 
 
 # ═══════════════════════════════════════════════════════════════

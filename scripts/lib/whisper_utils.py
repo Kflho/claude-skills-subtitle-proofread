@@ -14,6 +14,11 @@ v2.1 变更:
 
 import sys, os, re, subprocess, json, io
 
+# ── Whisper confidence thresholds (for AI review flagging) ──
+AI_REVIEW_AVG_LOGPROB_THRESHOLD = -1.0     # avg_logprob below this → uncertain
+AI_REVIEW_COMPRESSION_THRESHOLD = 2.0       # compression_ratio above this → hallucination risk
+AI_REVIEW_NO_SPEECH_THRESHOLD = 0.4         # no_speech_prob above this → might not be speech
+
 # ═══════════════════════════════════════════════════════════════
 # 1. 平台 & 路径
 # ═══════════════════════════════════════════════════════════════

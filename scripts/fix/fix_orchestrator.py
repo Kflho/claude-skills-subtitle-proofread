@@ -77,9 +77,11 @@ class FixReport:
 # ═══════════════════════════════════════════════════════════════
 
 # Whisper confidence thresholds (for AI review flagging)
-AI_REVIEW_AVG_LOGPROB_THRESHOLD = -1.0
-AI_REVIEW_COMPRESSION_THRESHOLD = 2.0
-AI_REVIEW_NO_SPEECH_THRESHOLD = 0.4
+from lib.whisper_utils import (
+    AI_REVIEW_AVG_LOGPROB_THRESHOLD,
+    AI_REVIEW_COMPRESSION_THRESHOLD,
+    AI_REVIEW_NO_SPEECH_THRESHOLD,
+)
 
 # Default Whisper paths (can be overridden in constructor)
 DEFAULT_WHISPER_CLI = r'D:/software/video/whisper-cublas-12.4.0-bin-x64/whisper-cli.exe'

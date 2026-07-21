@@ -39,7 +39,6 @@ scripts/
 ├── apply/apply_fixes.py         批量修复（繁→简+翻译腔+fixes）
 ├── ass/ass_repair.py            ASS 格式修补
 ├── utils/
-│   ├── check_progress.py        进度统计
 │   ├── update_report.py         报告 6 层读写
 │   └── clean_empty_cues.py      清理空白 cue
 └── lib/
