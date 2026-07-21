@@ -38,14 +38,7 @@ import lib._path  # noqa: F401
 
 from lib.chinese_utils import TRAD_TO_SIMP_MAP as _TRAD_TO_SIMP, PINYIN_TONES as _PINYIN_TONES
 from lib.japanese_utils import COMMON_KATAKANA as _JA_COMMON_WORDS
-from lib.whisper_utils import OP_BOUNDARY_SEC, ED_BOUNDARY_SEC
-
-# Shared SRT cue regex — timecode + text (no index prefix; callers prepend if needed)
-_SRT_CUE_RE = re.compile(
-    r'(\d{2}:\d{2}:\d{2}[.,]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[.,]\d{3})\s*\n'
-    r'((?:.+\n?)+?)(?=\n\d+\n|\n*\Z)',
-    re.MULTILINE
-)
+from lib.whisper_utils import OP_BOUNDARY_SEC, ED_BOUNDARY_SEC, parse_srt
 
 # ═══════════════════════════════════════════════════════════════
 # 1. Language-aware normalizers
@@ -477,19 +470,7 @@ def check_srt(srt_path, noun_table_path, lang='ja'):
     """Check one SRT file against the noun table."""
     # Parse SRT
     cues = []
-    with open(srt_path, 'r', encoding='utf-8-sig') as f:
-        content = f.read()
-
-    # Build pattern with index prefix for this caller
-    _IDX_CUE_RE = re.compile(r'(\d+)\s*\n' + _SRT_CUE_RE.pattern, re.MULTILINE)
-
-    for m in _IDX_CUE_RE.finditer(content):
-        cues.append({
-            'index': int(m.group(1)),
-            'start': m.group(2),
-            'end': m.group(3),
-            'text': m.group(4).strip(),
-        })
+    cues = list(parse_srt(srt_path, mark_garbled=False))
 
     # Parse noun table
     known_nouns = parse_noun_table(noun_table_path, lang=lang)
@@ -620,22 +601,7 @@ def check_oped_consistency(target_dir, op_boundary=OP_BOUNDARY_SEC, ed_boundary=
         if not fname.endswith('.srt'):
             continue
         fpath = os.path.join(target_dir, fname)
-        content = ''
-        with open(fpath, 'r', encoding='utf-8-sig') as f:
-            content = f.read()
-
-        cues = []
-        for m in _SRT_CUE_RE.finditer(content):
-            start = m.group(1)
-            end = m.group(2)
-            text = m.group(3).strip().replace('\n', ' ')
-            # Convert to seconds
-            parts_s = start.replace(',', '.').split(':')
-            parts_e = end.replace(',', '.').split(':')
-            start_s = int(parts_s[0])*3600 + int(parts_s[1])*60 + float(parts_s[2])
-            end_s = int(parts_e[0])*3600 + int(parts_e[1])*60 + float(parts_e[2])
-            cues.append({'start': start, 'end': end, 'text': text,
-                         'start_s': start_s, 'end_s': end_s})
+        cues = list(parse_srt(fpath, mark_garbled=False))
 
         if not cues:
             continue

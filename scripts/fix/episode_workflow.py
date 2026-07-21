@@ -25,7 +25,6 @@ Usage:
 import argparse
 import json
 import os
-import re
 import subprocess
 import sys
 from datetime import datetime
@@ -35,8 +34,7 @@ import lib._path  # noqa: F401
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-from lib.srt_utils import read_srt_file, parse_srt_cue
-from lib.whisper_utils import to_seconds, setup_windows_utf8
+from lib.whisper_utils import to_seconds, setup_windows_utf8, parse_srt
 from lib.project_utils import load_json, detect_mode, norm_ep, find_srt
 setup_windows_utf8()
 
@@ -272,8 +270,6 @@ def step_diff(project_dir, episode, scan_result, applied_fixes):
     # Build a set of fixed start times
     fixed_starts = {a['start'] for a in applied_fixes} if applied_fixes else set()
 
-    # Read current SRT text for each issue timecode
-    lines = read_srt_file(srt_path)
     print(f'[diff] {episode} changes:')
     print()
 
@@ -281,15 +277,7 @@ def step_diff(project_dir, episode, scan_result, applied_fixes):
     still_count = 0
 
     # Build timecode→text map from current SRT
-    current_map = {}
-    cue_pat = re.compile(
-        r'(\d{2}:\d{2}:\d{2}[.,]\d{3})\s*-->\s*\d{2}:\d{2}:\d{2}[.,]\d{3}\s*\n(.+?)(?:\n\n|\n?\Z)',
-        re.MULTILINE | re.DOTALL
-    )
-    for m in cue_pat.finditer('\n'.join(lines)):
-        tc = m.group(1).replace(',', '.')
-        txt = m.group(2).strip().replace('\n', ' ')
-        current_map[tc] = txt
+    current_map = {c['start']: c['text'] for c in parse_srt(srt_path, mark_garbled=False)}
 
     deleted_count = 0
     for item in sorted(issues, key=lambda x: x.get('start', x.get('timecode', ''))):
