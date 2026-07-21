@@ -64,9 +64,9 @@ scripts/
 1. **Whisper ≠ 人工审查 — 片段长度不同。**
    - Whisper：需要相邻 clean cue 作为**声学上下文**提高转录质量
      → 使用 `build_clusters()` 的完整区间（左clean cue + 乱码 + 右clean cue）
-   - 人工审查：只需要看到/听到**乱码段本身** + 少量前后空白
-     → 视频片段 = 乱码 cue 区间 + VAD 非人声 padding，**至多 5 秒**
-     → 节约成本（更短的视频文件）
+   - 人工审查：只需要看到/听到**乱码段本身** + 前后空白
+     → 视频片段 = 乱码 cue 区间 + VAD 非人声 padding，**每侧至多 5 秒**
+     → 节约成本（比 Whisper cluster 短的视频文件）
 2. **必须保留视频片段。** 人需要画面辅助判断（口型、场景、字幕叠加）。
    - `review()` 必须提取视频 clip（ffmpeg），不可改为纯音频
    - 纯音频只作为 ffmpeg 不可用时的 fallback

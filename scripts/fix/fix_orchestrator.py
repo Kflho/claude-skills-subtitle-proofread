@@ -1024,11 +1024,13 @@ class Fixer:
         return f'{h:02d}:{m:02d}:{s:06.3f}'.replace('.', ',')
 
     def _compute_review_clip_bounds(self, garbled_start, garbled_end,
-                                     cluster_ss, cluster_es, max_dur=5.0):
+                                     cluster_ss, cluster_es, max_pad=5.0):
         """Compute video clip boundaries for human review.
 
         Unlike Whisper (needs adjacent clean cues for context), humans only
-        need the garbled segment + VAD non-speech padding, capped at 5s.
+        need the garbled segment + VAD non-speech padding on each side.
+        Each side's padding is capped at *max_pad* seconds (default 5s).
+        The total clip = garbled + up to 2 × max_pad of silence.
         """
         speech_segs = self._load_speech_segs()
         pad_before = 0.0
@@ -1040,9 +1042,9 @@ class Fixer:
                 if es <= garbled_start:
                     last_speech_end = es
             if last_speech_end is not None:
-                pad_before = min(garbled_start - last_speech_end, 2.0)
+                pad_before = min(garbled_start - last_speech_end, max_pad)
             else:
-                pad_before = min(garbled_start - cluster_ss, 1.0)
+                pad_before = min(garbled_start - cluster_ss, max_pad)
 
             first_speech_after = None
             for ss, es in speech_segs:
@@ -1050,23 +1052,15 @@ class Fixer:
                     first_speech_after = ss
                     break
             if first_speech_after is not None:
-                pad_after = min(first_speech_after - garbled_end, 2.0)
+                pad_after = min(first_speech_after - garbled_end, max_pad)
             else:
-                pad_after = min(cluster_es - garbled_end, 1.0)
+                pad_after = min(cluster_es - garbled_end, max_pad)
         else:
             pad_before = 0.5
             pad_after = 0.5
 
         clip_start = max(cluster_ss, garbled_start - pad_before)
         clip_end = min(cluster_es, garbled_end + pad_after)
-
-        dur = clip_end - clip_start
-        if dur > max_dur:
-            excess = dur - max_dur
-            trim_each = excess / 2.0
-            clip_start = max(garbled_start - 0.3, clip_start + trim_each)
-            clip_end = min(garbled_end + 0.3, clip_end - trim_each)
-
         return clip_start, clip_end
 
     # ═══════════════════════════════════════════════════════════
