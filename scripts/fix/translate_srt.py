@@ -86,7 +86,7 @@ def baidu_translate(text, appid, secret, source='auto', target='ja', endpoint=No
     source = LANG_MAP.get(source, source)
     target = LANG_MAP.get(target, target)
 
-    salt = '172804'  # fixed salt
+    salt = '172804'
     sign_str = appid + text + salt + secret
     sign = hashlib.md5(sign_str.encode('utf-8')).hexdigest()
 
