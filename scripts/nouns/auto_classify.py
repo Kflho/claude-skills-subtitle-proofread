@@ -26,7 +26,7 @@ _ROOT_DIR = os.path.dirname(_SCRIPT_DIR)
 if _ROOT_DIR not in sys.path:
     sys.path.insert(0, _ROOT_DIR)
 
-from lib.japanese_utils import COMMON_KATAKANA as _JA_COMMON_WORDS
+from lib.japanese_utils import COMMON_KATAKANA as _JA_COMMON_WORDS, NON_WORD_RE
 
 # ── Try to import Jamdict (optional, graceful fallback) ──
 _JAMDICT_AVAILABLE = False
@@ -53,13 +53,6 @@ _INTRO_PATTERNS = re.compile(
 # Patterns indicating a name + honorific
 _HONORIFIC_PATTERNS = re.compile(
     r'(さん|くん|ちゃん|様|殿|博士|警部|殿下|先生|総統|団長|伯爵|署長|所長|船長|部長|社長)$'
-)
-
-# Patterns that look like onomatopoeia / breathing / filler
-_NON_WORD_PATTERNS = re.compile(
-    r'^[-ー―]{2,}$|'           # long dashes
-    r'^(.)\1{2,}$|'             # same char repeated 3+ times
-    r'^(ハァ|フー|ウー|アー|エー|オー|へへ|ふふ|わあ|ああ|ええ|おお)+$'
 )
 
 
@@ -103,7 +96,7 @@ def classify_candidate(candidate_text, context_cue='', episode_count=1, lang='ja
     # ── Automatic REJECT ──
 
     # Non-word patterns (dashes, breathing sounds, repetition)
-    if _NON_WORD_PATTERNS.match(text):
+    if NON_WORD_RE.match(text):
         return {'verdict': 'REJECT', 'reason': 'non-word pattern (onomatopoeia/filler)'}
 
     # Pure hiragana — proper nouns are almost never pure hiragana in Japanese

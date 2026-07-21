@@ -32,8 +32,6 @@ import sys
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path as _Path
-
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _ROOT_DIR = os.path.dirname(_SCRIPT_DIR)  # scripts/
 if _ROOT_DIR not in sys.path:
@@ -80,29 +78,6 @@ class FixReport:
 DEFAULT_WHISPER_CLI = r'D:/software/video/whisper-cublas-12.4.0-bin-x64/whisper-cli.exe'
 DEFAULT_WHISPER_MODEL = r'D:/software/video/whisper-cublas-12.4.0-bin-x64/models/ggml-kotoba-whisper-v2.0-q5_0.bin'
 DEFAULT_RETRY_MODEL = r'D:/software/video/whisper-cublas-12.4.0-bin-x64/models/ggml-large-v3-q5_0.bin'
-
-CHECKLIST_HEADER = """# 人工审查清单 — {episode}
-> 导出: {date}
-> 共 {count} 条待审查
->
-> version: 2
->
-> **填写方法**：每条下方「修正:」后直接写正确台词。
-> 填「删除」则从 SRT 移除该 cue。
->
-> 填写完毕后运行:
->   python scripts/run_all.py --apply-checklist
->
----
-"""
-
-CHECKLIST_ENTRY = """{ep} | {start} ~ {end} | {clip_file}
-来源: {source}
-残留: {original}
-修正:
-
----
-"""
 
 
 class Fixer:
@@ -983,8 +958,8 @@ class Fixer:
             # Perfect: single speech segment → use VAD boundaries
             ss, es = overlapping[0]
             return {
-                'start': self._seconds_to_tc(ss),
-                'end': self._seconds_to_tc(es),
+                'start': format_tc(ss),
+                'end': format_tc(es),
                 'text': corrected_text,
             }
 
@@ -1001,8 +976,8 @@ class Fixer:
             if g_idx is not None and g_idx < len(overlapping):
                 ss, es = overlapping[g_idx]
                 return {
-                    'start': self._seconds_to_tc(ss),
-                    'end': self._seconds_to_tc(es),
+                    'start': format_tc(ss),
+                    'end': format_tc(es),
                     'text': corrected_text,
                 }
             else:
@@ -1014,14 +989,6 @@ class Fixer:
             print(f'[VAD] {n} speech segments ≠ {n_garbled} garbled cues '
                   f'→ fallback (keep original boundaries)', file=sys.stderr)
             return None
-
-    @staticmethod
-    def _seconds_to_tc(seconds):
-        """Convert float seconds to SRT timecode HH:MM:SS,mmm."""
-        h = int(seconds // 3600)
-        m = int((seconds % 3600) // 60)
-        s = seconds % 60
-        return f'{h:02d}:{m:02d}:{s:06.3f}'.replace('.', ',')
 
     def _compute_review_clip_bounds(self, garbled_start, garbled_end,
                                      cluster_ss, cluster_es, max_pad=5.0):
@@ -1251,7 +1218,7 @@ class Fixer:
                 continue
 
             # Extract correction text after "修正:"
-            corr_match = re.search(r'修正:\s*\n(.+?)(?=\n---|\n\Z|\Z)', block, re.DOTALL)
+            corr_match = re.search(r'修正:\s*\n?(.+?)(?=\n---|\n\Z|\Z)', block, re.DOTALL)
             if not corr_match:
                 continue
 

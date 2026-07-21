@@ -30,11 +30,11 @@ from lib.project_utils import load_json, detect_mode, detect_format
 
 def _run(cmd_parts, cwd, timeout=600, desc=''):
     """Run a subprocess command, print status, return True on success."""
-    cmd = ' '.join(str(p) for p in cmd_parts)
     label = f'[{desc}]' if desc else ''
-    print(f'{label} {cmd[:100]}...', file=sys.stderr)
+    cmd_display = ' '.join(str(p) for p in cmd_parts)
+    print(f'{label} {cmd_display[:100]}...', file=sys.stderr)
     try:
-        result = subprocess.run(cmd, cwd=cwd, shell=True,
+        result = subprocess.run([str(p) for p in cmd_parts], cwd=cwd,
                                 capture_output=False, timeout=timeout)
         ok = result.returncode == 0
         print(f'{label} {"OK" if ok else "FAILED (code " + str(result.returncode) + ")"}',
@@ -61,14 +61,14 @@ def step_scan(project_dir, lang):
     scanner = os.path.join(_SCRIPT_DIR, 'scan', 'unified_scanner.py')
     cmd = [
         'python', scanner,
-        '--target-dir', f'"{target}"',
-        '--output-findings', f'"{findings}"',
-        '--output-issues', f'"{issues}"',
+        '--target-dir', target,
+        '--output-findings', findings,
+        '--output-issues', issues,
         '--build-glossary',
         '--project-lang', lang,
     ]
     if os.path.exists(ai_nouns):
-        cmd.extend(['--ai-nouns', f'"{ai_nouns}"'])
+        cmd.extend(['--ai-nouns', ai_nouns])
     return _run(cmd, project_dir, desc='scan')
 
 
@@ -170,9 +170,9 @@ def step_fix_episodes(project_dir, lang, mode, video_dir=None,
     ep_workflow = os.path.join(_SCRIPT_DIR, 'fix', 'episode_workflow.py')
     for i, ep in enumerate(selected):
         cmd = ['python', ep_workflow, ep, '--mode', mode,
-               f'--project-dir', f'"{project_dir}"']
+               '--project-dir', project_dir]
         if video_dir:
-            cmd.extend(['--video-dir', f'"{video_dir}"'])
+            cmd.extend(['--video-dir', video_dir])
         if skip_whisper:
             cmd.append('--skip-whisper')
         _run(cmd, project_dir, desc=f'ep {i+1}/{len(selected)} {ep}')
@@ -190,7 +190,7 @@ def step_nouns(project_dir, lang):
 
     # OP/ED cross-episode consistency
     print('\n[oped] OP/ED consistency check...', file=sys.stderr)
-    _run(['python', checker, f'"{target}"', '--lang', lang, '--oped',
+    _run(['python', checker, target, '--lang', lang, '--oped',
           '-o', os.path.join(project_dir, 'temp', 'scans', 'oped_fixes.json')],
          project_dir, desc='oped')
 
@@ -207,8 +207,8 @@ def step_nouns(project_dir, lang):
 def _step_noun_classify(project_dir, lang, checker, target, glossary):
     """Run noun_checker + auto_classify for unknown proper noun candidates."""
     print('\n[nouns] Noun table check...', file=sys.stderr)
-    _run(['python', checker, f'"{target}"', '--lang', lang,
-          '--noun-table', f'"{glossary}"',
+    _run(['python', checker, target, '--lang', lang,
+          '--noun-table', glossary,
           '-o', os.path.join(project_dir, 'temp', 'scans', 'noun_check.json')],
          project_dir, desc='nouns')
 
@@ -241,9 +241,9 @@ def _step_noun_classify(project_dir, lang, checker, target, glossary):
     classified_path = os.path.join(project_dir, 'temp', 'scans', 'noun_classified.json')
     _run([
         'python', os.path.join(_SCRIPT_DIR, 'nouns', 'auto_classify.py'),
-        '--candidates', f'"{cand_path}"',
+        '--candidates', cand_path,
         '--lang', lang,
-        '--output', f'"{classified_path}"',
+        '--output', classified_path,
     ], project_dir, desc='auto_classify')
 
     return _apply_classified_results(project_dir, candidates_for_classify, unknowns, cands, lang)
@@ -335,8 +335,8 @@ def step_apply_all(project_dir, lang):
     # Apply
     return _run([
         'python', apply_script,
-        '--target-dir', f'"{target}"',
-        '--fixes', f'"{fixes_path}"',
+        '--target-dir', target,
+        '--fixes', fixes_path,
         '--lang', lang,
     ], project_dir, desc='apply')
 
@@ -350,7 +350,7 @@ def step_ass_repair(project_dir):
 
     target = os.path.join(project_dir, 'AI审查后')
     repair = os.path.join(_SCRIPT_DIR, 'ass', 'ass_repair.py')
-    return _run(['python', repair, '--target-dir', f'"{target}"', '--check', 'all'],
+    return _run(['python', repair, '--target-dir', target, '--check', 'all'],
                 project_dir, desc='ass')
 
 
@@ -390,7 +390,7 @@ def step_clean(project_dir):
     """Clean up empty cues."""
     target = os.path.join(project_dir, 'AI审查后')
     cleaner = os.path.join(_SCRIPT_DIR, 'utils', 'clean_empty_cues.py')
-    return _run(['python', cleaner, '--target-dir', f'"{target}"'],
+    return _run(['python', cleaner, '--target-dir', target],
                 project_dir, desc='clean')
 
 
@@ -571,7 +571,7 @@ def _parse_v2_entries(content):
         timecode = tc_match.group(1).replace(',', '.')
         if re.search(r'^\s*✅', block, re.MULTILINE):
             continue
-        corr_match = re.search(r'修正:\s*\n(.+?)(?=\n---|\n\Z|\Z)', block, re.DOTALL)
+        corr_match = re.search(r'修正:\s*\n?(.+?)(?=\n---|\n\Z|\Z)', block, re.DOTALL)
         if not corr_match:
             continue
         text = corr_match.group(1).strip()

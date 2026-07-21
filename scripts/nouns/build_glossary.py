@@ -22,7 +22,7 @@ _ROOT_DIR = os.path.dirname(_SCRIPT_DIR)  # scripts/
 if _ROOT_DIR not in sys.path:
     sys.path.insert(0, _ROOT_DIR)
 
-from lib.japanese_utils import COMMON_KATAKANA as _COMMON_KATAKANA, COMMON_KANJI as _COMMON_KANJI
+from lib.japanese_utils import COMMON_KATAKANA as _COMMON_KATAKANA, COMMON_KANJI as _COMMON_KANJI, NON_WORD_RE
 
 # Minimum frequency to include in glossary
 _MIN_FREQ = 3
@@ -131,13 +131,6 @@ def build_glossary(term_freq, min_freq=_MIN_FREQ, lang='ja', use_jamdict=True,
         # Fallback: frozenset check
         return word in _COMMON_KANJI or word in _COMMON_KATAKANA
 
-    # Non-word patterns to skip
-    _NON_WORD_RE = re.compile(
-        r'^[-ー―]{2,}$|'           # long dashes
-        r'^(.)\1{2,}$|'             # same char repeated 3+
-        r'^(ハァ|フー|ウー|アー|エー|オー|へへ|ふふ)+$'  # breathing/filler
-    )
-
     # Separate katakana and kanji, filter noise
     katakana_terms = []
     kanji_terms = []
@@ -147,7 +140,7 @@ def build_glossary(term_freq, min_freq=_MIN_FREQ, lang='ja', use_jamdict=True,
             continue
 
         # Skip non-word patterns
-        if _NON_WORD_RE.match(word):
+        if NON_WORD_RE.match(word):
             continue
 
         # Skip OP/ED bracket labels

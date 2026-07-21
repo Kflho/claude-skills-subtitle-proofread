@@ -41,6 +41,7 @@ if _ROOT_DIR not in sys.path:
 
 from lib.chinese_utils import TRAD_TO_SIMP_MAP as _TRAD_TO_SIMP, PINYIN_TONES as _PINYIN_TONES
 from lib.japanese_utils import COMMON_KATAKANA as _JA_COMMON_WORDS
+from lib.whisper_utils import OP_BOUNDARY_SEC, ED_BOUNDARY_SEC
 
 # Shared SRT cue regex — timecode + text (no index prefix; callers prepend if needed)
 _SRT_CUE_RE = re.compile(
@@ -607,7 +608,7 @@ def _is_valid_text(text, lang):
     return True
 
 
-def check_oped_consistency(target_dir, op_boundary=95, ed_boundary=120, lang='ja'):
+def check_oped_consistency(target_dir, op_boundary=OP_BOUNDARY_SEC, ed_boundary=ED_BOUNDARY_SEC, lang='ja'):
     """跨集 OP/ED 文本一致性检查。
 
     收集所有剧集的 OP/ED 区间 cue，按时码分桶分组，
@@ -761,10 +762,10 @@ Examples:
     parser.add_argument('--oped', action='store_true',
                         help='Cross-episode OP/ED lyric consistency check. '
                              'Collects all OP/ED cues, finds variants, generates fixes.')
-    parser.add_argument('--op-boundary', type=float, default=95,
-                        help='OP boundary in seconds (default: 95)')
-    parser.add_argument('--ed-boundary', type=float, default=120,
-                        help='ED boundary in seconds (default: 120)')
+    parser.add_argument('--op-boundary', type=float, default=OP_BOUNDARY_SEC,
+                        help=f'OP boundary in seconds (default: {OP_BOUNDARY_SEC})')
+    parser.add_argument('--ed-boundary', type=float, default=ED_BOUNDARY_SEC,
+                        help=f'ED boundary in seconds (default: {ED_BOUNDARY_SEC})')
     args = parser.parse_args()
 
     # ── OP/ED 模式 ──

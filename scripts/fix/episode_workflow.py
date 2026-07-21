@@ -79,20 +79,19 @@ def step_translate(project_dir, episode, scan_result, dry_run=False):
 
     cmd_parts = [
         'python', os.path.join(_SCRIPT_DIR, 'translate_srt.py'),
-        f'"{ref_path}"',
-        f'--output', f'"{out_path}"',
+        ref_path,
+        '--output', out_path,
         '--to', 'ja',
     ]
-    cmd = ' '.join(cmd_parts)
 
     if dry_run:
         print(f'[translate] DRY RUN — would execute:')
-        print(f'  {cmd}')
+        print(f'  {" ".join(str(p) for p in cmd_parts)}')
         return out_path
 
     print(f'[translate] Translating: {os.path.basename(ref_path)} → ja')
     try:
-        result = subprocess.run(cmd, cwd=project_dir, shell=True,
+        result = subprocess.run([str(p) for p in cmd_parts], cwd=project_dir,
                                 capture_output=False, timeout=1800)
         if result.returncode != 0:
             print(f'[translate] Translation failed (exit {result.returncode})')

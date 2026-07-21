@@ -21,9 +21,6 @@ _ROOT_DIR = os.path.dirname(_SCRIPT_DIR)  # scripts/
 if _ROOT_DIR not in sys.path:
     sys.path.insert(0, _ROOT_DIR)
 
-from lib.whisper_utils import to_seconds as _to_seconds
-
-
 # ═══════════════════════════════════════════════════════════════
 # SRT parsing
 # ═══════════════════════════════════════════════════════════════

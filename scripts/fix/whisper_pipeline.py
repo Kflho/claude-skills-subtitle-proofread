@@ -29,7 +29,7 @@ if _ROOT_DIR not in sys.path:
     sys.path.insert(0, _ROOT_DIR)
 
 from lib.whisper_utils import (
-    setup_windows_utf8, extract_ep_number, to_seconds,
+    setup_windows_utf8, extract_ep_number, to_seconds, format_tc,
     parse_srt, write_srt, apply_fixes_to_srt, run_whisper,
     extract_audio_wav, is_valid_japanese,
     separate_vocals, get_audio_duration,
@@ -71,55 +71,52 @@ def get_speech_timeline(audio_path, aggressiveness=2):
               file=sys.stderr)
         return _get_speech_timeline_silencedetect(audio_path)
 
-    wf = wave.open(audio_path, 'rb')
-    rate = wf.getframerate()
-    nchannels = wf.getnchannels()
-    sampwidth = wf.getsampwidth()
+    with wave.open(audio_path, 'rb') as wf:
+        rate = wf.getframerate()
+        nchannels = wf.getnchannels()
+        sampwidth = wf.getsampwidth()
 
-    if rate != 16000 or nchannels != 1 or sampwidth != 2:
-        wf.close()
-        print(f'⚠ VAD requires 16kHz mono 16-bit, got {rate}Hz/{nchannels}ch/{sampwidth*8}bit',
-              file=sys.stderr)
-        return _get_speech_timeline_silencedetect(audio_path)
+        if rate != 16000 or nchannels != 1 or sampwidth != 2:
+            print(f'⚠ VAD requires 16kHz mono 16-bit, got {rate}Hz/{nchannels}ch/{sampwidth*8}bit',
+                  file=sys.stderr)
+            return _get_speech_timeline_silencedetect(audio_path)
 
-    vad = webrtcvad.Vad(aggressiveness)
-    frame_ms = 30
-    frame_samples = int(rate * frame_ms / 1000)
+        vad = webrtcvad.Vad(aggressiveness)
+        frame_ms = 30
+        frame_samples = int(rate * frame_ms / 1000)
 
-    speech_segs = []
-    in_speech = False
-    speech_start = 0.0
-    pos = 0
-    total_frames = 0
+        speech_segs = []
+        in_speech = False
+        speech_start = 0.0
+        pos = 0
+        total_frames = 0
 
-    while True:
-        frame = wf.readframes(frame_samples)
-        frame_bytes = len(frame)
-        if frame_bytes < frame_samples * 2:
-            break
-        try:
-            is_speech = vad.is_speech(frame, rate)
-        except Exception:
-            is_speech = False
+        while True:
+            frame = wf.readframes(frame_samples)
+            frame_bytes = len(frame)
+            if frame_bytes < frame_samples * 2:
+                break
+            try:
+                is_speech = vad.is_speech(frame, rate)
+            except Exception:
+                is_speech = False
 
-        t = pos * frame_ms / 1000.0
-        total_frames += 1
+            t = pos * frame_ms / 1000.0
+            total_frames += 1
 
-        if is_speech and not in_speech:
-            speech_start = t
-            in_speech = True
-        elif not is_speech and in_speech:
-            if t - speech_start >= 0.3:  # min 300ms speech
-                speech_segs.append((speech_start, t))
-            in_speech = False
-        pos += 1
+            if is_speech and not in_speech:
+                speech_start = t
+                in_speech = True
+            elif not is_speech and in_speech:
+                if t - speech_start >= 0.3:  # min 300ms speech
+                    speech_segs.append((speech_start, t))
+                in_speech = False
+            pos += 1
 
-    if in_speech:
-        final_t = total_frames * frame_ms / 1000.0
-        if final_t - speech_start >= 0.3:
-            speech_segs.append((speech_start, final_t))
-
-    wf.close()
+        if in_speech:
+            final_t = total_frames * frame_ms / 1000.0
+            if final_t - speech_start >= 0.3:
+                speech_segs.append((speech_start, final_t))
     # Merge nearby segments (<0.5s gap)
     speech_segs = _merge_nearby_segments(speech_segs, gap=0.5)
     return speech_segs
@@ -325,8 +322,8 @@ def add_placeholder_cues(gaps, cues, srt_path):
     placeholders = []
     for ss, es, dur in gaps:
         # Format timestamps as SRT timecodes
-        start_ts = f'{int(ss//3600):02d}:{int((ss%3600)//60):02d}:{ss%60:06.3f}'.replace('.', ',')
-        end_ts = f'{int(es//3600):02d}:{int((es%3600)//60):02d}:{es%60:06.3f}'.replace('.', ',')
+        start_ts = format_tc(ss)
+        end_ts = format_tc(es)
         placeholders.append({
             'start': start_ts,
             'end': end_ts,

@@ -4,6 +4,8 @@
 Used by: whisper_pipeline.py, build_glossary.py, noun_checker.py, auto_classify.py
 """
 
+import re
+
 # Common katakana words that are NOT proper nouns — skip in noun check & glossary
 # Merged from noun_checker.py (_JA_COMMON_WORDS) + build_glossary.py (_COMMON_KATAKANA)
 COMMON_KATAKANA = frozenset({
@@ -64,6 +66,14 @@ COMMON_KANJI = frozenset({
     # ── Fragments often from Whisper splitting ──
     '飲茶','御茶',
 })
+
+# Non-word patterns: dashes, repeated chars, breathing/filler sounds.
+# Shared between auto_classify.py and build_glossary.py.
+NON_WORD_RE = re.compile(
+    r'^[-ー―]{2,}$|'           # long dashes
+    r'^(.)\1{2,}$|'             # same char repeated 3+ times
+    r'^(ハァ|フー|ウー|アー|エー|オー|へへ|ふふ|わあ|ああ|ええ|おお)+$'
+)
 
 # Honorific / title suffix patterns shared between noun_checker and auto_classify.
 # Compiled form for matching; also available as a raw tuple for iteration.

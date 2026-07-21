@@ -19,6 +19,8 @@ try:
 except ImportError:
     import lib.srt_utils as srt_utils
 
+CJK_RE = srt_utils.CJK_RE  # single source of truth
+
 
 # ── 格式检测辅助 ──────────────────────────────────────────────
 
@@ -416,8 +418,6 @@ def collect_texts(target_dir: str, styles: Optional[set] = None) -> list[str]:
 # ═══════════════════════════════════════════════════════════════
 # 中文检测
 # ═══════════════════════════════════════════════════════════════
-
-CJK_RE = re.compile(r'[一-鿿]')
 
 def contains_cjk(text: str) -> bool:
     """检测文本是否含 CJK 字符（中日韩统一表意文字）。"""

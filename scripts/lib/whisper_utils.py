@@ -14,6 +14,10 @@ v2.1 变更:
 
 import sys, os, re, subprocess, json, io
 
+# ── OP/ED region boundaries (seconds from start/end) ──
+OP_BOUNDARY_SEC = 95    # cues before this → OP region, exempt from garbled detection
+ED_BOUNDARY_SEC = 120   # cues within this many seconds of the end → ED region
+
 # ── Whisper confidence thresholds (for AI review flagging) ──
 AI_REVIEW_AVG_LOGPROB_THRESHOLD = -1.0     # avg_logprob below this → uncertain
 AI_REVIEW_COMPRESSION_THRESHOLD = 2.0       # compression_ratio above this → hallucination risk
@@ -267,7 +271,7 @@ def classify_garbled_text(text, target_lang='ja'):
 # 4. SRT 解析
 # ═══════════════════════════════════════════════════════════════
 
-def parse_srt(path, mark_garbled=True, op_boundary=95, ed_boundary=120, target_lang='ja'):
+def parse_srt(path, mark_garbled=True, op_boundary=OP_BOUNDARY_SEC, ed_boundary=ED_BOUNDARY_SEC, target_lang='ja'):
     """解析 SRT 文件，返回带时间戳的 cue 列表。
     每个 cue: {start, end, start_s, end_s, text, line, is_garbled?, garbled_type?}
 
@@ -302,9 +306,10 @@ def parse_srt(path, mark_garbled=True, op_boundary=95, ed_boundary=120, target_l
     # OP/ED 豁免
     if mark_garbled and cues:
         max_end_s = max(c['end_s'] for c in cues)
+        ed_start = max(0, max_end_s - ed_boundary)
         for c in cues:
             if c.get('is_garbled') and (
-                c['start_s'] < op_boundary or c['start_s'] > max_end_s - ed_boundary
+                c['start_s'] < op_boundary or c['start_s'] > ed_start
             ):
                 c['is_garbled'] = False
                 c['garbled_type'] = 'clean'
@@ -374,7 +379,7 @@ def run_whisper(audio_path, whisper_cli, model_path, language='ja',
         cmd.append('-nf')
 
     proc = subprocess.run(cmd, capture_output=True, text=True,
-                          encoding='utf-8', errors='replace')
+                          encoding='utf-8', errors='replace', timeout=1800)
     for line in (proc.stderr or '').strip().split('\n'):
         if line.strip():
             print(f'  [whisper] {line.strip()}', file=sys.stderr)
@@ -472,6 +477,9 @@ def vad_filter_audio(input_audio, output_audio, silence_db=-30, min_silence=0.8,
         capture_output=True, text=True, encoding='utf-8', errors='replace')
 
     dur = get_audio_duration(input_audio)
+    if dur is None or dur <= 0:
+        shutil.copy2(input_audio, output_audio)
+        return [(0, 1.0)], 1.0, 1.0
 
     silence_starts = []
     silence_ends = []

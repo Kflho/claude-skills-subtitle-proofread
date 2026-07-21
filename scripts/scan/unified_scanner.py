@@ -42,7 +42,7 @@ from lib.ass_utils import (
     strip_ass_tags, iter_ass_files, iter_dialogue_lines,
     read_ass_file, contains_cjk,
 )
-from lib.whisper_utils import classify_garbled_text, to_seconds, extract_ep_number, setup_windows_utf8
+from lib.whisper_utils import classify_garbled_text, to_seconds, extract_ep_number, setup_windows_utf8, OP_BOUNDARY_SEC, ED_BOUNDARY_SEC
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -67,9 +67,9 @@ LANG_LABELS = {
 def get_oped_boundaries(cues):
     """计算 OP/ED 时间边界。开头 95s、结尾 120s 内的 cue 视为 OP/ED 区域。"""
     if not cues:
-        return 95, 0
+        return OP_BOUNDARY_SEC, 0
     max_end_s = max(c['end_s'] for c in cues)
-    return 95, max_end_s - 120
+    return OP_BOUNDARY_SEC, max(0, max_end_s - ED_BOUNDARY_SEC)
 
 
 # ═══════════════════════════════════════════════════════════════
