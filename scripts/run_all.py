@@ -247,7 +247,10 @@ def _step_noun_classify(project_dir, lang, checker, target, glossary):
 
     # Use a subdirectory for per-file outputs — noun_checker writes one JSON
     # per SRT when len(srt_files) > 1, so a single-file -o target is ignored.
+    # MUST create the directory first: noun_checker only respects -o as a dir
+    # target when os.path.isdir() returns True (it falls back to dirname otherwise).
     nouns_out_dir = os.path.join(project_dir, 'temp', 'scans', 'nouns')
+    os.makedirs(nouns_out_dir, exist_ok=True)
     _run(['python', checker, target, '--lang', lang,
           '--noun-table', glossary,
           '-o', nouns_out_dir],
