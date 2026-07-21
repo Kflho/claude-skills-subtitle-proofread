@@ -32,11 +32,11 @@ import re
 import sys
 from collections import defaultdict
 
-_script_dir = os.path.dirname(os.path.abspath(__file__))
-_root_dir = os.path.dirname(_script_dir)
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT_DIR = os.path.dirname(_SCRIPT_DIR)  # scripts/
 
-if _root_dir not in sys.path:
-    sys.path.insert(0, _root_dir)
+if _ROOT_DIR not in sys.path:
+    sys.path.insert(0, _ROOT_DIR)
 
 from lib.ass_utils import (
     strip_ass_tags, iter_ass_files, iter_dialogue_lines,
@@ -426,7 +426,7 @@ def main():
             os.getcwd(), 'reports', 'proper-nouns.md')
         print(f'\n→ 生成术语表: {glossary_out}', file=sys.stderr)
         import subprocess
-        build_script = os.path.join(_root_dir, '03_nouns', 'build_glossary.py')
+        build_script = os.path.join(_ROOT_DIR, '03_nouns', 'build_glossary.py')
         subprocess.run([
             sys.executable, build_script,
             '--findings', args.output_findings,

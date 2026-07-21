@@ -152,8 +152,8 @@ def parse_srt_cues(path):
     return cues
 
 
-def write_srt(cues, path):
-    """Write cues to SRT file."""
+def write_srt(path, cues):
+    """Write cues to SRT file. Signature matches lib.whisper_utils.write_srt."""
     os.makedirs(os.path.dirname(path) if os.path.dirname(path) else '.', exist_ok=True)
     with open(path, 'w', encoding='utf-8-sig') as f:
         for i, cue in enumerate(cues, 1):
@@ -321,7 +321,7 @@ Examples:
 
     # Write output (preserve original order)
     output_cues = [results[c['start']] for c in cues if c['start'] in results]
-    write_srt(output_cues, args.output)
+    write_srt(args.output, output_cues)
 
     print(f'Output: {args.output} ({len(output_cues)} cues)', file=sys.stderr)
     if failed:

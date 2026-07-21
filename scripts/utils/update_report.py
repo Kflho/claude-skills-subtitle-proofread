@@ -6,7 +6,7 @@
 层号与 SKILL.md 的 5+1 层流水线一致。
 
 用法:
-  from workflow.update_report import read_report, write_report, upsert_entries, update_entry_status
+  from utils.update_report import read_report, write_report, upsert_entries, update_entry_status
 
   # 读取
   data = read_report('reports/问题解决报告.md')

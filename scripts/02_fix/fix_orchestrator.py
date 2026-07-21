@@ -35,7 +35,7 @@ from datetime import datetime
 from pathlib import Path as _Path
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_ROOT_DIR = os.path.dirname(_SCRIPT_DIR)
+_ROOT_DIR = os.path.dirname(_SCRIPT_DIR)  # scripts/
 if _ROOT_DIR not in sys.path:
     sys.path.insert(0, _ROOT_DIR)
 
@@ -609,7 +609,7 @@ class Fixer:
         out_dir = output_dir or self._review_dir
 
         # Read unfixable from report Layer 6
-        from update_report import read_report
+        from utils.update_report import read_report
         data = read_report(self._report_path)
         entries = data.get('6', [])
         pending = [e for e in entries
@@ -762,7 +762,7 @@ class Fixer:
     def _upsert_layer(self, step: str, entries: list):
         """Write entries to the report. Wraps update_report.upsert_entries."""
         try:
-            from update_report import upsert_entries
+            from utils.update_report import upsert_entries
             upsert_entries(self._report_path, step=step, entries=entries)
         except Exception as e:
             print(f'[report] Failed to update Layer {step}: {e}',
@@ -883,7 +883,7 @@ class Fixer:
         Also updates the report Layer 6 entry from ⬜ → ✅.
         """
         try:
-            from update_report import update_entry_status
+            from utils.update_report import update_entry_status
             update_entry_status(
                 self._report_path, step='6',
                 ep=self.episode, time=timecode,

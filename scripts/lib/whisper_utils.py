@@ -18,11 +18,23 @@ import sys, os, re, subprocess, json, io
 # 1. 平台 & 路径
 # ═══════════════════════════════════════════════════════════════
 
+# Track whether we've already wrapped stdout/stderr to avoid double-wrapping
+# which causes the old wrapper's GC to close the underlying buffer.
+_utf8_setup_done = False
+
+
 def setup_windows_utf8():
-    """Windows 下设置 stdout/stderr UTF-8。"""
+    """Windows 下设置 stdout/stderr UTF-8（幂等 — 多次调用安全）。"""
+    global _utf8_setup_done
+    if _utf8_setup_done:
+        return
+    _utf8_setup_done = True
     if sys.platform == 'win32':
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+        # Only wrap if not already a TextIOWrapper (avoid double-wrapping)
+        if not isinstance(sys.stdout, io.TextIOWrapper):
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+        if not isinstance(sys.stderr, io.TextIOWrapper):
+            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -356,7 +368,8 @@ def run_whisper(audio_path, whisper_cli, model_path, language='ja',
     if no_fallback:
         cmd.append('-nf')
 
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True,
+                          encoding='utf-8', errors='replace')
     for line in (proc.stderr or '').strip().split('\n'):
         if line.strip():
             print(f'  [whisper] {line.strip()}', file=sys.stderr)

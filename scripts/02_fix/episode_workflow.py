@@ -36,13 +36,6 @@ import subprocess
 import sys
 from datetime import datetime
 
-# UTF-8 safety on Windows
-if hasattr(sys.stdout, 'reconfigure'):
-    try:
-        sys.stdout.reconfigure(encoding='utf-8')
-    except Exception:
-        pass
-
 # ── Path setup for importing from scripts dir ──
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _ROOT_DIR = os.path.dirname(_SCRIPT_DIR)  # scripts/
@@ -50,7 +43,8 @@ if _ROOT_DIR not in sys.path:
     sys.path.insert(0, _ROOT_DIR)
 
 from lib.srt_utils import read_srt_file, write_srt_file, parse_srt_cue, build_srt_cue_lines
-from lib.whisper_utils import to_seconds
+from lib.whisper_utils import to_seconds, setup_windows_utf8
+setup_windows_utf8()
 
 
 # ═══════════════════════════════════════════════════════════════

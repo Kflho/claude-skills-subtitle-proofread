@@ -22,6 +22,11 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _ROOT_DIR = _SCRIPT_DIR
 if _ROOT_DIR not in sys.path:
     sys.path.insert(0, _ROOT_DIR)
+# Allow importing from numbered subdirectories (02_fix, 03_nouns, etc.)
+for _sub in ['02_fix', '03_nouns', '04_apply', 'utils']:
+    _sub_path = os.path.join(_ROOT_DIR, _sub)
+    if os.path.isdir(_sub_path) and _sub_path not in sys.path:
+        sys.path.insert(0, _sub_path)
 
 # ── Helpers ──
 

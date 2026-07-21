@@ -11,18 +11,14 @@ import argparse
 import sys
 import os
 
-_script_dir = os.path.dirname(os.path.abspath(__file__))
-_root_dir = os.path.dirname(_script_dir)  # scripts/
-if _root_dir not in sys.path:
-    sys.path.insert(0, _root_dir)
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT_DIR = os.path.dirname(_SCRIPT_DIR)  # scripts/
+if _ROOT_DIR not in sys.path:
+    sys.path.insert(0, _ROOT_DIR)
 
 from lib.whisper_utils import setup_windows_utf8
 from lib.ass_utils import read_ass_file, write_ass_file, iter_ass_files
-
-try:
-    from lib import srt_utils
-except ImportError:
-    import lib.srt_utils as srt_utils
+from lib import srt_utils
 
 
 def clean_srt(lines: list[str]) -> tuple[list[str], int]:

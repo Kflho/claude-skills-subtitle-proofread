@@ -401,13 +401,22 @@ def main():
             if fname not in per_file_fixes:
                 continue
             lines = read_ass_file(fpath)
-            # 按行号降序排列，避免 delete_line 导致后续修复行号偏移
-            file_fixes = sorted(per_file_fixes[fname], key=lambda f: f.get('line', 0), reverse=True)
 
-            # 预解析 SRT cues（用于获取时间码）
+            # 预解析 SRT cues（用于获取时间码 + 时间码→行号转换）
             srt_cues_cache = None
             if _is_srt(fpath):
                 srt_cues_cache = _parse_srt_cues(lines)
+
+            # Resolve timecode-based fixes to line numbers (for noun_checker OP/ED fixes)
+            for fix in per_file_fixes.get(fname, []):
+                if 'line' not in fix and 'start' in fix and srt_cues_cache:
+                    for cue in srt_cues_cache:
+                        if cue.get('start', '').replace(',', '.') == fix['start'].replace(',', '.'):
+                            fix['line'] = cue['_start_line'] + 1  # 1-based line number
+                            break
+
+            # 按行号降序排列，避免 delete_line 导致后续修复行号偏移
+            file_fixes = sorted(per_file_fixes[fname], key=lambda f: f.get('line', 0), reverse=True)
 
             applied = 0
             ep_tag = _extract_ep(fname)
