@@ -238,19 +238,47 @@ def step_nouns(project_dir, lang):
 
 
 def _step_noun_classify(project_dir, lang, checker, target, glossary):
-    """Run noun_checker + auto_classify for unknown proper noun candidates."""
+    """Run noun_checker + auto_classify for unknown proper noun candidates.
+
+    noun_checker writes one *_nouns.json per SRT when there are multiple files.
+    We use a dedicated subdirectory and aggregate the per-file results afterward.
+    """
     print('\n[nouns] Noun table check...', file=sys.stderr)
+
+    # Use a subdirectory for per-file outputs — noun_checker writes one JSON
+    # per SRT when len(srt_files) > 1, so a single-file -o target is ignored.
+    nouns_out_dir = os.path.join(project_dir, 'temp', 'scans', 'nouns')
     _run(['python', checker, target, '--lang', lang,
           '--noun-table', glossary,
-          '-o', os.path.join(project_dir, 'temp', 'scans', 'noun_check.json')],
+          '-o', nouns_out_dir],
          project_dir, desc='nouns')
 
-    noun_json = load_json(os.path.join(project_dir, 'temp', 'scans', 'noun_check.json'))
-    if not noun_json:
-        return {}
+    # Aggregate all per-file *_nouns.json into a single unknown list
+    all_unknowns = []
+    if os.path.isdir(nouns_out_dir):
+        for fname in sorted(os.listdir(nouns_out_dir)):
+            if not fname.endswith('_nouns.json'):
+                continue
+            report = load_json(os.path.join(nouns_out_dir, fname))
+            if not report:
+                continue
+            for r in report.get('results', []):
+                if r.get('status') in ('unknown', 'mismatch'):
+                    # Tag with source episode for context
+                    r['episode'] = os.path.splitext(fname)[0].rsplit('_', 1)[0]
+                    all_unknowns.append(r)
 
-    unknowns = [r for r in noun_json.get('results', [])
-                if r.get('status') in ('unknown', 'mismatch')]
+    # Save aggregated result for backward compatibility (step_apply_all reads this)
+    agg_path = os.path.join(project_dir, 'temp', 'scans', 'noun_check.json')
+    agg_data = {
+        'total_unknown': len(all_unknowns),
+        'results': all_unknowns,
+        'fixes': [],  # placeholder — actual fixes come from auto_classify
+    }
+    with open(agg_path, 'w', encoding='utf-8') as f:
+        json.dump(agg_data, f, ensure_ascii=False, indent=2)
+
+    unknowns = all_unknowns
     if not unknowns:
         return {'total_unknown': 0}
 
@@ -365,7 +393,7 @@ def step_apply_all(project_dir, lang):
 
     # Collect fixes from all sources
     all_fixes = []
-    for src in ['oped_fixes.json', 'noun_check.json']:
+    for src in ['oped_fixes.json', 'noun_check.json', 'noun_accepted_fixes.json']:
         path = os.path.join(project_dir, 'temp', 'scans', src)
         data = load_json(path)
         if data:
