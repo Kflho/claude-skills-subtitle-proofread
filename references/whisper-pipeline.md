@@ -107,8 +107,8 @@ print(f'总计: {len(eps)} 集, {sum(e[1] for e in eps)} issues')
 ## 前置检查
 
 ```bash
-ls D:/software/video/whisper-cublas-*/whisper-cli.exe
-ls D:/software/video/whisper-cublas-*/models/ggml-kotoba-whisper-v2.0-q5_0.bin
+ls <whisper-install-dir>/whisper-cli.exe
+ls <whisper-install-dir>/models/ggml-kotoba-whisper-v2.0-q5_0.bin
 
 # 人声分离（可选但推荐）
 python --version                          # Python 3.12.x

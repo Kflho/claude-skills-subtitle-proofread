@@ -406,17 +406,18 @@ def step_clean(project_dir):
 
 def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True,
                  video_dir=None):
-    """Generate unified human review checklist from Layer 6 ⬜ entries.
+    """Generate per-episode review checklists + video clips.
 
-    One file (reports/manual-review/checklist.md) covers ALL episodes.
-    Entries grouped by episode with ## EP### headers.
+    Each episode gets its own folder: reports/manual-review/{EP}/
+    containing checklist.md and .mp4 clips.  Clips are extracted
+    via ffmpeg from the video files — so video_dir must be correct.
     """
     review_dir = os.path.join(project_dir, 'reports', 'manual-review')
-    os.makedirs(review_dir, exist_ok=True)
-    unified_path = os.path.join(review_dir, 'checklist.md')
     report_path = os.path.join(project_dir, 'reports', '问题解决报告.md')
 
     from utils.update_report import read_report
+    from fix.fix_orchestrator import Fixer
+
     report_data = read_report(report_path)
     layer6 = report_data.get('6', [])
     pending = [e for e in layer6 if e.get('status') == '⬜']
@@ -431,184 +432,70 @@ def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True,
         ep = e.get('ep', '?')
         by_ep.setdefault(ep, []).append(e)
 
-    # Build unified checklist markdown
-    from datetime import datetime
-    today = datetime.now().strftime('%Y-%m-%d')
-    lines = [
-        f'# 人工审查清单',
-        f'> 导出: {today}',
-        f'> 共 {len(by_ep)} 集 {len(pending)} 条待审查',
-        f'> version: 3  (unified)',
-        f'>',
-        f'> **填写方法**：看视频 + 读上下文 → 在「修正:」后写正确台词。',
-        f'> 写「删除」移除该 cue。填完运行 --apply-checklist。',
-        f'>',
-        f'---',
-        f'',
-    ]
+    total_entries = 0
+    total_clips = 0
 
     for ep in sorted(by_ep.keys()):
-        entries = by_ep[ep]
-        lines.append(f'## {ep} ({len(entries)}条)')
-        lines.append('')
-        for entry in entries:
-            timecode = entry.get('time', '?')
-            original = entry.get('original', '')
-            corrected = entry.get('corrected', '')
-            safe_tc = timecode.replace(':', '-').replace(',', '-').replace('.', '-')
-            clip_name = f'{ep}_{safe_tc}.mp4'
-            clip_path = os.path.join(review_dir, clip_name)
-            clip_str = clip_name if os.path.exists(clip_path) else '(需先生成)'
-            lines.append(
-                f'{ep} | {timecode}\n'
-                f'残留: {original}\n'
-                f'片段: {clip_str}\n'
-                f'修正: {corrected}\n'
-                f'\n---\n'
-            )
+        ep_dir = os.path.join(review_dir, ep)
+        print(f'\n[deliver] {ep}: {len(by_ep[ep])} pending → {ep_dir}', file=sys.stderr)
 
-    with open(unified_path, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(lines))
+        # Fixer.review() with output_dir: clips + checklist in per-ep folder
+        fixer = Fixer(ep, project_dir, video_dir=video_dir)
+        checklist_path = fixer.review(output_dir=ep_dir)
 
-    print(f'\n[deliver] Unified checklist: {unified_path}', file=sys.stderr)
-    print(f'[deliver] {len(pending)} pending items across {len(by_ep)} episodes',
+        if checklist_path:
+            # Count extracted clips
+            clips = [f for f in os.listdir(ep_dir) if f.endswith('.mp4')]
+            total_clips += len(clips)
+            total_entries += len(by_ep[ep])
+            print(f'[deliver]   {checklist_path} ({len(clips)} clips)', file=sys.stderr)
+
+    print(f'\n[deliver] {total_entries} pending items across {len(by_ep)} episodes',
           file=sys.stderr)
-    print(f'[deliver] After filling corrections, run:',
-          file=sys.stderr)
+    print(f'[deliver] {total_clips} video clips extracted', file=sys.stderr)
+    print(f'[deliver] After filling corrections, run:', file=sys.stderr)
     print(f'  python scripts/run_all.py --lang {lang} --apply-checklist',
           file=sys.stderr)
     return True
 
 
 def step_apply_checklist(project_dir, lang, video_dir=None):
-    """Apply filled unified human review checklist → SRT + report.
+    """Apply filled per-episode review checklists → SRT + report.
 
-    Parses reports/manual-review/checklist.md (v3 unified format),
-    applies corrections per-episode via Fixer.apply() with VAD alignment.
+    Scans reports/manual-review/{EP}/checklist.md for each episode folder,
+    applies corrections via Fixer.apply() with VAD alignment.
     """
     review_dir = os.path.join(project_dir, 'reports', 'manual-review')
-    unified_path = os.path.join(review_dir, 'checklist.md')
-
-    if not os.path.exists(unified_path):
-        print('[apply-checklist] Unified checklist not found.', file=sys.stderr)
+    if not os.path.isdir(review_dir):
+        print('[apply-checklist] No manual-review/ directory.', file=sys.stderr)
         return False
 
     from fix.fix_orchestrator import Fixer
-    corrections_by_ep = _parse_unified_checklist(unified_path)
-    if not corrections_by_ep:
-        print('[apply-checklist] No corrections found in checklist.', file=sys.stderr)
+
+    # Find per-episode folders with a checklist
+    ep_dirs = []
+    for name in sorted(os.listdir(review_dir)):
+        ep_dir = os.path.join(review_dir, name)
+        if os.path.isdir(ep_dir) and re.match(r'EP\d{3}$', name):
+            chk = os.path.join(ep_dir, 'checklist.md')
+            if os.path.exists(chk):
+                ep_dirs.append((name, chk))
+
+    if not ep_dirs:
+        print('[apply-checklist] No per-episode checklist.md files found.',
+              file=sys.stderr)
         return False
 
     total_applied = 0
-    for ep in sorted(corrections_by_ep.keys()):
-        ep_corrections = corrections_by_ep[ep]
-        tmp_path = os.path.join(review_dir, f'{ep}_checklist.md')
-        _write_ep_checklist(tmp_path, ep, ep_corrections)
+    for ep, checklist_path in ep_dirs:
         fixer = Fixer(ep, project_dir, video_dir=video_dir)
-        applied = fixer.apply(tmp_path)
+        applied = fixer.apply(checklist_path)
         total_applied += applied
         print(f'[apply-checklist] {ep}: {applied} corrections applied', file=sys.stderr)
 
     print(f'\n[apply-checklist] Total: {total_applied} corrections across '
-          f'{len(corrections_by_ep)} episodes', file=sys.stderr)
+          f'{len(ep_dirs)} episodes', file=sys.stderr)
     return total_applied > 0
-
-
-def _parse_unified_checklist(path):
-    """Parse unified checklist (version 3) into {ep: [corrections]}.
-
-    Supports both version 3 (unified) and version 2 (per-ep) for
-    backward compatibility.
-    """
-    with open(path, 'r', encoding='utf-8') as f:
-        content = f.read()
-
-    # Detect version
-    is_v3 = 'version: 3' in content
-
-    if is_v3:
-        corrections_by_ep = {}
-        # Split by episode headers: ## EP###
-        sections = re.split(r'\n(?=## EP\d{3} )', content)
-        for section in sections:
-            ep_match = re.match(r'## (EP\d{3})', section)
-            if not ep_match:
-                continue
-            ep = ep_match.group(1)
-            corrections = _parse_v3_section(section)
-            if corrections:
-                corrections_by_ep[ep] = corrections
-        return corrections_by_ep
-    else:
-        # Legacy v2: parse for single episode, infer EP from filename or content
-        corrections = _parse_v2_entries(content)
-        if not corrections:
-            return {}
-        # Try to find EP in content
-        ep_match = re.search(r'(EP\d{3})', content)
-        ep = ep_match.group(1) if ep_match else '???'
-        return {ep: corrections}
-
-
-def _parse_v3_section(section):
-    """Parse one episode section of a v3 unified checklist."""
-    corrections = []
-    blocks = re.split(r'\n---\n', section)
-    for block in blocks:
-        tc_match = re.search(r'(EP\d{3})\s*\|\s*(\d{2}:\d{2}:\d{2}[.,]\d{3})', block)
-        if not tc_match:
-            continue
-        timecode = tc_match.group(2).replace(',', '.')
-        if re.search(r'^\s*✅', block, re.MULTILINE):
-            continue  # Already done
-        corr_match = re.search(r'修正:\s*\n?(.+?)(?=\n---|\n\Z|\Z)', block, re.DOTALL)
-        if not corr_match:
-            continue
-        text = corr_match.group(1).strip()
-        corrections.append({'time': timecode, 'text': text})
-    return corrections
-
-
-def _parse_v2_entries(content):
-    """Parse legacy v2 checklist entries."""
-    corrections = []
-    blocks = re.split(r'\n---\n', content)
-    for block in blocks:
-        tc_match = re.search(
-            r'(\d{2}:\d{2}:\d{2}[.,]\d{3})\s*~\s*(\d{2}:\d{2}:\d{2}[.,]\d{3})?', block)
-        if not tc_match:
-            continue
-        timecode = tc_match.group(1).replace(',', '.')
-        if re.search(r'^\s*✅', block, re.MULTILINE):
-            continue
-        corr_match = re.search(r'修正:\s*\n?(.+?)(?=\n---|\n\Z|\Z)', block, re.DOTALL)
-        if not corr_match:
-            continue
-        text = corr_match.group(1).strip()
-        corrections.append({'time': timecode, 'text': text})
-    return corrections
-
-
-def _write_ep_checklist(path, ep, corrections):
-    """Write a temporary per-ep checklist for Fixer.apply() compatibility."""
-    lines = [
-        f'# 人工审查清单 — {ep}',
-        f'> version: 2',
-        f'> 共 {len(corrections)} 条',
-        f'',
-        f'---',
-        f'',
-    ]
-    for c in corrections:
-        lines.append(
-            f'{ep} | {c["time"]} ~ ? | ?.mp4\n'
-            f'来源: unified checklist\n'
-            f'残留: (see unified)\n'
-            f'修正: {c["text"]}\n'
-            f'\n---\n'
-        )
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(lines))
 
 
 def _detect_video_dir(project_dir, explicit=None):
@@ -769,7 +656,9 @@ Examples:
     print(f'{"="*55}', file=sys.stderr)
 
     if args.dry_run:
-        print('\n[DRY RUN] — no files will be modified\n', file=sys.stderr)
+        print('\n[DRY RUN] — scan only, no files will be modified\n', file=sys.stderr)
+        step_scan(project_dir, args.lang)
+        _print_progress(project_dir, 'Status: dry-run scan')
         return
 
     # ── Fast path: AI review apply only ──

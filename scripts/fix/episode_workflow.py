@@ -33,6 +33,7 @@ from datetime import datetime
 import lib._path  # noqa: F401
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_SCRIPTS_DIR = os.path.dirname(_SCRIPT_DIR)  # scripts/ — needed for subprocess PYTHONPATH
 
 from lib.whisper_utils import to_seconds, setup_windows_utf8, parse_srt
 from lib.project_utils import load_json, detect_mode, norm_ep, find_srt
@@ -90,7 +91,7 @@ def step_translate(project_dir, episode, scan_result, dry_run=False):
     try:
         env = os.environ.copy()
         if _SCRIPT_DIR not in env.get('PYTHONPATH', ''):
-            env['PYTHONPATH'] = _SCRIPT_DIR + (os.pathsep + env['PYTHONPATH'] if env.get('PYTHONPATH') else '')
+            env['PYTHONPATH'] = _SCRIPTS_DIR + (os.pathsep + env['PYTHONPATH'] if env.get('PYTHONPATH') else '')
         result = subprocess.run([str(p) for p in cmd_parts], cwd=project_dir, env=env,
                                 capture_output=False, timeout=1800)
         if result.returncode != 0:
@@ -191,13 +192,11 @@ def step_apply(project_dir, episode, fixes_or_report, scan_result, no_backup=Fal
         print('[apply] No fixes to report.')
         return [], []
 
-    ai_review_items = report.details if hasattr(report, 'details') and isinstance(report.details, list) else []
     print(f'[apply] {report.applied} fixed, {report.ai_review} AI review, '
           f'{report.failed} unfixable (already applied to SRT & report)')
 
-    if ai_review_items:
-        _write_ai_review_json(project_dir, episode, ai_review_items)
-    return [], ai_review_items
+    # AI review JSON no longer generated — tracked in report Layer 2.5 only
+    return [], []
 
 
 def _write_ai_review_json(project_dir, episode, ai_review_items, cues=None):
@@ -466,32 +465,17 @@ def _run_pipeline(project_dir, episode, mode, args):
         elif step == 'diff':
             step_diff(project_dir, episode, scan_result, applied)
 
-    # Final summary + auto-generate checklists for unfixable items
+    # Final summary (checklists + clips now generated in step_deliver)
     if not args.dry_run and 'apply' in steps:
         n_fixed = fixes.applied
         n_ai = fixes.ai_review
         n_failed = fixes.failed
 
-        # Auto-generate checklists for unfixable items
-        from fix.fix_orchestrator import Fixer
-        fixer = Fixer(episode, project_dir, video_dir=args.video_dir)
-
-        if n_ai > 0:
-            print(f'\n[auto] Generating AI review checklist for {n_ai} short fragments...')
-            fixer.review_ai()
-
-        if n_failed > 0:
-            print(f'\n[auto] Generating human review checklist for {n_failed} unfixable items...')
-            fixer.review()
-
         print()
         print('=' * 55)
-        print(f'  Done: {n_fixed} auto-keep, {n_ai} AI complete, '
+        print(f'  Done: {n_fixed} auto-keep, {n_ai} AI review, '
               f'{n_failed} → L6 human')
-        if n_ai:
-            print(f'  AI review: reports/manual-review/{episode}_ai_review.md')
-        if n_failed:
-            print(f'  Human review: reports/manual-review/{episode}_checklist.md')
+        print(f'  Reports + clips → generated in Layer 6 step_deliver')
         print('=' * 55)
 
 

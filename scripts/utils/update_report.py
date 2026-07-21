@@ -159,14 +159,18 @@ def _parse_table_row(line):
     cells = [c.strip() for c in line.split('|')]
     # 表格行格式: '' 'EP002' '00:02:00.490' 'me' '修正' '✅' ''
     # cells[0] 和 cells[-1] 是空字符串（行首行尾的 |）
-    valid = [c for c in cells if c]
-    if len(valid) < 4:
+    # 用固定位置而非 filter，因为 corrected 可能是空字符串
+    if len(cells) < 6:
+        return None
+    ep, t, orig, corr, status = cells[1], cells[2], cells[3], cells[4], cells[5]
+    if not ep or not t:
         return None
 
-    entry = {'ep': valid[0], 'time': valid[1], 'original': valid[2]}
-    entry['corrected'] = valid[3] if len(valid) > 3 else ''
-    entry['status'] = valid[4] if len(valid) > 4 else '⬜'
-    return entry
+    return {
+        'ep': ep, 'time': t, 'original': orig,
+        'corrected': corr,
+        'status': status or '⬜',
+    }
 
 
 def read_report(path):

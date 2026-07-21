@@ -35,6 +35,7 @@ from datetime import datetime
 import lib._path  # noqa: F401
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_SCRIPTS_DIR = os.path.dirname(_SCRIPT_DIR)  # scripts/ — needed for subprocess PYTHONPATH
 
 from lib.whisper_utils import (
     setup_windows_utf8, extract_ep_number, to_seconds, format_tc,
@@ -73,10 +74,12 @@ class FixReport:
 # Fixer
 # ═══════════════════════════════════════════════════════════════
 
-# Default Whisper paths (can be overridden in constructor)
-DEFAULT_WHISPER_CLI = r'D:/software/video/whisper-cublas-12.4.0-bin-x64/whisper-cli.exe'
-DEFAULT_WHISPER_MODEL = r'D:/software/video/whisper-cublas-12.4.0-bin-x64/models/ggml-kotoba-whisper-v2.0-q5_0.bin'
-DEFAULT_RETRY_MODEL = r'D:/software/video/whisper-cublas-12.4.0-bin-x64/models/ggml-large-v3-q5_0.bin'
+# Default Whisper paths — read from environment variables.
+# Set WHISPER_CLI, WHISPER_MODEL, and WHISPER_RETRY_MODEL in your shell
+# or pass whisper_cli=/model=/retry_model= to the Fixer constructor.
+DEFAULT_WHISPER_CLI = os.environ.get('WHISPER_CLI', '')
+DEFAULT_WHISPER_MODEL = os.environ.get('WHISPER_MODEL', '')
+DEFAULT_RETRY_MODEL = os.environ.get('WHISPER_RETRY_MODEL', '')
 
 
 class Fixer:
@@ -124,6 +127,11 @@ class Fixer:
         self._whisper_cli = whisper_cli or DEFAULT_WHISPER_CLI
         self._model = model or DEFAULT_WHISPER_MODEL
         self._retry_model = retry_model or DEFAULT_RETRY_MODEL
+
+        if not self._whisper_cli:
+            print('[Fixer] WARNING: WHISPER_CLI env var not set. '
+                  'Set it or pass whisper_cli= to use Whisper fixes.',
+                  file=sys.stderr)
 
         # Lazy-loaded state
         self._srt_path = None
@@ -300,10 +308,19 @@ class Fixer:
         Returns FixReport.
         """
         if not self._video_path:
+            msg = (f'[whisper] {self.episode}: No video file found.\n'
+                   f'  Searched: video_dir={self._video_dir or "(not set)"}, '
+                   f'project/video, project/videos.\n'
+                   f'  Fix: pass --video-dir, or add the path to CLAUDE.md '
+                   f'under 「项目路径」with 「视频」in the description.')
+            print(msg, file=sys.stderr)
             return FixReport(source='whisper', failed=0,
                              details=['No video file found'])
 
         if not self._srt_path:
+            msg = (f'[whisper] {self.episode}: No SRT file found in '
+                   f'{self._srt_dir}')
+            print(msg, file=sys.stderr)
             return FixReport(source='whisper', failed=0,
                              details=['No SRT file to fix'])
 
@@ -573,7 +590,7 @@ class Fixer:
                 try:
                     env = os.environ.copy()
                     if _SCRIPT_DIR not in env.get('PYTHONPATH', ''):
-                        env['PYTHONPATH'] = _SCRIPT_DIR + (os.pathsep + env['PYTHONPATH'] if env.get('PYTHONPATH') else '')
+                        env['PYTHONPATH'] = _SCRIPTS_DIR + (os.pathsep + env['PYTHONPATH'] if env.get('PYTHONPATH') else '')
                     subprocess.run([
                         sys.executable, translate_script,
                         ref_srt, '--to', self.target_lang,
@@ -593,11 +610,9 @@ class Fixer:
             whisper_result = self.fix_by_whisper()
             report.merge(whisper_result)
 
-        # Priority 3: Human review for still unfixable
-        if not self.is_clean():
-            checklist = self.review()
-            if checklist:
-                report.details.append(f'Checklist: {checklist}')
+        # Human review checklist is generated later by run_all.py:step_deliver().
+        # Don't generate it here — that would create a duplicate flat-file
+        # checklist alongside the per-ep-folder one.
 
         print(f'\n[{self.episode}] Auto-fix complete: '
               f'{report.applied} applied, {report.failed} → manual review',
@@ -623,6 +638,7 @@ class Fixer:
             Path to checklist.md, or None if nothing to review
         """
         out_dir = output_dir or self._review_dir
+        is_per_ep = bool(output_dir)  # per-ep folder mode: no EP prefix, checklist.md
 
         # Read unfixable from report Layer 6
         from utils.update_report import read_report
@@ -650,25 +666,55 @@ class Fixer:
         entries_md = []
         extracted = 0
         skipped = 0
+        auto_cut = 0
 
         for cl in clusters:
-            # Use the first garbled cue's timecode as the entry key
             first_g = cl['garbled'][0]
             last_g = cl['garbled'][-1]
             start_ts = first_g['start']
             safe_start = start_ts.replace(':', '-').replace(',', '-').replace('.', '-')
-            clip_name = f'{self.episode}_{safe_start}.mp4'
+
+            # Per-ep folder mode: clip is <timestamp>.mp4 inside the ep folder
+            clip_name = f'{safe_start}.mp4'
             clip_path = os.path.join(out_dir, clip_name)
 
-            # ── Human review clip: garbled cue + VAD non-speech padding, max 5s ──
-            # Whisper needs adjacent clean cues for acoustic context, but humans
-            # only need to see/hear the garbled segment itself.  Use VAD speech_segs
-            # to find non-speech padding around the garbled cues.
             garbled_start = first_g['start_s']
             garbled_end = last_g['end_s']
-            clip_start, clip_end = self._compute_review_clip_bounds(
+
+            # ── VAD-aware clip bounds ──
+            bounds = self._compute_review_clip_bounds(
                 garbled_start, garbled_end, cl.get('ss'), cl.get('es'))
 
+            left_text = cl.get('left_text', '')
+            right_text = cl.get('right_text', '')
+            garbled_texts = ' | '.join(g['text'][:60] for g in cl['garbled'])
+
+            # ── Auto-cut #1: zero VAD speech → silently mark resolved ──
+            if bounds is None:
+                auto_cut += 1
+                self._mark_report_resolved(cl['garbled'], 'zero VAD speech')
+                continue
+
+            clip_start, clip_end = bounds
+
+            # ── Auto-cut #2: no meaningful Japanese dialogue ──
+            # Count Japanese characters that are NOT just exclamations.
+            # あっ！えーっ！うんうん… are non-verbal sounds, not dialogue.
+            # Only kana/kanji outside the EXCLAMATION_KANA set count as
+            # evidence of real speech worth human review.
+            all_jp = sum(1 for c in garbled_texts
+                        if 'ぁ' <= c <= 'ヿ' or '一' <= c <= '鿿')
+            exclamation_jp = sum(1 for c in garbled_texts
+                                if c in self.EXCLAMATION_KANA)
+            meaningful_jp = all_jp - exclamation_jp
+            if meaningful_jp < 2:
+                auto_cut += 1
+                self._mark_report_resolved(
+                    cl['garbled'],
+                    f'no dialogue JP ({all_jp} jp, {exclamation_jp} exclamation, {meaningful_jp} meaningful)')
+                continue
+
+            # ── Extract clip for human review ──
             if not os.path.exists(clip_path) and self._video_path:
                 ok = self._extract_clip(self._video_path, clip_start,
                                         clip_end, clip_path)
@@ -678,11 +724,6 @@ class Fixer:
                     skipped += 1
             elif os.path.exists(clip_path):
                 extracted += 1
-
-            # Build context text from cluster
-            left_text = cl.get('left_text', '')
-            right_text = cl.get('right_text', '')
-            garbled_texts = ' | '.join(g['text'][:60] for g in cl['garbled'])
 
             entries_md.append(
                 f'{self.episode} | {start_ts} ~ {first_g.get("end", "?")}\n'
@@ -696,7 +737,10 @@ class Fixer:
             )
 
         # Write checklist
-        checklist_path = os.path.join(out_dir, f'{self.episode}_checklist.md')
+        if is_per_ep:
+            checklist_path = os.path.join(out_dir, 'checklist.md')
+        else:
+            checklist_path = os.path.join(out_dir, f'{self.episode}_checklist.md')
         with open(checklist_path, 'w', encoding='utf-8') as f:
             f.write(f'# 人工审查清单 — {self.episode}\n'
                     f'> 导出: {today}\n'
@@ -714,7 +758,8 @@ class Fixer:
         self._save_review_clusters(clusters)
 
         print(f'[{self.episode}] review: {len(entries_md)} entries → '
-              f'{checklist_path} ({extracted} clips, {skipped} skipped)',
+              f'{checklist_path} ({extracted} clips, {skipped} ffmpeg-failed, '
+              f'{auto_cut} auto-cut)',
               file=sys.stderr)
         return checklist_path
 
@@ -993,44 +1038,80 @@ class Fixer:
             return None
 
     def _compute_review_clip_bounds(self, garbled_start, garbled_end,
-                                     cluster_ss, cluster_es, max_pad=5.0):
-        """Compute video clip boundaries for human review.
+                                     cluster_ss, cluster_es, max_pad=2.0):
+        """Compute video clip boundaries for human review — VAD-aware v2.
 
-        Unlike Whisper (needs adjacent clean cues for context), humans only
-        need the garbled segment + VAD non-speech padding on each side.
-        Each side's padding is capped at *max_pad* seconds (default 5s).
-        The total clip = garbled + up to 2 × max_pad of silence.
+        Returns (clip_start_s, clip_end_s) or None if no speech detected.
+        None = auto-cut (don't generate clip, mark as resolved).
         """
         speech_segs = self._load_speech_segs()
-        pad_before = 0.0
-        pad_after = 0.0
+        if not speech_segs:
+            return (max(cluster_ss, garbled_start - 0.5),
+                    min(cluster_es, garbled_end + 0.5))
 
-        if speech_segs:
-            last_speech_end = None
-            for ss, es in speech_segs:
-                if es <= garbled_start:
-                    last_speech_end = es
-            if last_speech_end is not None:
-                pad_before = min(garbled_start - last_speech_end, max_pad)
-            else:
-                pad_before = min(garbled_start - cluster_ss, max_pad)
+        # ── 1. Speech overlap with garbled cues ──
+        garbled_speech_dur = 0.0
+        for ss, es in speech_segs:
+            overlap = min(es, garbled_end) - max(ss, garbled_start)
+            if overlap > 0:
+                garbled_speech_dur += overlap
 
-            first_speech_after = None
-            for ss, es in speech_segs:
-                if ss >= garbled_end:
-                    first_speech_after = ss
-                    break
-            if first_speech_after is not None:
-                pad_after = min(first_speech_after - garbled_end, max_pad)
-            else:
-                pad_after = min(cluster_es - garbled_end, max_pad)
-        else:
-            pad_before = 0.5
-            pad_after = 0.5
+        if garbled_speech_dur <= 0:
+            return None
 
-        clip_start = max(cluster_ss, garbled_start - pad_before)
-        clip_end = min(cluster_es, garbled_end + pad_after)
+        # ── 2. Initial: garbled ± max_pad ──
+        clip_start = max(cluster_ss, garbled_start - max_pad)
+        clip_end = min(cluster_es, garbled_end + max_pad)
+
+        # ── 3. Snap to VAD boundaries (capped) ──
+        # Only extend if a speech segment overlaps the garbled range
+        # AND its edge is within max_pad of the garbled boundary.
+        # We do NOT pull in a 20s speech segment that starts far
+        # before the garbled cue — that's unrelated dialogue.
+        for ss, es in speech_segs:
+            if es >= garbled_start and ss <= garbled_end:
+                if ss < garbled_start and garbled_start - ss <= max_pad:
+                    clip_start = min(clip_start, ss)
+                if es > garbled_end and es - garbled_end <= max_pad:
+                    clip_end = max(clip_end, es)
+        clip_start = max(cluster_ss, clip_start)
+        clip_end = min(cluster_es, clip_end)
+
+        # ── 4. Trim long silences at edges ──
+        clip_start = self._trim_leading_silence(
+            clip_start, clip_end, max_pad, speech_segs)
+        clip_end = self._trim_trailing_silence(
+            clip_start, clip_end, max_pad, speech_segs)
+
         return clip_start, clip_end
+
+    @staticmethod
+    def _trim_leading_silence(start_s, end_s, max_pad, speech_segs):
+        """Advance start_s if there is > max_pad of silence before first speech."""
+        first_speech = None
+        for ss, es in speech_segs:
+            if es >= start_s:
+                first_speech = ss
+                break
+        if first_speech is not None and first_speech > start_s:
+            silence = first_speech - start_s
+            if silence > max_pad:
+                return first_speech - max_pad
+        return start_s
+
+    @staticmethod
+    def _trim_trailing_silence(start_s, end_s, max_pad, speech_segs):
+        """Pull back end_s if there is > max_pad of silence after last speech."""
+        last_speech = None
+        for ss, es in reversed(speech_segs):
+            if ss <= end_s:
+                last_speech = es
+                break
+        if last_speech is not None and last_speech < end_s:
+            silence = end_s - last_speech
+            if silence > max_pad:
+                return last_speech + max_pad
+        return end_s
 
     # ═══════════════════════════════════════════════════════════
     # Internal helpers
@@ -1044,6 +1125,19 @@ class Fixer:
         except Exception as e:
             print(f'[report] Failed to update Layer {step}: {e}',
                   file=sys.stderr)
+
+    def _mark_report_resolved(self, garbled_cues, reason=''):
+        """Mark Layer 6 report entries as resolved for all cues in a cluster."""
+        from utils.update_report import update_entry_status
+        for g in garbled_cues:
+            ts = g.get('start', '')
+            ok = update_entry_status(
+                self._report_path, step='6', ep=self.episode,
+                time=ts, status='✅',
+                corrected=f'[auto-cut: {reason}]' if reason else '[auto-cut]')
+            if not ok:
+                print(f'  [warn] Could not find report entry for {ts}',
+                      file=sys.stderr)
 
     # ── VAD & review cluster persistence ──
 
@@ -1074,24 +1168,79 @@ class Fixer:
     def _review_clusters_path(self):
         return os.path.join(self._temp_dir, f'{self.episode}_review_clusters.json')
 
+    # ── Review-specific clustering (tighter than Whisper's 60s gap) ──
+    REVIEW_CLUSTER_GAP = 8.0   # seconds — max gap between garbled cues in a review cluster
+
+    # Kana used exclusively in exclamations/grunts/sound-effects, not dialogue.
+    # あっ！えーっ！おっ！うんうん… etc. are non-verbal sounds Whisper
+    # transcribed as kana; they don't indicate real dialogue content.
+    EXCLAMATION_KANA = frozenset(
+        'あいうえおぁぃぅぇぉっーん〜'
+        'アイウエオァィゥェォッ'
+    )
+
     def _build_review_clusters(self, cues, pending_items):
-        """Build review clusters using the same logic as Whisper's build_clusters().
+        """Build tight review clusters for human review video clips.
 
-        Groups garbled cues by proximity, expands to adjacent clean cue
-        boundaries.  Returns clusters with left_text/right_text for context
-        display and ss/es for video clip extraction.
+        KEY DIFFERENCE from Whisper's build_clusters():
+        - Uses 8s gap (not 60s) — groups only nearby garbled cues
+        - Does NOT expand to adjacent clean cue boundaries for clip
+          extraction; _compute_review_clip_bounds() uses VAD instead
+        - Still captures left/right clean cue TEXT for context display
+          in the checklist (but NOT for clip time boundaries)
+        - Cluster ss/es = garbled range only; VAD-aware padding is
+          layered on by _compute_review_clip_bounds()
         """
-        from fix.whisper_pipeline import build_clusters
-
-        # Mark garbled cues that match pending items, unmark the rest
+        # Mark garbled cues that match pending items
         pending_starts = {e.get('time', '') for e in pending_items}
         for c in cues:
             if c.get('start', '') in pending_starts:
                 c['is_garbled'] = True
-            elif not c.get('is_garbled'):
-                pass  # keep existing garbled marks
 
-        return build_clusters(cues)
+        # Collect only the garbled cues we care about
+        garbled_cues = [c for c in cues if c.get('is_garbled')
+                       and c.get('start', '') in pending_starts]
+        if not garbled_cues:
+            return []
+
+        # Per-cue clusters: each garbled cue gets its own clip.
+        # No grouping — grouping nearby cues creates 30s clips full of
+        # sound effects when Whisper hallucinates in quick succession.
+        groups = [[g] for g in garbled_cues]
+
+        # Build cluster dicts
+        clusters = []
+        for g_group in groups:
+            first, last = g_group[0], g_group[-1]
+
+            # Find adjacent clean cues for TEXT CONTEXT only
+            # (not for clip boundaries — VAD handles that)
+            first_idx = next((k for k, c in enumerate(cues)
+                            if c['start'] == first['start']), 0)
+            last_idx = next((k for k, c in enumerate(cues)
+                           if c['start'] == last['start']), 0)
+
+            left = next((cues[k] for k in range(first_idx - 1, -1, -1)
+                        if not cues[k].get('is_garbled') and cues[k]['text']), None)
+            right = next((cues[k] for k in range(last_idx + 1, len(cues))
+                         if not cues[k].get('is_garbled') and cues[k]['text']), None)
+
+            # Cluster boundaries: start from the garbled cues, then add
+            # generous headroom so _compute_review_clip_bounds can find
+            # nearby speech.  Edge-truncation there will tighten the final
+            # clip to ≤ 5 s silence on each side.
+            REVIEW_SEARCH_WINDOW = 5.0   # per-cue: tight window
+            ss = max(0, first['start_s'] - REVIEW_SEARCH_WINDOW)
+            es = last['end_s'] + REVIEW_SEARCH_WINDOW
+
+            clusters.append({
+                'ss': ss, 'es': es,
+                'dur': es - ss,
+                'garbled': g_group,
+                'left_text': left['text'] if left else '',
+                'right_text': right['text'] if right else '',
+            })
+        return clusters
 
     def _save_review_clusters(self, clusters):
         """Save cluster info as JSON for apply() to use in VAD alignment."""
@@ -1153,8 +1302,11 @@ class Fixer:
                       end_s: float, output_path: str) -> bool:
         """Extract a video clip using ffmpeg. Returns True on success."""
         clip_start = max(0, start_s)
-        duration = max(end_s - start_s, 2.0)
-        duration = max(2.0, min(duration, 30.0))
+        duration = end_s - start_s
+        # Floor at 2s (minimum watchable), reasonable ceiling at 60s
+        # (bounds are now VAD-aware so most clips stay < 25s;
+        #  the cap is a safety net for pathological edge cases)
+        duration = max(2.0, min(duration, 60.0))
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 

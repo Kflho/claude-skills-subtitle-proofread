@@ -26,9 +26,9 @@
 Claude 自动扫描系统中是否存在 whisper.cpp（CUDA 版）：
 
 ```
-检查路径: D:/software/video/whisper-cublas-*/whisper-cli.exe
-检查模型: models/ggml-kotoba-whisper-v2.0-q5_0.bin (日语推荐)
-备选模型: models/ggml-large-v3-q5_0.bin
+检查路径: <whisper-install-dir>/whisper-cli.exe
+检查模型: <whisper-install-dir>/models/ggml-kotoba-whisper-v2.0-q5_0.bin (日语推荐)
+备选模型: <whisper-install-dir>/models/ggml-large-v3-q5_0.bin
 ```
 
 **已有 whisper** → 记录路径和可用模型，跳到「验证环境」。
@@ -55,7 +55,7 @@ Claude 自动扫描系统中是否存在 whisper.cpp（CUDA 版）：
 1. 手动下载对应版本的 whisper.cpp 压缩包
    - CUDA 版: https://github.com/ggerganov/whisper.cpp/releases → whisper-cublas-12.4.0-bin-x64.zip
    - CPU 版:  whisper-bin-x64.zip
-2. 解压到 D:/software/video/whisper-cublas-*/  （避免中文路径）
+2. 解压到 `<your-software-dir>/whisper-cublas-*/`（避免中文路径）
 3. 手动下载 GGML 模型（日语推荐 kotoba-whisper-v2.0）
    - https://huggingface.co/kotoba-tech/kotoba-whisper-v2.0-ggml/resolve/main/ggml-kotoba-whisper-v2.0-q5_0.bin
    - 放入 models/ 目录
@@ -123,8 +123,8 @@ whisper-cli.exe -m <模型> -l ja -f _test_sep/htdemucs/_test_original/vocals.wa
 
 | 信息 | 示例 | 用途 |
 |------|------|------|
-| whisper.cpp 安装目录 | `D:/software/video/whisper-cublas-12.4.0-bin-x64` | 定位 CLI 和模型 |
-| 视频文件目录 | `D:/Video/Animation/TV/[Anonymoose] 鉄腕アトム (DVD, 10bit)/` | 提取音频 |
+| whisper.cpp 安装目录 | `<your-software-dir>/whisper-cublas-12.4.0-bin-x64` | 定位 CLI 和模型 |
+| 视频文件目录 | `<your-video-dir>/` | 提取音频 |
 | 原语言字幕目录 | `AI审查后/` | 乱码扫描输入 |
 | 视频↔字幕对应规则 | 文件名中的集号匹配 | 自动配对 |
 

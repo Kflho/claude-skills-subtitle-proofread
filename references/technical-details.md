@@ -505,6 +505,21 @@ noun_checker → auto_classify（Jamdict+规则）→ NEEDS_AI 候选项 → AI 
 
 `Fixer.review()` 调用 ffmpeg 提取视频 clip 供人工判断（口型/场景）。参数：libx264 CRF 28，AAC 64k，640px 宽，faststart。
 
+**VAD 感知切片 v2**（2026-07-21 改进）：
+
+| 改进 | 旧行为 | 新行为 |
+|------|--------|--------|
+| 聚类策略 | `build_clusters()` 60s gap + 扩展到相邻 clean cue → 片段时间过长 | 独立 `_build_review_clusters()` 8s tight gap，VAD 边界 |
+| 静音截断 | 固定 ±5s padding → 大量 30s 纯音乐 clip | VAD 检测前后静音 >5s → 截断到 5s |
+| 噪音过滤 | 无 — 所有乱码 cue 都生成 clip | 零 VAD 语音 → 直接砍掉；VAD <1.0s + 残留 ≤5 字母 → 砍掉 |
+| 对话截断 | 固定 padding 不保证完整台词 | 扩展到包含全部 VAD 语音段 → 对话不截断 |
+| 审查清单 | 重复生成双份（flat + per-ep） | 仅 per-ep 文件夹版（`reports/manual-review/EPxxx/checklist.md`） |
+
+**"大胆砍"策略**：要么砍，要么送审，无中间态。
+1. VAD 在乱码时间段零语音 → 自动标记报告 ✅，清单不出现
+2. VAD 语音 <1.0s 且残留 ≤5 字母 → 同上
+3. 其余 → 生成 clip，干净清单条目，无 VAD 备注/警告
+
 ---
 
 ## 13. ASS 格式修补
