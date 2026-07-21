@@ -553,6 +553,13 @@ def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True,
             total_entries += len(by_ep[ep])
             print(f'[deliver]   {checklist_path} ({len(clips)} clips)', file=sys.stderr)
 
+        # Cleanup: if all items were auto-cut (0 clips), remove the folder
+        clips_after = [f for f in os.listdir(ep_dir) if f.endswith('.mp4')] if os.path.isdir(ep_dir) else []
+        if not clips_after:
+            import shutil
+            shutil.rmtree(ep_dir, ignore_errors=True)
+            print(f'[deliver]   {ep}: all auto-cut — folder removed', file=sys.stderr)
+
     print(f'\n[deliver] {total_entries} pending items across {len(by_ep)} episodes',
           file=sys.stderr)
     print(f'[deliver] {total_clips} video clips extracted', file=sys.stderr)
@@ -595,6 +602,18 @@ def _apply_ai_checklists(project_dir, lang):
         print(f'[apply-ai-review] {ep}: {applied} corrections applied',
               file=sys.stderr)
 
+        # Cleanup: remove applied checklist + empty folder
+        ep_dir = os.path.dirname(checklist_path)
+        try:
+            os.remove(checklist_path)
+            remaining = os.listdir(ep_dir)
+            if not remaining:
+                os.rmdir(ep_dir)
+                print(f'[apply-ai-review]   {ep}: folder removed (all done)',
+                      file=sys.stderr)
+        except OSError:
+            pass
+
     print(f'\n[apply-ai-review] Total: {total_applied} corrections across '
           f'{len(ep_dirs)} episodes', file=sys.stderr)
     return total_applied > 0
@@ -633,6 +652,18 @@ def step_apply_checklist(project_dir, lang, video_dir=None):
         applied = fixer.apply(checklist_path)
         total_applied += applied
         print(f'[apply-checklist] {ep}: {applied} corrections applied', file=sys.stderr)
+
+        # Cleanup: remove applied checklist + empty folder
+        ep_dir = os.path.dirname(checklist_path)
+        try:
+            os.remove(checklist_path)
+            remaining = os.listdir(ep_dir)
+            if not remaining:
+                os.rmdir(ep_dir)
+                print(f'[apply-checklist]   {ep}: folder removed (all done)',
+                      file=sys.stderr)
+        except OSError:
+            pass
 
     print(f'\n[apply-checklist] Total: {total_applied} corrections across '
           f'{len(ep_dirs)} episodes', file=sys.stderr)
