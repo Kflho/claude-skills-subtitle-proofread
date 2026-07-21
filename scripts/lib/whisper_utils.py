@@ -319,11 +319,24 @@ def parse_srt(path, mark_garbled=True, op_boundary=OP_BOUNDARY_SEC, ed_boundary=
 
 def write_srt(path, cues):
     """将 cue 列表写回 SRT 文件。"""
+    def _norm_ts(ts):
+        """Normalize timestamp: last dot before space/end → comma (SRT spec)."""
+        ts = ts.strip()
+        # Replace the last '.' in the timestamp part with ',' (SRT standard)
+        # Pattern: HH:MM:SS.mmm → HH:MM:SS,mmm
+        if '.' in ts:
+            # Find the last '.' in the timestamp (before any non-digit tail)
+            parts = ts.split('.')
+            if len(parts) == 2:
+                # Only one dot: HH:MM:SS.mmm
+                ts = f'{parts[0]},{parts[1]}'
+        return ts
+
     os.makedirs(os.path.dirname(path) if os.path.dirname(path) else '.', exist_ok=True)
     with open(path, 'w', encoding='utf-8-sig') as f:
         for i, c in enumerate(cues, 1):
             f.write(f'{i}\n')
-            f.write(f'{c["start"]} --> {c["end"]}\n')
+            f.write(f'{_norm_ts(c["start"])} --> {_norm_ts(c["end"])}\n')
             f.write(f'{c["text"]}\n\n')
 
 
