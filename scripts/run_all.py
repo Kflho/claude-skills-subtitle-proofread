@@ -147,17 +147,16 @@ def step_fix_episodes(project_dir, lang, mode, video_dir=None,
     if len(selected) > 10:
         print(f'[fix] First: {selected[0]}, Last: {selected[-1]}', file=sys.stderr)
 
-    # --skip-if-clean: check episodes before spawning subprocess
+    # --skip-if-clean: fast pre-check (Fixer.is_clean() is cheap — no audio/ffmpeg)
     if skip_if_clean:
         from fix.fix_orchestrator import Fixer
         clean_eps = []
         for ep in selected:
             try:
-                fixer = Fixer(ep, project_dir)
-                if fixer.is_clean():
+                if Fixer(ep, project_dir).is_clean():
                     clean_eps.append(ep)
             except Exception:
-                pass  # if check fails, process anyway
+                pass
         if clean_eps:
             print(f'[fix] --skip-if-clean: {len(clean_eps)} already clean → skipping',
                   file=sys.stderr)
@@ -167,17 +166,28 @@ def step_fix_episodes(project_dir, lang, mode, video_dir=None,
         print('[fix] All episodes already clean — nothing to do.', file=sys.stderr)
         return []
 
-    ep_workflow = os.path.join(_SCRIPT_DIR, 'fix', 'episode_workflow.py')
-    for i, ep in enumerate(selected):
-        cmd = ['python', ep_workflow, ep, '--mode', mode,
-               '--project-dir', project_dir]
-        if video_dir:
-            cmd.extend(['--video-dir', video_dir])
-        if skip_whisper:
-            cmd.append('--skip-whisper')
-        _run(cmd, project_dir, desc=f'ep {i+1}/{len(selected)} {ep}')
+    from fix.episode_workflow import _run_pipeline
 
-    return selected  # return processed episode list for downstream filtering
+    class _Args:
+        step = None
+        dry_run = False
+
+    for i, ep in enumerate(selected):
+        if skip_whisper and mode == 'audio':
+            continue  # audio mode with --skip-whisper: nothing to do
+        args = _Args()
+        if video_dir:
+            args.video_dir = video_dir
+        else:
+            args.video_dir = None
+        args.no_backup = False
+        print(f'[fix] {ep} ({i+1}/{len(selected)})', file=sys.stderr)
+        try:
+            _run_pipeline(project_dir, ep, mode, args)
+        except Exception as e:
+            print(f'[fix] {ep} FAILED: {e}', file=sys.stderr)
+
+    return selected
 
 
 def step_nouns(project_dir, lang):
