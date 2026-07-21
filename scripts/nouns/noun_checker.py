@@ -183,6 +183,32 @@ _ZH_INTRO_PATTERN = re.compile(
 )
 
 
+def _dedup_overlapping(candidates):
+    """Remove overlapping candidates, keeping the longest match at each position.
+
+    When the same text span produces multiple candidates (e.g. ``御茶水博士``
+    also yielding ``茶水博士`` and ``水博士`` via regex at different start
+    positions), only the longest is retained.  Non-overlapping candidates are
+    all kept.
+    """
+    if len(candidates) <= 1:
+        return candidates
+    # Sort: earlier start first; at same start, longer match first
+    candidates.sort(key=lambda c: (c['start'], -len(c['text'])))
+    kept = []
+    for c in candidates:
+        c_end = c['start'] + len(c['text'])
+        overlaps = False
+        for existing in kept:
+            e_end = existing['start'] + len(existing['text'])
+            if c['start'] < e_end and existing['start'] < c_end:
+                overlaps = True
+                break
+        if not overlaps:
+            kept.append(c)
+    return kept
+
+
 class JapaneseExtractor:
     """Extract proper noun candidates from Japanese subtitle cues."""
 
@@ -239,18 +265,13 @@ class JapaneseExtractor:
             for m in re.finditer(r'[゠-ヿ]{2,}', cue_text):
                 word = m.group()
                 if word in known_names_set:
-                    already_covered = any(
-                        abs(c['start'] - m.start()) < len(word)
-                        for c in candidates
-                    )
-                    if not already_covered:
-                        candidates.append({
-                            'text': word, 'name_part': word,
-                            'start': m.start(), 'type': 'known_katakana',
-                            'context': f'既知名詞: {word}',
-                        })
+                    candidates.append({
+                        'text': word, 'name_part': word,
+                        'start': m.start(), 'type': 'known_katakana',
+                        'context': f'既知名詞: {word}',
+                    })
 
-        return candidates
+        return _dedup_overlapping(candidates)
 
 
 class ChineseExtractor:
@@ -296,31 +317,24 @@ class ChineseExtractor:
         # Pattern 4: 「」quoted names (Chinese also uses corner brackets)
         for m in re.finditer(r'[「「]([一-鿿]{1,6})[」」]', cue_text):
             name = m.group(1)
-            already_covered = any(abs(c['start'] - m.start()) < 6 for c in candidates)
-            if not already_covered:
-                candidates.append({
-                    'text': name, 'name_part': name,
-                    'start': m.start(1), 'type': 'quoted',
-                    'context': f'引用: 「{name}」',
-                })
+            candidates.append({
+                'text': name, 'name_part': name,
+                'start': m.start(1), 'type': 'quoted',
+                'context': f'引用: 「{name}」',
+            })
 
         # Pattern 5: Known Chinese names matching noun table
         if known_names_set:
             for m in re.finditer(r'[一-鿿]{2,4}', cue_text):
                 word = m.group()
                 if word in known_names_set:
-                    already_covered = any(
-                        abs(c['start'] - m.start()) < len(word)
-                        for c in candidates
-                    )
-                    if not already_covered:
-                        candidates.append({
-                            'text': word, 'name_part': word,
-                            'start': m.start(), 'type': 'known_hanzi',
-                            'context': f'已知名词: {word}',
-                        })
+                    candidates.append({
+                        'text': word, 'name_part': word,
+                        'start': m.start(), 'type': 'known_hanzi',
+                        'context': f'已知名词: {word}',
+                    })
 
-        return candidates
+        return _dedup_overlapping(candidates)
 
 
 def get_extractor(lang):

@@ -249,16 +249,56 @@ def apply_merge_cues(lines, fix):
     return True, f"合并 {count} 个 cues: {merged_text[:60]}..."
 
 
+def _script_range(ch):
+    """Return a regex character class for the script of *ch*, or None."""
+    if '一' <= ch <= '鿿' or '㐀' <= ch <= '䶿':
+        return r'一-鿿㐀-䶿'          # kanji
+    if '぀' <= ch <= 'ゟ':
+        return r'぀-ゟ'                       # hiragana
+    if '゠' <= ch <= 'ヿ':
+        return r'゠-ヿ'                       # katakana
+    return None
+
+
+def _wrap_cjk_boundary(pattern, original):
+    """Wrap *pattern* with script-aware lookbehind/lookahead so it only
+    matches at the boundary of the same script class.
+
+    Prevents ``水博士`` from matching inside ``御茶水博士``, or
+    ``ラン`` from matching inside ``ウラン``.
+
+    *pattern* should already be ``re.escape``-d.
+    """
+    if not original:
+        return pattern
+
+    first_range = _script_range(original[0])
+    last_range = _script_range(original[-1])
+
+    bounded = pattern
+    if first_range:
+        bounded = r'(?<![' + first_range + r'])' + bounded
+    if last_range:
+        bounded = bounded + r'(?![' + last_range + r'])'
+    return bounded
+
+
 def apply_replace_global(fpath, fix):
-    """全局文本替换（不区分文件/行）。"""
+    """全局文本替换（不区分文件/行）。带 CJK 脚本边界保护，防止子串冲突。"""
     with open(fpath, 'r', encoding='utf-8-sig' if _is_srt(fpath) else 'utf-8') as f:
         content = f.read()
-    count = content.count(fix['original'])
+
+    original = fix['original']
+    replacement = fix['replacement']
+
+    escaped = re.escape(original)
+    bounded = _wrap_cjk_boundary(escaped, original)
+    new_content, count = re.subn(bounded, replacement, content)
+
     if count > 0:
-        content = content.replace(fix['original'], fix['replacement'])
         with open(fpath, 'w', encoding='utf-8') as f:
-            f.write(content)
-    return count > 0, f"全局替换 {count} 处"
+            f.write(new_content)
+    return count > 0, f"全局替换 {count} 处（边界保护）"
 
 
 def apply_replace_global_regex(fpath, fix):
