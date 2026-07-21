@@ -160,7 +160,7 @@ def find_video(project_dir, episode):
     video_dirs = [
         os.path.join(project_dir, 'video'),
         os.path.join(project_dir, 'videos'),
-        r'E:\Animation\TV\[Anonymoose] 鉄腕アトム (DVD, 10bit)',
+        r'D:\Video\Animation\TV\[Anonymoose] 鉄腕アトム (DVD, 10bit)',
     ]
 
     # Common extensions

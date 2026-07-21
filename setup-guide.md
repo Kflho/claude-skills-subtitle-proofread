@@ -124,7 +124,7 @@ whisper-cli.exe -m <模型> -l ja -f _test_sep/htdemucs/_test_original/vocals.wa
 | 信息 | 示例 | 用途 |
 |------|------|------|
 | whisper.cpp 安装目录 | `D:/software/video/whisper-cublas-12.4.0-bin-x64` | 定位 CLI 和模型 |
-| 视频文件目录 | `E:/Animation/TV/[Anonymoose] 鉄腕アトム/` | 提取音频 |
+| 视频文件目录 | `D:/Video/Animation/TV/[Anonymoose] 鉄腕アトム (DVD, 10bit)/` | 提取音频 |
 | 原语言字幕目录 | `AI审查后/` | 乱码扫描输入 |
 | 视频↔字幕对应规则 | 文件名中的集号匹配 | 自动配对 |
 
