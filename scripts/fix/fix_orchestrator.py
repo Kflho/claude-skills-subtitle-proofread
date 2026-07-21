@@ -254,7 +254,7 @@ class Fixer:
             return FixReport(source='reference', failed=0,
                              details=['No current SRT to compare'])
 
-        from compare_srt import compare as compare_cues, parse_srt as parse_ref
+        from fix.compare_srt import compare as compare_cues, parse_srt as parse_ref
 
         current_cues = parse_srt(self._srt_path, mark_garbled=False)
         ref_cues = parse_ref(reference_srt)
@@ -357,7 +357,7 @@ class Fixer:
 
             # Step 1: VAD clean
             if not skip_vad_clean:
-                from whisper_pipeline import vad_delete_nonspeech
+                from fix.whisper_pipeline import vad_delete_nonspeech
                 vad_audio = os.path.join(tmpdir, 'vad_full.wav')
                 try:
                     extract_audio_wav(self._video_path, vad_audio)
@@ -378,7 +378,7 @@ class Fixer:
                 return FixReport(source='whisper', deleted=deleted_count)
 
             # Step 2: Build clusters + run Whisper
-            from whisper_pipeline import (
+            from fix.whisper_pipeline import (
                 build_clusters, run_tier1, run_tier2,
                 UPGRADE_THRESHOLD,
             )

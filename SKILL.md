@@ -26,18 +26,18 @@ argument-hint: [目标目录] [参考字幕目录]
 ```
 scripts/
 ├── run_all.py                  ← 一键全流程
-├── 01_scan/unified_scanner.py   字符扫描 + 术语收集
-├── 02_fix/
+├── scan/unified_scanner.py      字符扫描 + 术语收集
+├── fix/
 │   ├── fix_orchestrator.py      统一修复（参考字幕 → Whisper → 人工）
 │   ├── episode_workflow.py      单集编排器
 │   ├── whisper_pipeline.py      Whisper 重转录（Tier 1 拼接 / Tier 2 整集）
 │   ├── translate_srt.py         百度翻译（text 模式）
 │   └── compare_srt.py           时间码对齐+相似度
-├── 03_nouns/
+├── nouns/
 │   ├── noun_checker.py          专名一致性 + OP/ED 统一
 │   └── build_glossary.py        术语表生成
-├── 04_apply/apply_fixes.py      批量修复（繁→简+翻译腔+fixes）
-├── 05_ass/ass_repair.py         ASS 格式修补
+├── apply/apply_fixes.py         批量修复（繁→简+翻译腔+fixes）
+├── ass/ass_repair.py            ASS 格式修补
 ├── utils/
 │   ├── check_progress.py        进度统计
 │   ├── update_report.py         报告 6 层读写
@@ -80,18 +80,18 @@ python scripts/run_all.py --lang ja --resume            # AI审查后继续
 python scripts/run_all.py --lang ja --apply-checklist   # 应用人工审查修正
 
 # 单集
-python scripts/02_fix/episode_workflow.py EP064         # 全流程
-python scripts/02_fix/episode_workflow.py EP064 --step ai-review  # AI审查
+python scripts/fix/episode_workflow.py EP064         # 全流程
+python scripts/fix/episode_workflow.py EP064 --step ai-review  # AI审查
 
 # Fixer 直接调用
-python scripts/02_fix/fix_orchestrator.py EP002 --step check     # 检查是否干净
-python scripts/02_fix/fix_orchestrator.py EP002 --step whisper   # 只跑 Whisper
-python scripts/02_fix/fix_orchestrator.py EP002 --step review    # 生成审查清单
-python scripts/02_fix/fix_orchestrator.py EP002 --step apply --checklist <path>  # 应用修正
+python scripts/fix/fix_orchestrator.py EP002 --step check     # 检查是否干净
+python scripts/fix/fix_orchestrator.py EP002 --step whisper   # 只跑 Whisper
+python scripts/fix/fix_orchestrator.py EP002 --step review    # 生成审查清单
+python scripts/fix/fix_orchestrator.py EP002 --step apply --checklist <path>  # 应用修正
 
 # 单层调试
-python scripts/01_scan/unified_scanner.py --target-dir AI审查后/ --project-lang ja
-python scripts/03_nouns/noun_checker.py AI审查后/ --lang ja --oped
+python scripts/scan/unified_scanner.py --target-dir AI审查后/ --project-lang ja
+python scripts/nouns/noun_checker.py AI审查后/ --lang ja --oped
 
 # 备份
 git add -A && git commit -m "备份：{做什么}"

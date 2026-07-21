@@ -227,7 +227,7 @@ def step_repair_ass(project_dir, dry_run=False):
         return
 
     target = os.path.join(project_dir, 'AI审查后')
-    script_path = os.path.join(_ROOT_DIR, '05_ass', 'ass_repair.py')
+    script_path = os.path.join(_ROOT_DIR, 'ass', 'ass_repair.py')
 
     if not os.path.exists(script_path):
         print('[repair-ass] ERROR: ass_repair.py not found.')
@@ -378,7 +378,7 @@ def step_compare(project_dir, episode, scan_result, translated_path, dry_run=Fal
         print(f'[compare] DRY RUN — would call Fixer.fix_by_reference()')
         return []
 
-    from fix_orchestrator import Fixer
+    from fix.fix_orchestrator import Fixer
 
     fixer = Fixer(episode, project_dir)
     report = fixer.fix_by_reference(translated_path)
@@ -408,7 +408,7 @@ def step_review(project_dir, episode, dry_run=False):
     out_path = os.path.join(out_dir, f'{episode}_nouns.json')
 
     cmd = ' '.join([
-        'python', os.path.join(_ROOT_DIR, '03_nouns', 'noun_checker.py'),
+        'python', os.path.join(_ROOT_DIR, 'nouns', 'noun_checker.py'),
         f'"{srt_path}"',
         f'--noun-table', f'"{noun_table}"',
         f'--output', f'"{out_path}"',
@@ -457,7 +457,7 @@ def step_audio(project_dir, episode, scan_result, dry_run=False, video_dir=None)
         print(f'\n[audio] DRY RUN — would call Fixer.fix_by_whisper()')
         return issues
 
-    from fix_orchestrator import Fixer
+    from fix.fix_orchestrator import Fixer
 
     fixer = Fixer(episode, project_dir, video_dir=video_dir)
     if fixer.is_clean():

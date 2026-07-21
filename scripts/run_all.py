@@ -22,11 +22,6 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _ROOT_DIR = _SCRIPT_DIR
 if _ROOT_DIR not in sys.path:
     sys.path.insert(0, _ROOT_DIR)
-# Allow importing from numbered subdirectories (02_fix, 03_nouns, etc.)
-for _sub in ['02_fix', '03_nouns', '04_apply', 'utils']:
-    _sub_path = os.path.join(_ROOT_DIR, _sub)
-    if os.path.isdir(_sub_path) and _sub_path not in sys.path:
-        sys.path.insert(0, _sub_path)
 
 # ── Helpers ──
 
@@ -84,7 +79,7 @@ def step_scan(project_dir, lang):
     issues = os.path.join(project_dir, 'temp', 'scans', 'issues')
     os.makedirs(os.path.dirname(findings), exist_ok=True)
 
-    scanner = os.path.join(_SCRIPT_DIR, '01_scan', 'unified_scanner.py')
+    scanner = os.path.join(_SCRIPT_DIR, 'scan', 'unified_scanner.py')
     return _run([
         'python', scanner,
         '--target-dir', f'"{target}"',
@@ -172,7 +167,7 @@ def step_fix_episodes(project_dir, lang, mode, video_dir=None,
 
     # --skip-if-clean: check episodes before spawning subprocess
     if skip_if_clean:
-        from fix_orchestrator import Fixer
+        from fix.fix_orchestrator import Fixer
         clean_eps = []
         for ep in selected:
             try:
@@ -190,7 +185,7 @@ def step_fix_episodes(project_dir, lang, mode, video_dir=None,
         print('[fix] All episodes already clean — nothing to do.', file=sys.stderr)
         return []
 
-    ep_workflow = os.path.join(_SCRIPT_DIR, '02_fix', 'episode_workflow.py')
+    ep_workflow = os.path.join(_SCRIPT_DIR, 'fix', 'episode_workflow.py')
     for i, ep in enumerate(selected):
         cmd = ['python', ep_workflow, ep, '--mode', mode,
                f'--project-dir', f'"{project_dir}"']
@@ -207,7 +202,7 @@ def step_nouns(project_dir, lang):
     """Layer 3: noun_checker — proper nouns + OP/ED consistency."""
     target = os.path.join(project_dir, 'AI审查后')
     glossary = os.path.join(project_dir, 'reports', 'proper-nouns.md')
-    checker = os.path.join(_SCRIPT_DIR, '03_nouns', 'noun_checker.py')
+    checker = os.path.join(_SCRIPT_DIR, 'nouns', 'noun_checker.py')
 
     results = {}
 
@@ -254,7 +249,7 @@ def step_nouns(project_dir, lang):
 def step_apply_all(project_dir, lang):
     """Layer 4: apply_fixes — collect all fixes, apply at once."""
     target = os.path.join(project_dir, 'AI审查后')
-    apply_script = os.path.join(_SCRIPT_DIR, '04_apply', 'apply_fixes.py')
+    apply_script = os.path.join(_SCRIPT_DIR, 'apply', 'apply_fixes.py')
 
     # Collect fixes from all sources
     all_fixes = []
@@ -300,7 +295,7 @@ def step_ass_repair(project_dir):
         return True
 
     target = os.path.join(project_dir, 'AI审查后')
-    repair = os.path.join(_SCRIPT_DIR, '05_ass', 'ass_repair.py')
+    repair = os.path.join(_SCRIPT_DIR, 'ass', 'ass_repair.py')
     return _run(['python', repair, '--target-dir', f'"{target}"', '--check', 'all'],
                 project_dir, desc='ass')
 
@@ -346,7 +341,7 @@ def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True,
             print('[deliver] No checklists found to apply.', file=sys.stderr)
             return True
 
-        from fix_orchestrator import Fixer
+        from fix.fix_orchestrator import Fixer
         total_applied = 0
         for ep in sorted(processed_episodes):
             checklist = os.path.join(review_dir, f'{ep}_checklist.md')
