@@ -34,6 +34,13 @@ import sys
 from collections import defaultdict, Counter
 from difflib import SequenceMatcher
 
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT_DIR = os.path.dirname(os.path.dirname(_SCRIPT_DIR))  # scripts/
+sys.path.insert(0, _ROOT_DIR)
+
+from lib.chinese_utils import TRAD_TO_SIMP_MAP as _TRAD_TO_SIMP, PINYIN_TONES as _PINYIN_TONES
+from lib.japanese_utils import COMMON_KATAKANA as _JA_COMMON_WORDS
+
 # Shared SRT cue regex — timecode + text (no index prefix; callers prepend if needed)
 _SRT_CUE_RE = re.compile(
     r'(\d{2}:\d{2}:\d{2}[.,]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[.,]\d{3})\s*\n'
@@ -131,9 +138,6 @@ def get_normalizer(lang):
 # ═══════════════════════════════════════════════════════════════
 
 # ── Japanese patterns ──
-
-from lib.chinese_utils import TRAD_TO_SIMP_MAP as _TRAD_TO_SIMP, PINYIN_TONES as _PINYIN_TONES
-from lib.japanese_utils import COMMON_KATAKANA as _JA_COMMON_WORDS
 
 _JA_NAME_KANJI_SUFFIX = re.compile(
     r'([一-鿿]{1,4})'

@@ -17,10 +17,9 @@ import re
 import sys
 from collections import defaultdict
 
-
-# ═══════════════════════════════════════════════════════════════
-# Exclusion lists
-# ═══════════════════════════════════════════════════════════════
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT_DIR = os.path.dirname(os.path.dirname(_SCRIPT_DIR))  # scripts/
+sys.path.insert(0, _ROOT_DIR)
 
 from lib.japanese_utils import COMMON_KATAKANA as _COMMON_KATAKANA
 
