@@ -149,7 +149,7 @@ def step_fix_episodes(project_dir, lang, mode, skip_whisper=False,
 
     if not selected:
         print('[fix] No episodes to process.', file=sys.stderr)
-        return True
+        return []
 
     print(f'[fix] {len(selected)} episodes to process', file=sys.stderr)
     if len(selected) > 10:
@@ -163,7 +163,7 @@ def step_fix_episodes(project_dir, lang, mode, skip_whisper=False,
             cmd.append('--skip-whisper')
         _run(cmd, project_dir, desc=f'ep {i+1}/{len(selected)} {ep}')
 
-    return True
+    return selected  # return processed episode list for downstream filtering
 
 
 def step_nouns(project_dir, lang):
@@ -276,13 +276,18 @@ def step_clean(project_dir):
                 project_dir, desc='clean')
 
 
-def step_deliver(project_dir, lang):
+def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True):
     """Layer 6: extract review clips for human delivery.
 
-    Collects unfixable items from:
-      - Whisper fixes (confidence=none) in temp/scans/*_fixes.json
-      - Report layer 6 entries in reports/问题解决报告.md
-      - Noun checker unresolved items in temp/scans/noun_check.json
+    Partial runs (--limit, --episodes, --start-from): only collects fixes JSONs
+    for episodes that were actually processed. Skips report and noun check
+    (their data spans all episodes and can't be filtered).
+
+    Full runs (no limit): collects all sources — fixes JSONs, report, noun check.
+
+    Args:
+        processed_episodes: list of episode IDs processed in this run (for filtering)
+        is_full_run: if True, also scan report + noun check (cross-episode sources)
     """
     report_path = os.path.join(project_dir, 'reports', '问题解决报告.md')
     fixes_dir = os.path.join(project_dir, 'temp', 'scans')
@@ -300,22 +305,36 @@ def step_deliver(project_dir, lang):
         '--output', f'"{output_dir}"',
     ]
 
-    # Add report if it exists and has Layer 6 content
-    if os.path.exists(report_path):
-        cmd.extend(['--report', f'"{report_path}"', '--step', '6'])
-
-    # Add noun check if it exists
-    if os.path.exists(noun_check):
-        cmd.extend(['--noun-check', f'"{noun_check}"'])
-
-    # Collect fixes JSONs — pass all at once (nargs='*' needs single --fixes occurrence)
+    # Collect fixes JSONs — only for episodes processed in this run
     if os.path.isdir(fixes_dir):
-        fix_files = [os.path.join(fixes_dir, f) for f in os.listdir(fixes_dir)
-                     if f.endswith('_fixes.json')]
+        fix_files = []
+        for f in os.listdir(fixes_dir):
+            if not f.endswith('_fixes.json'):
+                continue
+            # Extract episode ID from filename: EP017_fixes.json → EP017
+            ep_match = re.match(r'(EP\d{3})_fixes\.json', f)
+            if ep_match:
+                ep_id = ep_match.group(1)
+                if not processed_episodes or ep_id in processed_episodes:
+                    fix_files.append(os.path.join(fixes_dir, f))
+            else:
+                fix_files.append(os.path.join(fixes_dir, f))  # non-standard name, include
+
         if fix_files:
             cmd.append('--fixes')
             for ff in fix_files:
                 cmd.append(f'"{ff}"')
+
+    # Add report + noun check — only on full runs (cross-episode data)
+    if is_full_run:
+        if os.path.exists(report_path):
+            cmd.extend(['--report', f'"{report_path}"', '--step', '6'])
+        if os.path.exists(noun_check):
+            cmd.extend(['--noun-check', f'"{noun_check}"'])
+    else:
+        print(f'[deliver] Partial run ({len(processed_episodes or [])} episodes) — '
+              f'skipping report & noun check (only processing fixes JSONs).',
+              file=sys.stderr)
 
     if video_dir:
         cmd.extend(['--video-dir', f'"{video_dir}"'])
@@ -411,6 +430,10 @@ Examples:
     # Parse episode selection
     episodes = _parse_episodes(args.episodes) if args.episodes else None
 
+    # Detect partial vs full run (affects Layer 6 delivery scope)
+    is_full_run = (args.limit == 0 and not args.episodes and not args.start_from
+                   and not args.apply_ai_review)
+
     print(f'{"="*55}', file=sys.stderr)
     print(f'  Subtitle Proofread — {mode.upper()} mode, {fmt.upper()} format, '
           f'--lang {args.lang}', file=sys.stderr)
@@ -447,8 +470,8 @@ Examples:
     print(f'\n{"─"*40}', file=sys.stderr)
     print('  Layer 2/6: Semantic fix (translate/Whisper)', file=sys.stderr)
     print(f'{"─"*40}', file=sys.stderr)
-    step_fix_episodes(project_dir, args.lang, mode, skip_whisper=args.skip_whisper,
-                      episodes=episodes, limit=args.limit, start_from=args.start_from)
+    processed = step_fix_episodes(project_dir, args.lang, mode, skip_whisper=args.skip_whisper,
+                                  episodes=episodes, limit=args.limit, start_from=args.start_from)
 
     # ── Layer 3: Proper nouns ──
     print(f'\n{"─"*40}', file=sys.stderr)
@@ -475,7 +498,8 @@ Examples:
     print(f'\n{"─"*40}', file=sys.stderr)
     print('  Layer 6/6: Human review delivery', file=sys.stderr)
     print(f'{"─"*40}', file=sys.stderr)
-    step_deliver(project_dir, args.lang)
+    step_deliver(project_dir, args.lang, processed_episodes=processed,
+                 is_full_run=is_full_run)
 
     # ── Clean ──
     step_clean(project_dir)
