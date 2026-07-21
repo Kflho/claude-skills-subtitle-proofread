@@ -697,6 +697,7 @@ class Fixer:
         extracted = 0
         skipped = 0
         auto_cut = 0
+        auto_cut_times = set()  # collect start times for SRT deletion
 
         for cl in clusters:
             first_g = cl['garbled'][0]
@@ -719,9 +720,10 @@ class Fixer:
             right_text = cl.get('right_text', '')
             garbled_texts = ' | '.join(g['text'][:60] for g in cl['garbled'])
 
-            # ── Auto-cut #1: zero VAD speech → silently mark resolved ──
+            # ── Auto-cut #1: zero VAD speech → delete from SRT ──
             if bounds is None:
                 auto_cut += 1
+                auto_cut_times.update(g['start'] for g in cl['garbled'])
                 self._mark_report_resolved(cl['garbled'], 'zero VAD speech')
                 continue
 
@@ -739,6 +741,7 @@ class Fixer:
             meaningful_jp = all_jp - exclamation_jp
             if meaningful_jp < 2:
                 auto_cut += 1
+                auto_cut_times.update(g['start'] for g in cl['garbled'])
                 self._mark_report_resolved(
                     cl['garbled'],
                     f'no dialogue JP ({all_jp} jp, {exclamation_jp} exclamation, {meaningful_jp} meaningful)')
@@ -765,6 +768,21 @@ class Fixer:
                 f'修正:\n'
                 f'\n---\n'
             )
+
+        # ── Delete auto-cut cues from SRT ──
+        # Auto-cut cues are non-speech noise (e.g. "me", "dai", "af")
+        # that Whisper can't match. The report was already marked ✅;
+        # now actually remove the garbage from the subtitle file.
+        if auto_cut_times:
+            cues = self._load_cues() or parse_srt(
+                self._srt_path, mark_garbled=False, target_lang=self.target_lang)
+            before = len(cues)
+            cues = [c for c in cues if c.get('start') not in auto_cut_times]
+            deleted = before - len(cues)
+            if deleted > 0:
+                write_srt(self._srt_path, cues)
+                print(f'[{self.episode}] review: auto-deleted {deleted} '
+                      f'noise cues from SRT', file=sys.stderr)
 
         # Write checklist
         if is_per_ep:
