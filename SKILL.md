@@ -50,14 +50,17 @@ returns 0 fixes — a silent failure.
 
 ### Step 4: Add user's flags
 
+> ⚠️ **Do NOT add `--apply-ai-review` or `--apply-checklist` to a full run.**
+> These are standalone fast paths (see Step 6 below) — they skip the entire
+> pipeline and only apply already-completed review results. Combining them
+> with a full run causes the pipeline to exit immediately after apply + clean.
+
 | User said | Add this flag |
 |-----------|---------------|
 | "试运行" / "dry run" / "preview" | `--dry-run` (scan only, no file changes) |
 | "第N到M集" / "EP005-EP010" | `-e EP005-EP010` |
 | "前N集" / "first N" | `--limit N` |
 | "从第N集开始" | `--start-from EP0NN` |
-| "应用AI审查" | `--apply-ai-review` |
-| "应用人工校对" | `--apply-checklist` |
 | "跳过Whisper" | `--skip-whisper` |
 | "断点续跑" | `--resume` |
 
@@ -71,6 +74,24 @@ returns 0 fixes — a silent failure.
 | `Done: 0 fixed, 0 AI review, 0 unfixable` + no `[whisper]` messages | **Whisper didn't run.** Check `--video-dir` points to a directory with `.mkv` files |
 | `[whisper] EP00N: No video file found` | Video directory is wrong or empty |
 | `Pipeline complete — all layers passed` | Orchestrator ran all layers without crashing |
+
+### Step 6: Post-pipeline fast paths (standalone — do NOT combine with full run)
+
+These flags run a **single action** and exit. They do NOT scan, run Whisper,
+or process anything new. Use them only AFTER a full pipeline run + human/AI review.
+
+| Flag | What it does | When to use |
+|------|-------------|-------------|
+| `--apply-ai-review` | Apply `temp/scans/ai_review_fixes.json` → SRT + clean | After Claude AI review of proper nouns |
+| `--apply-checklist` | Apply `reports/manual-review/{EP}/checklist.md` → SRT | After human fills in corrections in checklist |
+
+```bash
+# After AI reviews proper nouns:
+python run_all.py --lang ja --apply-ai-review
+
+# After human fills checklist corrections:
+python run_all.py --lang ja --apply-checklist --video-dir "<VIDEO_DIR>"
+```
 
 ## Layers (reference — read only if debugging)
 

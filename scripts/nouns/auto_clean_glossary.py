@@ -270,8 +270,11 @@ def apply_suggestions(suggestions):
     with open(utils_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
-    # Find existing COMMON_KANJI words
+    # Find existing COMMON_KANJI words (from import + from file content)
     existing = set(_COMMON_KANJI) | set(_COMMON_KATAKANA)
+    # Also scan file content for previously inserted words (handles same-process re-calls)
+    for m in re.finditer(r"'([^']+)'", content):
+        existing.add(m.group(1))
 
     # Filter to genuinely new words
     new_words = []
@@ -281,7 +284,7 @@ def apply_suggestions(suggestions):
             existing.add(word)
 
     if not new_words:
-        print('All suggestions already in COMMON_KANJI.', file=sys.stderr)
+        print('All suggestions already in COMMON_KANJI — nothing to add.', file=sys.stderr)
         return 0
 
     # Build the insertion — find the last entry before the closing })

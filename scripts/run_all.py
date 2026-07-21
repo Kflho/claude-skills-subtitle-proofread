@@ -50,13 +50,36 @@ def _run(cmd_parts, cwd, timeout=600, desc=''):
 
 # ── Pipeline steps ──
 
-def step_scan(project_dir, lang):
-    """Layer 1: unified_scanner + build_glossary."""
+def step_scan(project_dir, lang, force_rescan=False):
+    """Layer 1: unified_scanner + build_glossary.
+
+    If findings.json already exists and SRT files haven't changed since
+    last scan, skip re-scanning (idempotent). Use --force-rescan to override.
+    """
     target = os.path.join(project_dir, 'AI审查后')
     findings = os.path.join(project_dir, 'temp', 'scans', 'findings.json')
     issues = os.path.join(project_dir, 'temp', 'scans', 'issues')
     ai_nouns = os.path.join(project_dir, 'temp', 'scans', 'ai_nouns.json')
     os.makedirs(os.path.dirname(findings), exist_ok=True)
+
+    # ── Cache check: skip rescan if SRTs haven't changed ──
+    if not force_rescan and os.path.exists(findings):
+        try:
+            findings_mtime = os.path.getmtime(findings)
+            srt_changed = False
+            if os.path.isdir(target):
+                for fname in os.listdir(target):
+                    if fname.endswith('.srt'):
+                        srt_path = os.path.join(target, fname)
+                        if os.path.getmtime(srt_path) > findings_mtime:
+                            srt_changed = True
+                            break
+            if not srt_changed:
+                print('[scan] findings.json is fresh — skipping rescan '
+                      '(use --force-rescan to override)', file=sys.stderr)
+                return True
+        except Exception:
+            pass  # Fall through to normal scan
 
     scanner = os.path.join(_SCRIPT_DIR, 'scan', 'unified_scanner.py')
     cmd = [
@@ -310,6 +333,31 @@ def _apply_classified_results(project_dir, candidates, unknowns, cands, lang):
     return results
 
 
+def _dedup_fixes(fixes):
+    """Deduplicate fixes by (action, file, original/line) key.
+
+    First occurrence wins (preserves source priority: oped > noun_check > ai_review).
+    """
+    seen = set()
+    result = []
+    for fix in fixes:
+        action = fix.get('action', '')
+        if action in ('replace_global', 'replace_global_regex'):
+            key = (action, fix.get('original', fix.get('pattern', '')))
+        else:
+            key = (action, fix.get('file', ''),
+                   fix.get('original', fix.get('line', '')))
+        if key not in seen:
+            seen.add(key)
+            result.append(fix)
+
+    if len(result) < len(fixes):
+        print(f'[apply] Dedup: {len(fixes)} → {len(result)} fixes '
+              f'(removed {len(fixes) - len(result)} duplicates)', file=sys.stderr)
+
+    return result
+
+
 def step_apply_all(project_dir, lang):
     """Layer 4: apply_fixes — collect all fixes, apply at once."""
     target = os.path.join(project_dir, 'AI审查后')
@@ -335,6 +383,9 @@ def step_apply_all(project_dir, lang):
     if not all_fixes:
         print('[apply] No fixes to apply.', file=sys.stderr)
         return True
+
+    # Deduplicate across sources
+    all_fixes = _dedup_fixes(all_fixes)
 
     # Write combined fixes
     fixes_path = os.path.join(project_dir, 'temp', 'scans', 'all_fixes.json')
@@ -619,6 +670,8 @@ Examples:
                         help='Apply filled human-review checklists (--step deliver only)')
     parser.add_argument('--no-skip-if-clean', action='store_true',
                         help='Process all episodes even if SRT has no garbled cues')
+    parser.add_argument('--force-rescan', action='store_true',
+                        help='Force re-scan even if findings.json is fresh')
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
 
@@ -657,7 +710,7 @@ Examples:
 
     if args.dry_run:
         print('\n[DRY RUN] — scan only, no files will be modified\n', file=sys.stderr)
-        step_scan(project_dir, args.lang)
+        step_scan(project_dir, args.lang, force_rescan=args.force_rescan)
         _print_progress(project_dir, 'Status: dry-run scan')
         return
 
@@ -683,7 +736,7 @@ Examples:
         print(f'\n{"─"*40}', file=sys.stderr)
         print('  Layer 1/6: Character scan', file=sys.stderr)
         print(f'{"─"*40}', file=sys.stderr)
-        step_scan(project_dir, args.lang)
+        step_scan(project_dir, args.lang, force_rescan=args.force_rescan)
 
     _print_progress(project_dir, 'Status: after scan')
 

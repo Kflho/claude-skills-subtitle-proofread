@@ -329,17 +329,23 @@ def write_srt(path, cues):
 
 def apply_fixes_to_srt(path, fixes):
     """将修复列表写入 SRT。fixes: [{'start': '...', 'replacement': '...'}, ...]
-    返回成功修复数。
+    返回成功修复数。已正确的 cue 计入 fixed 但不重写。
     """
     cues = parse_srt(path, mark_garbled=False)
     fixed = 0
+    changed = False
     for cue in cues:
         for f in fixes:
             if f['start'] == cue['start'] and f.get('replacement'):
+                if cue['text'] == f['replacement']:
+                    fixed += 1  # Already correct — count but don't rewrite
+                    break
                 cue['text'] = f['replacement']
                 fixed += 1
+                changed = True
                 break
-    write_srt(path, cues)
+    if changed:
+        write_srt(path, cues)
     return fixed
 
 

@@ -366,6 +366,33 @@ class Fixer:
                       file=sys.stderr)
                 return FixReport(source='whisper', deleted=deleted_count)
 
+            # Filter out cues already marked ✅ in report (idempotent re-run)
+            if garbled:
+                from utils.update_report import read_report
+                try:
+                    report_data = read_report(self._report_path)
+                    layer2_fixed = set()
+                    for entry in report_data.get('2', []):
+                        if (entry.get('ep') == self.episode
+                                and entry.get('status') == '✅'):
+                            layer2_fixed.add(entry.get('time', ''))
+                    if layer2_fixed:
+                        already_ok = [c for c in garbled
+                                      if c.get('start', '') in layer2_fixed]
+                        if already_ok:
+                            print(f'[whisper] {len(already_ok)} cues already '
+                                  f'✅ in report → skipping',
+                                  file=sys.stderr)
+                            garbled = [c for c in garbled
+                                       if c.get('start', '') not in layer2_fixed]
+                except Exception:
+                    pass  # If report read fails, process all — conservative
+
+            if not garbled:
+                print(f'[whisper] All remaining garbled cues already fixed '
+                      f'in report', file=sys.stderr)
+                return FixReport(source='whisper', deleted=deleted_count)
+
             # Step 2: Build clusters + run Whisper
             from fix.whisper_pipeline import (
                 build_clusters, run_tier1, run_tier2,
@@ -498,6 +525,9 @@ class Fixer:
                      'status': '✅'}
                     for f in auto_keep
                 ])
+                # Sync: if any auto-kept cues were previously in L6 (human review),
+                # mark them as resolved so the checklist doesn't show stale entries
+                self._sync_layer6_resolved([f['start'] for f in auto_keep])
 
             # Layer 2.5: short fragments → AI completion
             if ai_short_fragments:
@@ -1138,6 +1168,39 @@ class Fixer:
             if not ok:
                 print(f'  [warn] Could not find report entry for {ts}',
                       file=sys.stderr)
+
+    def _sync_layer6_resolved(self, fixed_starts):
+        """When Whisper re-run fixes a previously-failed cue, clear its L6 entry.
+
+        Only clears L6 entries that have NO human-filled correction text
+        (status protection: human work is never overwritten).
+        """
+        if not fixed_starts:
+            return
+        try:
+            from utils.update_report import read_report, update_entry_status
+            data = read_report(self._report_path)
+            layer6 = data.get('6', [])
+            synced = 0
+            for entry in layer6:
+                if (entry.get('ep') == self.episode
+                        and entry.get('time', '') in fixed_starts
+                        and entry.get('status') == '⬜'):
+                    # Only clear if human hasn't already filled a correction
+                    existing_corrected = entry.get('corrected', '')
+                    if existing_corrected and existing_corrected not in ('', '[auto-cut]', '[auto-cut: zero VAD speech]'):
+                        continue  # Human already worked on this — don't touch
+                    update_entry_status(
+                        self._report_path, step='6',
+                        ep=self.episode, time=entry.get('time', ''),
+                        status='✅',
+                        corrected='[whisper-retry-fixed]')
+                    synced += 1
+            if synced > 0:
+                print(f'[whisper] Synced {synced} L6 entries → ✅ '
+                      f'(Whisper re-run succeeded)', file=sys.stderr)
+        except Exception as e:
+            print(f'[whisper] Failed to sync L6: {e}', file=sys.stderr)
 
     # ── VAD & review cluster persistence ──
 

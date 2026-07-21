@@ -148,6 +148,8 @@ def apply_replace_text(lines, fix):
         if cue is None:
             return False, f"第 {fix['line']} 行不在任何 SRT cue 中"
         old = cue['text']
+        if old == fix['replacement']:
+            return True, f"already correct: {old[:40]}"
         cue['text'] = fix['replacement']
         # 重建文件行
         new_lines = _rebuild_srt_lines(cues)
@@ -193,7 +195,7 @@ def apply_delete_line(lines, fix):
         cues = _parse_srt_cues(lines)
         cue = _find_srt_cue_by_line(cues, fix['line'])
         if cue is None:
-            return False, f"第 {fix['line']} 行不在任何 SRT cue 中"
+            return True, f"already deleted: line {fix['line']}"
         old_text = cue['text'][:40]
         cues.remove(cue)
         new_lines = _rebuild_srt_lines(cues)
@@ -292,7 +294,8 @@ def apply_replace_global(fpath, fix):
     if count > 0:
         with open(fpath, 'w', encoding='utf-8') as f:
             f.write(new_content)
-    return count > 0, f"全局替换 {count} 处（边界保护）"
+        return True, f"全局替换 {count} 处（边界保护）"
+    return True, f"already correct: {original[:40]}"
 
 
 def apply_replace_global_regex(fpath, fix):
@@ -303,7 +306,8 @@ def apply_replace_global_regex(fpath, fix):
     if count > 0:
         with open(fpath, 'w', encoding='utf-8') as f:
             f.write(new_content)
-    return count > 0, f"正则替换 {count} 处"
+        return True, f"正则替换 {count} 处"
+    return True, f"already correct (regex): {fix['pattern'][:40]}"
 
 
 def apply_delete_style(lines, fix):
@@ -382,6 +386,7 @@ def main():
             print(f"⚠ 跳过无效修复项: {fix}")
 
     total_applied = 0
+    total_already = 0
     total_skipped = 0
     report_entries = []  # 用于 --log-to-report
 
@@ -394,16 +399,21 @@ def main():
         print("=== 全局替换 ===\n")
         for fix in global_fixes:
             applied = 0
+            already = 0
             for fname, fpath in iter_ass_files(args.target_dir):
                 if fix['action'] == 'replace_global':
                     ok, msg = apply_replace_global(fpath, fix)
                 else:
                     ok, msg = apply_replace_global_regex(fpath, fix)
-                if ok:
+                if ok and 'already correct' in msg:
+                    already += 1
+                elif ok:
                     applied += 1
             if applied > 0:
                 total_applied += 1
                 print(f"  ✓ {fix.get('note', fix['action'])} → 影响 {applied} 个文件")
+            elif already > 0:
+                total_already += 1
 
     # 2. 样式/注释级修复（仅 ASS）
     if style_fixes:
@@ -476,36 +486,40 @@ def main():
                     ok, msg = False, f"未知 action: {action}"
 
                 if ok:
-                    applied += 1
-                    if args.log_to_report and args.step:
-                        if action == 'replace_text':
-                            report_entries.append({
-                                'ep': ep_tag, 'time': pre_time,
-                                'original': pre_text,
-                                'corrected': fix.get('replacement', '')[:120],
-                                'status': '✅',
-                            })
-                        elif action == 'delete_line':
-                            report_entries.append({
-                                'ep': ep_tag, 'time': pre_time,
-                                'original': pre_text,
-                                'corrected': '(已删除)',
-                                'status': '🗑️',
-                            })
-                        elif action == 'merge_cues':
-                            report_entries.append({
-                                'ep': ep_tag, 'time': pre_time,
-                                'original': pre_text,
-                                'corrected': f'合并 {fix.get("count", 2)} 个 cues',
-                                'status': '✅',
-                            })
-                        elif action == 'replace_name':
-                            report_entries.append({
-                                'ep': ep_tag, 'time': pre_time,
-                                'original': f'Name: {pre_text}',
-                                'corrected': f'Name: {fix.get("replacement", "")}',
-                                'status': '✅',
-                            })
+                    is_already = 'already correct' in msg or 'already deleted' in msg
+                    if is_already:
+                        total_already += 1
+                    else:
+                        applied += 1
+                        if args.log_to_report and args.step:
+                            if action == 'replace_text':
+                                report_entries.append({
+                                    'ep': ep_tag, 'time': pre_time,
+                                    'original': pre_text,
+                                    'corrected': fix.get('replacement', '')[:120],
+                                    'status': '✅',
+                                })
+                            elif action == 'delete_line':
+                                report_entries.append({
+                                    'ep': ep_tag, 'time': pre_time,
+                                    'original': pre_text,
+                                    'corrected': '(已删除)',
+                                    'status': '🗑️',
+                                })
+                            elif action == 'merge_cues':
+                                report_entries.append({
+                                    'ep': ep_tag, 'time': pre_time,
+                                    'original': pre_text,
+                                    'corrected': f'合并 {fix.get("count", 2)} 个 cues',
+                                    'status': '✅',
+                                })
+                            elif action == 'replace_name':
+                                report_entries.append({
+                                    'ep': ep_tag, 'time': pre_time,
+                                    'original': f'Name: {pre_text}',
+                                    'corrected': f'Name: {fix.get("replacement", "")}',
+                                    'status': '✅',
+                                })
                 else:
                     total_skipped += 1
                     print(f"  ✗ {fname}:{fix.get('line', '?')} - {msg}")
@@ -527,7 +541,8 @@ def main():
         _upsert(args.log_to_report, step=args.step, entries=report_entries)
         print(f'\n📋 已记录 {len(report_entries)} 条到问题解决报告第{args.step}层')
 
-    print(f"\n{'[DRY-RUN] ' if args.dry_run else ''}共应用 {total_applied} 项修复，跳过 {total_skipped} 项")
+    print(f"\n{'[DRY-RUN] ' if args.dry_run else ''}共应用 {total_applied} 项修复，"
+          f"已正确 {total_already} 项，跳过 {total_skipped} 项")
 
 
 # ═══════════════════════════════════════════════════════════════

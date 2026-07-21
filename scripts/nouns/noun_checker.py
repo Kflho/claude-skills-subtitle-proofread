@@ -669,6 +669,24 @@ def check_oped_consistency(target_dir, op_boundary=OP_BOUNDARY_SEC, ed_boundary=
                     canon_norm = normalizer.normalize(canonical_text, 'lenient')
 
                     if entry_norm == canon_norm or text_similarity(entry_norm, canon_norm) >= 0.7:
+                        # Check if already fixed in current SRT
+                        fpath = os.path.join(target_dir, entry['fname'])
+                        already_fixed = False
+                        if os.path.exists(fpath):
+                            try:
+                                current_cues = list(parse_srt(fpath, mark_garbled=False))
+                                for cue in current_cues:
+                                    if cue.get('start', '') == entry['start']:
+                                        if cue.get('text', '') == canonical_text:
+                                            already_fixed = True
+                                        break
+                            except Exception:
+                                pass  # If we can't read, err on side of generating fix
+                        if already_fixed:
+                            stats.setdefault('already_fixed', 0)
+                            stats['already_fixed'] += 1
+                            continue
+
                         fixes.append({
                             'action': 'replace_text',
                             'file': entry['fname'],
@@ -748,6 +766,8 @@ Examples:
         print(f'  OP groups: {s.get("op_groups", 0)}, variants: {s.get("op_variants_found", 0)}')
         print(f'  ED groups: {s.get("ed_groups", 0)}, variants: {s.get("ed_variants_found", 0)}')
         print(f'  Total fixes: {s.get("total_fixes", 0)}')
+        if s.get('already_fixed', 0) > 0:
+            print(f'  Already fixed (skipped): {s["already_fixed"]}')
 
         fixes = result.get('fixes', [])
         if fixes:

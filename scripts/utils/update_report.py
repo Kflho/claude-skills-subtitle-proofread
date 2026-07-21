@@ -68,6 +68,10 @@ STATUS_MAP = {
     '🗑️': '已删除',
 }
 
+# 状态优先级：高数值 = 高优先级，永不降级
+# ✅=3 (人工/AI确认) > 🗑️=2 (确认删除) > ⬜=1 (待处理)
+STATUS_PRIORITY = {'✅': 3, '🗑️': 2, '⬜': 1}
+
 # 层与项目特征的关联（用于动态筛选）
 # None=始终适用，dict=需要这些特征才适用
 _LAYER_REQUIRES = {
@@ -296,8 +300,15 @@ def upsert_entries(path, step, entries):
     for entry in entries:
         key = _entry_key(entry)
         if key in existing:
-            # 覆盖更新
-            data[step][existing[key]] = entry
+            old_entry = data[step][existing[key]]
+            old_status = old_entry.get('status', '⬜')
+            new_status = entry.get('status', '⬜')
+            # 永不降级：保留更高优先级的状态
+            if STATUS_PRIORITY.get(new_status, 0) >= STATUS_PRIORITY.get(old_status, 0):
+                # 如果新条目的 corrected 为空但旧的有值，保留旧的 corrected
+                if not entry.get('corrected') and old_entry.get('corrected'):
+                    entry['corrected'] = old_entry['corrected']
+                data[step][existing[key]] = entry
         else:
             data[step].append(entry)
             existing[key] = len(data[step]) - 1
@@ -329,7 +340,10 @@ def update_entry_status(path, step, ep, time, corrected=None, status=None):
             if corrected is not None:
                 entry['corrected'] = corrected
             if status is not None:
-                entry['status'] = status
+                current = entry.get('status', '⬜')
+                # 永不降级
+                if STATUS_PRIORITY.get(status, 0) >= STATUS_PRIORITY.get(current, 0):
+                    entry['status'] = status
             write_report(path, data)
             return True
 

@@ -269,11 +269,121 @@ def _merge_ai_nouns(glossary, ai_nouns_path, lang='ja'):
 
 
 # ═══════════════════════════════════════════════════════════════
+# Existing glossary parsing (for merge mode)
+# ═══════════════════════════════════════════════════════════════
+
+def _parse_existing_glossary(path):
+    """Parse existing proper-nouns.md to extract preserved entries.
+
+    Returns dict compatible with build_glossary output structure,
+    containing only entries that should be preserved (non-auto-generated).
+    """
+    if not os.path.exists(path):
+        return None
+
+    with open(path, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    preserved = {'characters': [], 'kanji_compounds': [], 'other_terms': []}
+
+    # Parse 角色名 table
+    char_section = _extract_section(content, '角色名')
+    for m in re.finditer(r'\|\s*([^\s|]+)\s*\|\s*(\d+)\s*\|\s*(.+?)\s*\|', char_section):
+        name_raw, freq, variants_str = m.group(1), int(m.group(2)), m.group(3)
+        # Detect and strip source tags from name column (e.g. "アトム[AI]" → "アトム")
+        has_source = '[AI]' in name_raw or '[manual]' in name_raw
+        source_tag = '[AI]' if '[AI]' in name_raw else ('[manual]' if '[manual]' in name_raw else '')
+        name = name_raw.replace('[AI]', '').replace('[manual]', '').strip()
+        if freq == 0 or has_source:
+            variants = [{'word': name, 'freq': freq}]
+            if variants_str != '—':
+                for v in variants_str.split(','):
+                    v = v.strip()
+                    if v and v != name:
+                        variants.append({'word': v, 'freq': 0})
+            preserved['characters'].append({
+                'canonical': name, 'variants': variants,
+                'total_freq': freq, 'source': source_tag or ('[AI]' if freq == 0 else '[manual]'),
+            })
+
+    # Parse 汉字复合词 table
+    kanji_section = _extract_section(content, '汉字复合词')
+    for m in re.finditer(r'\|\s*([^\s|]+)\s*\|\s*(\d+)\s*\|', kanji_section):
+        name_raw, freq = m.group(1), int(m.group(2))
+        has_source = '[AI]' in name_raw or '[manual]' in name_raw
+        name = name_raw.replace('[AI]', '').replace('[manual]', '').strip()
+        if freq == 0 or has_source:  # freq=0 or has source tag → preserve
+            preserved['kanji_compounds'].append({
+                'word': name, 'freq': freq,
+                'source': '[AI]' if '[AI]' in name_raw else '[manual]',
+            })
+
+    # Parse 其他片假名术语 table
+    other_section = _extract_section(content, '其他片假名术语')
+    for m in re.finditer(r'\|\s*([^\s|]+)\s*\|\s*(\d+)\s*\|\s*(.+?)\s*\|', other_section):
+        name_raw, freq, variants_str = m.group(1), int(m.group(2)), m.group(3)
+        has_source = '[AI]' in name_raw or '[manual]' in name_raw
+        source_tag = '[AI]' if '[AI]' in name_raw else ('[manual]' if '[manual]' in name_raw else '')
+        name = name_raw.replace('[AI]', '').replace('[manual]', '').strip()
+        if freq == 0 or has_source:
+            variants = [{'word': name, 'freq': freq}]
+            preserved['other_terms'].append({
+                'canonical': name, 'variants': variants,
+                'total_freq': freq, 'source': source_tag or '[manual]',
+            })
+
+    total = sum(len(v) for v in preserved.values())
+    if total > 0:
+        print(f'[glossary] Preserved {total} existing entries '
+              f'(characters: {len(preserved["characters"])}, '
+              f'kanji: {len(preserved["kanji_compounds"])}, '
+              f'other: {len(preserved["other_terms"])})', file=sys.stderr)
+    return preserved
+
+
+def _extract_section(content, keyword):
+    """Extract a markdown section by header keyword."""
+    pattern = rf'##\s+{keyword}[^\n]*\n(.*?)(?=\n##\s|\Z)'
+    m = re.search(pattern, content, re.DOTALL)
+    return m.group(1) if m else ''
+
+
+def _merge_preserved(glossary, preserved):
+    """Merge preserved entries into glossary, keeping manual/AI entries.
+
+    Existing entries (by canonical name) are not overwritten.
+    New preserved entries are appended.
+    freq is updated to max(old, new) for existing entries.
+    """
+    if not preserved:
+        return glossary
+
+    # Build name lookup for each category
+    for category in ['characters', 'other_terms']:
+        existing_names = {g.get('canonical', '') for g in glossary.get(category, [])}
+        for entry in preserved.get(category, []):
+            name = entry.get('canonical', '')
+            if name and name not in existing_names:
+                glossary.setdefault(category, []).append(entry)
+                existing_names.add(name)
+
+    # Kanji compounds
+    existing_kanji = {k.get('word', '') for k in glossary.get('kanji_compounds', [])}
+    for entry in preserved.get('kanji_compounds', []):
+        name = entry.get('word', '')
+        if name and name not in existing_kanji:
+            glossary.setdefault('kanji_compounds', []).append(entry)
+            existing_kanji.add(name)
+
+    return glossary
+
+
+# ═══════════════════════════════════════════════════════════════
 # Output formatting
 # ═══════════════════════════════════════════════════════════════
 
 def format_glossary_markdown(glossary):
-    """Format glossary as markdown tables (auto-generated only, no merge)."""
+    """Format glossary as markdown tables."""
     lines = []
 
     # ── Characters ──
@@ -286,7 +396,8 @@ def format_glossary_markdown(glossary):
             variants_str = ', '.join(
                 v['word'] for v in g['variants'][1:4]
             ) if len(g['variants']) > 1 else '—'
-            lines.append(f'| {g["canonical"]} | {g["total_freq"]} | {variants_str} |')
+            source_tag = g.get('source', '')
+            lines.append(f'| {g["canonical"]}{source_tag} | {g["total_freq"]} | {variants_str} |')
         lines.append('')
 
     # ── Kanji compounds ──
@@ -296,7 +407,8 @@ def format_glossary_markdown(glossary):
         lines.append('| 日语 | 出现次数 |')
         lines.append('|------|---------|')
         for k in kanji:
-            lines.append(f'| {k["word"]} | {k["freq"]} |')
+            source_tag = k.get('source', '')
+            lines.append(f'| {k["word"]}{source_tag} | {k["freq"]} |')
         lines.append('')
 
     # ── Other terms ──
@@ -309,7 +421,8 @@ def format_glossary_markdown(glossary):
             variants_str = ', '.join(
                 v['word'] for v in g['variants'][1:4]
             ) if len(g['variants']) > 1 else '—'
-            lines.append(f'| {g["canonical"]} | {g["total_freq"]} | {variants_str} |')
+            source_tag = g.get('source', '')
+            lines.append(f'| {g["canonical"]}{source_tag} | {g["total_freq"]} | {variants_str} |')
         lines.append('')
 
     lines.append('\n## 使用方法\n')
@@ -339,6 +452,8 @@ def main():
                         help='Target language (default: ja). ja=katakana+kanji glossary, zh=hanzi only')
     parser.add_argument('--ai-nouns',
                         help='Path to ai_nouns.json from WebSearch enrichment')
+    parser.add_argument('--no-merge', action='store_true',
+                        help='Fully regenerate glossary, discarding manual/AI entries')
     args = parser.parse_args()
 
     # Load term frequencies
@@ -365,6 +480,23 @@ def main():
     other_count = len(glossary['other_terms'])
     print(f'Characters: {char_count} | Kanji: {kanji_count} | Other: {other_count}',
           file=sys.stderr)
+
+    # Merge with existing glossary (preserve manual/AI entries)
+    if not args.no_merge and os.path.exists(args.output):
+        preserved = _parse_existing_glossary(args.output)
+        if preserved:
+            before_chars = len(glossary['characters'])
+            before_kanji = len(glossary['kanji_compounds'])
+            before_other = len(glossary['other_terms'])
+            glossary = _merge_preserved(glossary, preserved)
+            merged_chars = len(glossary['characters']) - before_chars
+            merged_kanji = len(glossary['kanji_compounds']) - before_kanji
+            merged_other = len(glossary['other_terms']) - before_other
+            if merged_chars or merged_kanji or merged_other:
+                print(f'[merge] +{merged_chars} characters, '
+                      f'+{merged_kanji} kanji, '
+                      f'+{merged_other} other terms preserved',
+                      file=sys.stderr)
 
     # Format and write
     md = format_glossary_markdown(glossary)
