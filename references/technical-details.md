@@ -44,7 +44,6 @@ scripts/
 ├── utils/
 │   ├── check_progress.py          ← 进度统计
 │   ├── update_report.py           ← 问题解决报告 6 层读写
-│   ├── extract_review_clips.py    ← [废弃 → 02_fix/fix_orchestrator.py]
 │   └── clean_empty_cues.py        ← 清理空白 cue
 └── lib/
     ├── srt_utils.py               ← SRT 解析/写回
@@ -340,7 +339,6 @@ noun_checker 输出中 `unknown/mismatch > 0` → 抽样 top 20 高频候选 →
 
 所有修正通过统一的 SRT 写入 + 报告更新路径。SRT 是唯一真相源。
 
-### extract_review_clips.py [废弃]
 
 功能已迁移到 `fix_orchestrator.py`。保留文件但不维护。
 

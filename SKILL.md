@@ -41,7 +41,6 @@ scripts/
 ├── utils/
 │   ├── check_progress.py        进度统计
 │   ├── update_report.py         报告 6 层读写
-│   ├── extract_review_clips.py  [废弃 → fix_orchestrator]
 │   └── clean_empty_cues.py      清理空白 cue
 └── lib/
     ├── srt_utils.py / ass_utils.py / whisper_utils.py
