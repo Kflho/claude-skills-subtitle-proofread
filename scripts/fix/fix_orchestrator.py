@@ -935,6 +935,9 @@ class Fixer:
             print(f'[apply] SRT not found for {self.episode}', file=sys.stderr)
             return 0
 
+        # Determine report layer: ai_review.md → L2.5, checklist.md → L6
+        report_step = '2.5' if os.path.basename(checklist_path) == 'ai_review.md' else '6'
+
         # Parse checklist
         corrections = self._parse_checklist(checklist_path)
         if not corrections:
@@ -964,7 +967,7 @@ class Fixer:
                 removed = cues.pop(target_idx)
                 print(f'[apply] Deleted: {timecode} "{removed["text"][:60]}"',
                       file=sys.stderr)
-                self._mark_checklist_done(corrections, timecode, '✅')
+                self._mark_checklist_done(corrections, timecode, '✅', step=report_step)
                 applied += 1
                 continue
 
@@ -973,7 +976,7 @@ class Fixer:
             if target_idx is None:
                 print(f'[apply] Cue not found: {timecode} — may already be fixed',
                       file=sys.stderr)
-                self._mark_checklist_done(corrections, timecode, '✅')
+                self._mark_checklist_done(corrections, timecode, '✅', step=report_step)
                 continue
 
             corrected_text = text.strip()
@@ -1000,7 +1003,7 @@ class Fixer:
 
             print(f'[apply] {tag} {timecode} → "{corrected_text[:60]}"',
                   file=sys.stderr)
-            self._mark_checklist_done(corrections, timecode, '✅')
+            self._mark_checklist_done(corrections, timecode, '✅', step=report_step)
             applied += 1
 
         # Write back SRT
@@ -1472,15 +1475,15 @@ class Fixer:
         return corrections
 
     def _mark_checklist_done(self, corrections: list, timecode: str,
-                             status: str):
+                             status: str, step: str = '6'):
         """Update report entry for a single applied correction.
 
-        Also updates the report Layer 6 entry from ⬜ → ✅.
+        Updates the report Layer entry from ⬜ → ✅.
         """
         try:
             from utils.update_report import update_entry_status
             update_entry_status(
-                self._report_path, step='6',
+                self._report_path, step=step,
                 ep=self.episode, time=timecode,
                 status=status,
             )
