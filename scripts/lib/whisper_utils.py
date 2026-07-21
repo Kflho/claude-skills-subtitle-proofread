@@ -711,6 +711,45 @@ def is_short_garbled_fragment(text, target_lang='ja'):
         return len(text) <= 8 and not re.search(r'[一-鿿]', text)
 
 
+def is_ai_fixable(text, target_lang='ja'):
+    """判断文本是否可由 AI 根据上下文推断修复。
+
+    比 is_short_garbled_fragment 更宽松 — 捕获有日语语义但含少量
+    拉丁乱码的中长碎片（如「doしまった是非とこないだん」）。
+
+    条件：
+    - 含假名或汉字（有日语语义可推断）
+    - 含拉丁字母（有乱码需要修复）
+    - 长度 ≤ 80（一句话以内）
+    - 非纯噪音（至少有一些日语内容）
+
+    Returns True if AI can likely fix this from surrounding context.
+    """
+    text = text.strip()
+    if not text:
+        return False
+
+    if target_lang == 'ja':
+        has_kana = bool(re.search(r'[぀-ヿ]', text))
+        has_kanji = bool(re.search(r'[一-鿿]', text))
+        has_latin = bool(re.search(r'[a-zA-Z]', text))
+
+        # 要有日语语义 且 有拉丁乱码
+        if not (has_kana or has_kanji):
+            return False
+        if not has_latin:
+            return False
+        # 不要太长（一句话以内 AI 才能准确推断）
+        if len(text) > 80:
+            return False
+        return True
+    else:
+        # 中文：有汉字 + 拉丁乱码 + 不太长
+        has_hanzi = bool(re.search(r'[一-鿿]', text))
+        has_latin = bool(re.search(r'[a-zA-Z]', text))
+        return has_hanzi and has_latin and len(text) <= 80
+
+
 def is_proper_noun_pattern(text):
     """判断文本是否符合专名模式（片假名/汉字名 → 应送 L3 而非 AI 补全）。"""
     # 纯片假名 → 可能是人名/角色名

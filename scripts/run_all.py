@@ -455,6 +455,58 @@ def step_clean(project_dir):
                 project_dir, desc='clean')
 
 
+def step_ai_review(project_dir, lang):
+    """Generate AI-review checklists for Layer 2.5 short fragments.
+
+    Reads Layer 2.5 ⬜ entries from the report, generates per-episode
+    ai_review.md files WITHOUT video clips. Claude (the AI in this
+    conversation) fills in corrections from surrounding context.
+    """
+    review_dir = os.path.join(project_dir, 'reports', 'manual-review')
+    report_path = os.path.join(project_dir, 'reports', '问题解决报告.md')
+
+    from utils.update_report import read_report
+    from fix.fix_orchestrator import Fixer
+
+    report_data = read_report(report_path)
+    layer25 = report_data.get('2.5', [])
+    pending = [e for e in layer25 if e.get('status') == '⬜']
+
+    if not pending:
+        print('[ai-review] No pending Layer 2.5 entries.', file=sys.stderr)
+        return True
+
+    # Group by episode
+    by_ep = {}
+    for e in pending:
+        ep = e.get('ep', '?')
+        by_ep.setdefault(ep, []).append(e)
+
+    total_entries = 0
+
+    for ep in sorted(by_ep.keys()):
+        ep_dir = os.path.join(review_dir, ep)
+        print(f'\n[ai-review] {ep}: {len(by_ep[ep])} pending → {ep_dir}',
+              file=sys.stderr)
+
+        fixer = Fixer(ep, project_dir)
+        checklist_path = fixer.review_ai(output_dir=ep_dir)
+
+        if checklist_path:
+            total_entries += len(by_ep[ep])
+            print(f'[ai-review]   {checklist_path}', file=sys.stderr)
+
+    if total_entries > 0:
+        print(f'\n[ai-review] {total_entries} entries across {len(by_ep)} episodes',
+              file=sys.stderr)
+        print(f'[ai-review] Claude: read ai_review.md files, fill 修正: fields,',
+              file=sys.stderr)
+        print(f'  then run: python run_all.py --lang {lang} --apply-ai-review',
+              file=sys.stderr)
+
+    return True
+
+
 def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True,
                  video_dir=None):
     """Generate per-episode review checklists + video clips.
@@ -508,6 +560,44 @@ def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True,
     print(f'  python scripts/run_all.py --lang {lang} --apply-checklist',
           file=sys.stderr)
     return True
+
+
+def _apply_ai_checklists(project_dir, lang):
+    """Apply filled AI review checklists — shared by --apply-ai-review fast path.
+
+    Scans reports/manual-review/{EP}/ai_review.md, applies corrections
+    via Fixer.apply() with VAD alignment.
+    """
+    review_dir = os.path.join(project_dir, 'reports', 'manual-review')
+    if not os.path.isdir(review_dir):
+        print('[apply-ai-review] No manual-review/ directory.', file=sys.stderr)
+        return False
+
+    from fix.fix_orchestrator import Fixer
+
+    ep_dirs = []
+    for name in sorted(os.listdir(review_dir)):
+        ep_dir = os.path.join(review_dir, name)
+        if os.path.isdir(ep_dir) and re.match(r'EP\d{3}$', name):
+            chk = os.path.join(ep_dir, 'ai_review.md')
+            if os.path.exists(chk):
+                ep_dirs.append((name, chk))
+
+    if not ep_dirs:
+        print('[apply-ai-review] No ai_review.md files found.', file=sys.stderr)
+        return False
+
+    total_applied = 0
+    for ep, checklist_path in ep_dirs:
+        fixer = Fixer(ep, project_dir)
+        applied = fixer.apply(checklist_path)
+        total_applied += applied
+        print(f'[apply-ai-review] {ep}: {applied} corrections applied',
+              file=sys.stderr)
+
+    print(f'\n[apply-ai-review] Total: {total_applied} corrections across '
+          f'{len(ep_dirs)} episodes', file=sys.stderr)
+    return total_applied > 0
 
 
 def step_apply_checklist(project_dir, lang, video_dir=None):
@@ -719,7 +809,10 @@ Examples:
         print(f'\n{"─"*40}', file=sys.stderr)
         print('  Apply AI review fixes (fast)', file=sys.stderr)
         print(f'{"─"*40}', file=sys.stderr)
+        # Apply JSON-based AI fixes (proper nouns, oped)
         step_apply_all(project_dir, args.lang)
+        # Apply per-episode AI review checklists (L2.5 fragments)
+        _apply_ai_checklists(project_dir, args.lang)
         step_clean(project_dir)
         return
 
@@ -749,6 +842,12 @@ Examples:
                                   episodes=episodes, limit=args.limit,
                                   start_from=args.start_from,
                                   skip_if_clean=not args.no_skip_if_clean)
+
+    # ── Layer 2.5: AI fragment completion ──
+    print(f'\n{"─"*40}', file=sys.stderr)
+    print('  Layer 2.5/6: AI fragment completion', file=sys.stderr)
+    print(f'{"─"*40}', file=sys.stderr)
+    step_ai_review(project_dir, args.lang)
 
     # ── Layer 3: Proper nouns ──
     print(f'\n{"─"*40}', file=sys.stderr)

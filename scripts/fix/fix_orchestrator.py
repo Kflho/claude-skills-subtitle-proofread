@@ -473,6 +473,7 @@ class Fixer:
             from lib.whisper_utils import (
                 looks_like_plausible_japanese,
                 is_short_garbled_fragment,
+                is_ai_fixable,
                 is_proper_noun_pattern,
             )
 
@@ -500,6 +501,8 @@ class Fixer:
                 if is_proper_noun_pattern(original):
                     proper_noun_items.append(f)
                 elif is_short_garbled_fragment(replacement, self.target_lang):
+                    ai_short_fragments.append(f)
+                elif is_ai_fixable(replacement, self.target_lang):
                     ai_short_fragments.append(f)
                 else:
                     human_items.append(f)

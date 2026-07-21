@@ -70,6 +70,7 @@ returns 0 fixes — a silent failure.
 |--------|---------|
 | `L4 ✅` | Episode fully processed — all layers passed |
 | `[STILL]` entries | Cues Whisper couldn't fix → need L6 human review |
+| `[ai-review]` entries | Cues too long for short-fragment but AI-fixable → L2.5 AI context completion |
 | `Fixed: N` (N > 0) | Whisper successfully fixed N cues |
 | `Done: 0 fixed, 0 AI review, 0 unfixable` + no `[whisper]` messages | **Whisper didn't run.** Check `--video-dir` points to a directory with `.mkv` files |
 | `[whisper] EP00N: No video file found` | Video directory is wrong or empty |
@@ -82,11 +83,11 @@ or process anything new. Use them only AFTER a full pipeline run + human/AI revi
 
 | Flag | What it does | When to use |
 |------|-------------|-------------|
-| `--apply-ai-review` | Apply `temp/scans/ai_review_fixes.json` → SRT + clean | After Claude AI review of proper nouns |
+| `--apply-ai-review` | Apply JSON fixes + `reports/manual-review/{EP}/ai_review.md` → SRT + clean | After Claude fills AI fragment completions |
 | `--apply-checklist` | Apply `reports/manual-review/{EP}/checklist.md` → SRT | After human fills in corrections in checklist |
 
 ```bash
-# After AI reviews proper nouns:
+# After Claude fills AI review checklists:
 python run_all.py --lang ja --apply-ai-review
 
 # After human fills checklist corrections:
@@ -99,7 +100,7 @@ python run_all.py --lang ja --apply-checklist --video-dir "<VIDEO_DIR>"
 |-------|-------------|
 | L1 `scan/unified_scanner.py` | One-pass scan: garbled chars, repeats, term harvest |
 | L2 `fix/fix_orchestrator.py` | Cascading fix: reference → Whisper → triage |
-| L2.5 (Claude) | AI fragment completion for short unreadable cues |
+| L2.5 `run_all.py:step_ai_review` | AI context completion for fragments with Japanese semantics + Latin garbled |
 | L3 `nouns/noun_checker.py` + `auto_classify.py` | Proper noun unification |
 | L3.5 (Claude) | AI judgment on borderline proper nouns |
 | L4 `apply/apply_fixes.py` | Batch apply all accumulated fixes |
@@ -125,7 +126,13 @@ cd "$PROJ" && python "$SCRIPTS/fix/fix_orchestrator.py" EP005 --step whisper
 # L2: Check if episode is clean
 cd "$PROJ" && python "$SCRIPTS/fix/fix_orchestrator.py" EP005 --step check
 
-# L2.5 + L6: Generate review checklist
+# L2.5: Generate AI review checklist (context-only, no video)
+cd "$PROJ" && python -c "
+from fix.fix_orchestrator import Fixer
+Fixer('EP005', '$PROJ').review_ai()
+"
+
+# L6: Generate human review checklist
 cd "$PROJ" && python "$SCRIPTS/fix/fix_orchestrator.py" EP005 --step review
 
 # L3: Build proper noun glossary
