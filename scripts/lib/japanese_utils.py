@@ -65,6 +65,31 @@ COMMON_KANJI = frozenset({
     '署長','所長','船長','部長','社長',
     # ── Fragments often from Whisper splitting ──
     '飲茶','御茶',
+    # ── Common words ALSO in JMnedict as rare surnames/places ──
+    # These are everyday vocabulary that happen to exist as names.
+    # Without this override, Jamdict keeps them (in both JMdict + JMnedict).
+    '世紀','手伝','完成','太陽','馬鹿','平和','大人',
+    '案内','成功','自由','仲良','無事','戦争','大切','裏切',
+    '空気','惑星','安心','本場','不思議','未来','場合',
+    '美味','宝石','地上','兄弟','覚悟','小僧','大勢','加減',
+    '片付','年前','客様','味方','綺麗','有名','我慢','最初',
+    '時代','人形','出来','早速','大陸','見張','事故','勇気',
+    '運命','王様','相当','可愛','茶飲',
+    # ── Additional common words discovered from corpus ──
+    '犯人','反対','苦労','紹介','正体','奴隷','簡単',
+    '気持','用意','地球人','大統領','計画','発明','協力',
+    '風船','世界一','映画','残念','全滅','電波','完全',
+    '分解','植物','科学','仕掛','責任','何者','息子','恐竜',
+    '貴様','貴様','円盤','本物','用意',
+    # ── Common words WITH common JMdict priority tags (news1/ichi1/etc.)
+    # These are everyday vocabulary that ALSO exist as rare surnames/places
+    # in JMnedict, so Jamdict alone cannot filter them.
+    '地下','強力','女王','調子','利用','土産','永久','権利','自然',
+    '工事','結果','改造','途中','重大','悪魔','文字','文明','一方',
+    '主人','空中','本日','天下','他人','火山','風呂','黄色','津波',
+    '第一','努力','出会','記録','本部','下手','見物','隕石','教授',
+    '大好','首飾','出来上','元通','何言','役立','金儲','博士僕',
+    '一体誰','管理位','父様',
 })
 
 # Non-word patterns: dashes, repeated chars, breathing/filler sounds.

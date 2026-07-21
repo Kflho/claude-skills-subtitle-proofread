@@ -113,7 +113,16 @@ def build_glossary(term_freq, min_freq=_MIN_FREQ, lang='ja', use_jamdict=True,
 
         Uses Jamdict (JMdict + JMnedict) when available.
         Falls back to COMMON_KANJI frozenset + COMMON_KATAKANA.
+
+        IMPORTANT: COMMON_KANJI is always consulted as a HARD override.
+        Many common Japanese words (世紀, 戦争, 宝石, …) are in BOTH
+        JMdict and JMnedict (as rare surnames/place names).  Without the
+        frozenset override, they would leak into the proper-noun glossary.
         """
+        # Hard override: frozensets always apply regardless of Jamdict
+        if word in _COMMON_KANJI or word in _COMMON_KATAKANA:
+            return True
+
         # Jamdict path
         if _jam:
             try:
@@ -123,10 +132,9 @@ def build_glossary(term_freq, min_freq=_MIN_FREQ, lang='ja', use_jamdict=True,
                     return True
                 return False
             except Exception:
-                pass  # fall through to frozenset fallback
+                pass  # fall through
 
-        # Fallback: frozenset check
-        return word in _COMMON_KANJI or word in _COMMON_KATAKANA
+        return False
 
     # Separate katakana and kanji, filter noise
     katakana_terms = []

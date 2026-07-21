@@ -23,7 +23,7 @@ import sys
 
 import lib._path  # noqa: F401
 
-from lib.japanese_utils import COMMON_KATAKANA as _JA_COMMON_WORDS, NON_WORD_RE
+from lib.japanese_utils import COMMON_KATAKANA as _JA_COMMON_WORDS, COMMON_KANJI as _JA_COMMON_KANJI, NON_WORD_RE
 
 # ── Try to import Jamdict (optional, graceful fallback) ──
 _JAMDICT_AVAILABLE = False
@@ -126,6 +126,11 @@ def classify_candidate(candidate_text, context_cue='', episode_count=1, lang='ja
     # In known common katakana words list → REJECT
     if text in _JA_COMMON_WORDS:
         return {'verdict': 'REJECT', 'reason': 'known common katakana word'}
+
+    # In known common kanji words list → REJECT (hard override, catches
+    # words that are in both JMdict + JMnedict as rare surnames)
+    if text in _JA_COMMON_KANJI:
+        return {'verdict': 'REJECT', 'reason': 'known common kanji word'}
 
     # Appears with honorific suffix in context → likely a name
     if context_cue and _HONORIFIC_PATTERNS.search(text):
