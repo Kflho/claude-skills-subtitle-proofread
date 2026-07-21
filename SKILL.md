@@ -9,6 +9,22 @@ description: >
 
 # Subtitle Proofread
 
+## Pipeline flow (AI intervention points marked)
+
+```
+L1   scan            → findings.json + proper-nouns.md
+L2   fix (Whisper)   → SRT repaired
+L2.5 🤖 AI fragment  → context-based completion (Step 5.5)
+L3   noun check      → OP/ED + noun_table → candidates
+L3.1 script auto_clean → prune obvious non-nouns from glossary
+L3.2 🤖 AI glossary review → judge borderline entries (Step 5.7)
+L3.5 🤖 AI noun judgment   → decide unknown candidates (Step 5.9)
+L4   apply           → batch-apply all fixes
+L5   ASS repair      → (SRT: skipped)
+L6   deliver         → human checklist + video clips
+L6.5 🤖 AI pre-review → try to fix L6 items before human (Step 5.11)
+```
+
 ## When invoked — do this
 
 ### Step 1: Read project config from CLAUDE.md
@@ -75,8 +91,9 @@ returns 0 fixes — a silent failure.
 | `Done: 0 fixed, 0 AI review, 0 unfixable` + no `[whisper]` messages | **Whisper didn't run.** Check `--video-dir` points to a directory with `.mkv` files |
 | `[whisper] EP00N: No video file found` | Video directory is wrong or empty |
 | `Pipeline complete — all layers passed` | Orchestrator ran all layers without crashing |
+| `[AI review] N candidates → auto_classify handled all` | L3 noun candidates processed by script — check if any need AI |
 
-### Step 5.5: Auto AI review (do NOT skip — part of the pipeline)
+### Step 5.5: 🤖 L2.5 AI fragment completion (do NOT skip — part of the pipeline)
 
 If the pipeline prints `[ai-review] N pending` entries (non-zero), Claude MUST
 immediately handle them:
@@ -92,6 +109,115 @@ immediately handle them:
 
 This is the "Claude AI" in L2.5 — do it inline, don't wait for the user to ask.
 
+### Step 5.6: 🤖 L3.1 Auto-clean glossary (auto-triggered after scan)
+
+After L1 scan rebuilds `reports/proper-nouns.md`, the pipeline runs L3 noun
+check. Before that, Claude MUST run auto_clean to prune the newly-built glossary:
+
+```bash
+cd "<project-root>" && PYTHONPATH="<scripts>" python \
+  "<scripts>/nouns/auto_clean_glossary.py" \
+  --glossary reports/proper-nouns.md --lang ja
+```
+
+If it finds >0 suggestions, apply with `--apply --yes`:
+
+```bash
+# Apply + rebuild clean glossary in one go:
+cd "<project-root>" && PYTHONPATH="<scripts>" python \
+  "<scripts>/nouns/auto_clean_glossary.py" \
+  --glossary reports/proper-nouns.md --lang ja --apply --yes
+```
+
+Then rebuild the glossary from findings:
+```bash
+cd "<project-root>" && PYTHONPATH="<scripts>" python \
+  "<scripts>/nouns/build_glossary.py" \
+  --findings temp/scans/findings.json -o reports/proper-nouns.md --lang ja
+```
+
+This ensures the glossary is clean before L3 noun_checker runs against it.
+
+### Step 5.7: 🤖 L3.2 AI glossary review (auto-triggered after auto_clean)
+
+After auto_clean, Claude MUST review the glossary for borderline entries that
+the script couldn't decide:
+
+1. **Read** `reports/proper-nouns.md`
+2. **Scan** all three sections (角色名, 汉字复合词, 其他片假名术语)
+3. **Judge** entries that look borderline:
+   - Katakana: is it a real character name or a sound effect/common word?
+   - Kanji: is it a real proper noun or a verb fragment?
+4. **If borderline entries found**: add them to `COMMON_KATAKANA` or
+   `COMMON_KANJI` in `lib/japanese_utils.py`, then re-run build_glossary.
+5. **If glossary looks clean**: note "glossary clean" and move on.
+
+Context you can use for judgment:
+- Astro Boy (1963) character lists from memory
+- Common Japanese name patterns (surname + given name, honorifics)
+- Whether a word makes sense as a name vs. a common noun
+
+### Step 5.8: 🤖 AI web search for proper nouns (optional, user-triggered)
+
+If the user says "网上搜索专有名词" or "search for character names":
+
+1. **Search** for "鉄腕アトム 1963 キャラクター 一覧" or similar
+2. **Extract** character names, place names, organization names
+3. **Save** to `temp/scans/ai_nouns.json`:
+   ```json
+   {"characters": ["アトム", "ウラン", ...], "places": [...], "organizations": [...]}
+   ```
+4. **Re-run** glossary build with `--ai-nouns temp/scans/ai_nouns.json`:
+   ```bash
+   cd "<project-root>" && PYTHONPATH="<scripts>" python \
+     "<scripts>/nouns/build_glossary.py" \
+     --findings temp/scans/findings.json -o reports/proper-nouns.md --lang ja \
+     --ai-nouns temp/scans/ai_nouns.json
+   ```
+   AI-sourced names bypass the min_freq=3 threshold and are marked `[AI]`.
+
+### Step 5.9: 🤖 L3.5 AI proper noun judgment (auto-triggered after noun_checker)
+
+After L3 noun_checker runs, the pipeline prints an AI review notice with counts.
+If it says "AI REVIEW NEEDED: N proper noun candidates":
+
+1. **Read** `temp/scans/ai_review_candidates.json`
+2. **For each candidate**, judge whether it's a proper noun:
+   - Is it a character name? Place name? Organization? Anime-specific term?
+   - Is it a common word/phrase/fragment that should be rejected?
+3. **Output** decisions to `temp/scans/ai_review_fixes.json`:
+   ```json
+   [
+     {"action": "replace_global", "original": "候補", "replacement": "規範形"},
+     ...
+   ]
+   ```
+4. **Re-run** `python run_all.py --lang ja --resume` to apply.
+
+If auto_classify handled all candidates (Needs AI: 0), skip this step.
+
+### Step 5.10: 🤖 L6 AI pre-review (auto-triggered after deliver)
+
+After L6 delivers human review checklists, Claude MUST try to resolve items
+before asking the human:
+
+1. **Check** `reports/manual-review/` for any `EP*/checklist.md` files
+2. **Read** each checklist
+3. **For each ⬜ item**:
+   - Read the 上文/下文 context from the checklist
+   - Can you infer the correct text WITHOUT watching the video?
+   - If YES → fill in `修正:` field
+   - If NO (truly need audio/video to decide) → leave blank for human
+4. **Apply** fixable items: `python run_all.py --lang ja --apply-checklist --video-dir "<VIDEO_DIR>"`
+5. **Report** how many items were AI-fixed vs. still need human review
+
+**Decision criteria for "AI can fix":**
+- Context (上文+下文) clearly shows what the garbled text should be
+- The current SRT text (`残留`) is already correct Japanese (just confirm it)
+- Common Japanese phrases where garbling is obvious from context
+- **Leave for human if**: the audio is essential (e.g., two similar-sounding
+  words both make sense, or it's a name you can't verify)
+
 ### Step 6: Post-pipeline fast paths (standalone — do NOT combine with full run)
 
 These flags run a **single action** and exit. They do NOT scan, run Whisper,
@@ -100,28 +226,32 @@ or process anything new. Use them only AFTER a full pipeline run + human/AI revi
 | Flag | What it does | When to use |
 |------|-------------|-------------|
 | `--apply-ai-review` | Apply JSON fixes + `reports/manual-review/{EP}/ai_review.md` → SRT + clean | After Claude fills AI fragment completions |
-| `--apply-checklist` | Apply `reports/manual-review/{EP}/checklist.md` → SRT | After human fills in corrections in checklist |
+| `--apply-checklist` | Apply `reports/manual-review/{EP}/checklist.md` → SRT | After Claude/human fills in corrections in checklist |
 
 ```bash
 # After Claude fills AI review checklists:
 python run_all.py --lang ja --apply-ai-review
 
-# After human fills checklist corrections:
+# After Claude/human fills checklist corrections:
 python run_all.py --lang ja --apply-checklist --video-dir "<VIDEO_DIR>"
 ```
 
 ## Layers (reference — read only if debugging)
 
-| Layer | What it does |
-|-------|-------------|
-| L1 `scan/unified_scanner.py` | One-pass scan: garbled chars, repeats, term harvest |
-| L2 `fix/fix_orchestrator.py` | Cascading fix: reference → Whisper → triage |
-| L2.5 `run_all.py:step_ai_review` | AI context completion for fragments with Japanese semantics + Latin garbled |
-| L3 `nouns/noun_checker.py` + `auto_classify.py` | Proper noun unification |
-| L3.5 (Claude) | AI judgment on borderline proper nouns |
-| L4 `apply/apply_fixes.py` | Batch apply all accumulated fixes |
-| L5 (skipped for SRT) | ASS format repair |
-| L6 (human) | Review checklist with video clips + VAD alignment |
+| Layer | What it does | AI介入 |
+|-------|-------------|--------|
+| L1 `scan/unified_scanner.py` | One-pass scan: garbled chars, repeats, term harvest | — |
+| L2 `fix/fix_orchestrator.py` | Cascading fix: reference → Whisper → triage | — |
+| L2.5 `run_all.py:step_ai_review` | AI context completion for fragments | 🤖 Step 5.5 |
+| L3.0 `nouns/build_glossary.py` | Build proper-noun glossary from corpus | — |
+| L3.1 `nouns/auto_clean_glossary.py` | Heuristic prune of non-nouns | 🤖 Step 5.6 |
+| L3.2 Claude glossary review | Judge borderline glossary entries | 🤖 Step 5.7 |
+| L3.3 `nouns/noun_checker.py` | Scan SRTs for proper noun variants | — |
+| L3.4 `nouns/auto_classify.py` | Deterministic pre-filter before AI | — |
+| L3.5 Claude noun judgment | Judge unknown proper noun candidates | 🤖 Step 5.9 |
+| L4 `apply/apply_fixes.py` | Batch apply all accumulated fixes | — |
+| L5 (skipped for SRT) | ASS format repair | — |
+| L6 `fix/fix_orchestrator.py:review` | Human review checklist + video clips | 🤖 Step 5.10 (pre-review) |
 
 ## Single-layer debugging
 
@@ -172,19 +302,6 @@ cd "$PROJ" && python "$SCRIPTS/apply/apply_fixes.py" \
 cd "$PROJ" && python "$SCRIPTS/utils/update_report.py" \
   reports/问题解决报告.md --summary
 ```
-
-## L3 glossary maintenance
-
-The proper-noun glossary is built once, AI-reviewed once, then reused.
-
-```
-L3.0  build_glossary.py      → aggressive JMdict filter → raw glossary
-L3.1  auto_clean_glossary.py → heuristic prune
-L3.2  Claude AI review       → semantic judgment on low-frequency survivors
-```
-
-**L3.2 trigger**: user says "审查专名表". Claude reads `reports/proper-nouns.md`,
-judges kanji compounds with freq ≤ 8, appends common nouns to `COMMON_KANJI`.
 
 ## Git guardrail
 
