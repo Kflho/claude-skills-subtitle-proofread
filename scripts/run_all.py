@@ -655,12 +655,27 @@ def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True,
             total_entries += len(by_ep[ep])
             print(f'[deliver]   {checklist_path} ({len(clips)} clips)', file=sys.stderr)
 
-        # Cleanup: if all items were auto-cut (0 clips), remove the folder
+        # Cleanup: if all items were auto-cut (0 clips), remove checklist + clips
+        # but KEEP ai_review.md (L2.5 may have created it — it's still needed)
         clips_after = [f for f in os.listdir(ep_dir) if f.endswith('.mp4')] if os.path.isdir(ep_dir) else []
         if not clips_after:
-            import shutil
-            shutil.rmtree(ep_dir, ignore_errors=True)
-            print(f'[deliver]   {ep}: all auto-cut — folder removed', file=sys.stderr)
+            # Only remove deliver artifacts, not ai_review.md
+            for fname in os.listdir(ep_dir):
+                fpath = os.path.join(ep_dir, fname)
+                if fname.endswith('.mp4') or fname == 'checklist.md':
+                    try:
+                        os.remove(fpath)
+                    except OSError:
+                        pass
+            # If folder is now empty (no ai_review.md), remove it
+            remaining = os.listdir(ep_dir)
+            if not remaining:
+                import shutil
+                shutil.rmtree(ep_dir, ignore_errors=True)
+                print(f'[deliver]   {ep}: all auto-cut — folder removed', file=sys.stderr)
+            else:
+                print(f'[deliver]   {ep}: all auto-cut — checklist removed (kept: {remaining})',
+                      file=sys.stderr)
 
     print(f'\n[deliver] {total_entries} pending items across {len(by_ep)} episodes',
           file=sys.stderr)
