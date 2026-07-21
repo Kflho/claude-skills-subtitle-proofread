@@ -71,8 +71,9 @@ def collect_from_fixes(fixes_path):
 
     items = []
     srt_name = data.get('srt', '')
-    ep_match = re.search(r'(\d{3})', srt_name)
-    ep = f'EP{ep_match.group(1)}' if ep_match else ''
+    # Use proper episode extractor (handles years like 1963, resolutions, etc.)
+    from lib.whisper_utils import extract_ep_number
+    ep = extract_ep_number(srt_name)
 
     for fix in data.get('fixes', []):
         if fix.get('confidence') == 'none':
