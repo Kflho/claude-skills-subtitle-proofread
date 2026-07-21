@@ -26,10 +26,11 @@ L2 错误修复  → Fixer: 参考字幕 → Whisper → auto_triage
                 ├─ 专名模式 → L3
                 └─ 长乱码 → L6人工
 L2.5 AI补全 → VAD有人声+不可读+短碎片 → AI上下文推测
-L3 专名统一  → build_glossary → auto_clean_glossary → noun_checker + auto_classify
-                ├─ 激进策略: 在 JMdict 就删（不管 JMnedict）
-                ├─ 启发式: 动词词干/时间碎片/修饰语片段 → 自动过滤
-                └─ 只保留人名 + 动画特有概念
+L3 专名统一  → 四步流水线:
+                L3.0 build_glossary → 激进出词表 (JMdict就删)
+                L3.1 auto_clean_glossary → 脚本启发式粗筛
+                L3.2 AI词库审查 → 语义终审 (脚本漏网之鱼)
+                L3.3 noun_checker + auto_classify → 匹配SRT
 L3.5 AI审查 → auto_classify拿不准的 → AI判断
 L4 批量修复  → apply_fixes: 繁→简 + 翻译腔 + fixes
 L5 格式修补  → ASS only, 本项目跳过
@@ -57,11 +58,34 @@ python scripts/run_all.py --lang ja --limit 5           # 前5集
 python scripts/run_all.py --lang ja -e EP001-EP010      # 指定范围
 python scripts/run_all.py --lang ja --apply-checklist   # 应用人工审查
 
-# 专名表维护
+# 专名表维护（L3.0-L3.2）
 python nouns/build_glossary.py --findings temp/scans/findings.json -o reports/proper-nouns.md
-python nouns/auto_clean_glossary.py --glossary reports/proper-nouns.md          # dry-run
-python nouns/auto_clean_glossary.py --glossary reports/proper-nouns.md --apply  # 自动清理
+python nouns/auto_clean_glossary.py --glossary reports/proper-nouns.md          # L3.1 dry-run
+python nouns/auto_clean_glossary.py --glossary reports/proper-nouns.md --apply  # L3.1 自动清理
+# L3.2 AI词库审查: 调用 subtitle-proofread skill → Claude 审查剩余条目
 ```
+
+### L3.2 AI 词库审查
+
+脚本粗筛后仍有少量漏网之鱼。高频条目（水博士 270、科学省 96）
+明显是真专名，不需要审。AI 只审查**低频 + 可疑**条目。
+
+**触发**: 调用 subtitle-proofread skill → 「审查专名表」
+**输入**: `proper-nouns.md` 中 freq ≤ 8、不含姓氏/地名特征的条目（~30 条）
+**输出**: 追加到 COMMON_KANJI 的词
+**成本**: ~30 条目 × 简单分类 ≈ 1,500 tokens，一次性
+
+**为什么脚本 + AI 各司其职：**
+
+| | L3.1 脚本 | L3.2 AI |
+|------|------|------|
+| 处理量 | 17,548 → ~600 | ~30（低频可疑） |
+| 擅长 | 字典/模式匹配 | 语义理解 |
+| 漏网 | 競技大会、慶応生… | — |
+| Token | 0 | ~1,500 |
+
+> **这是一个维护步骤，不参与每次 run_all.py 执行。**
+> 建表 → AI 审一次 → commit → 后续直接复用。
 
 ## 项目感知
 

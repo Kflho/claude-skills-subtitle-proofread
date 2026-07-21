@@ -80,7 +80,7 @@ COMMON_KANJI = frozenset({
     '気持','用意','地球人','大統領','計画','発明','協力',
     '風船','世界一','映画','残念','全滅','電波','完全',
     '分解','植物','科学','仕掛','責任','何者','息子','恐竜',
-    '貴様','貴様','円盤','本物','用意',
+    '貴様','円盤','本物','用意',
     # ── Common words WITH common JMdict priority tags (news1/ichi1/etc.)
     # These are everyday vocabulary that ALSO exist as rare surnames/places
     # in JMnedict, so Jamdict alone cannot filter them.
@@ -119,7 +119,10 @@ COMMON_KANJI = frozenset({
     '素早','頭兄','人間並','科学文明','水合','月様','期待人間',
     '準備完了','見覚','家創','水博士今','出場権利','歯向',
     '者名','銀行対応','見破','打差','威張','馬鹿馬鹿','関車',
-    '第六','陰力','水博士今','博士君',
+    '第六','陰力','博士君',
+    # ── L3.2 AI词库审查: 脚本漏网的常见词 ──
+    '競技大会','腎臓細胞','通信機','瓜二','中毒患者',
+    '女王様','慶応生','耳飾','出迎',
 })
 
 # Non-word patterns: dashes, repeated chars, breathing/filler sounds.

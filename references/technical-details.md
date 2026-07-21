@@ -364,12 +364,31 @@ auto_classify.py                     ← ACCEPT/REJECT/NEEDS_AI
 
 ### auto_clean_glossary.py
 
-自动化原本需要 3-5 轮人工肉眼扫描的「审表→加 COMMON_KANJI→重新生成」循环。
+脚本启发式粗筛 — 自动化原本需要 3-5 轮人工肉眼扫描的循环。
 
 ```bash
 python nouns/auto_clean_glossary.py --glossary reports/proper-nouns.md          # dry-run
 python nouns/auto_clean_glossary.py --glossary reports/proper-nouns.md --apply  # 自动清理
 ```
+
+启发式规则：
+- JMdict 查找（最可靠）
+- 动词词干结尾（着替/見捨/怒鳴…）
+- 时间/数字碎片（時間後/日前/万年後…）
+- 修饰语片段（一番大/全部聞…）
+- KEEP 保护：姓氏/地名模式 → 不误删
+
+### L3.2 AI 词库审查
+
+脚本粗筛后仍有 ~150 条，其中约 5-10% 是启发式无法覆盖的普通名词（语义判断）。
+
+Claude 审查流程：
+1. 读取 `proper-nouns.md` 汉字复合词表
+2. 对每条判断：是人名？动画特有概念？还是普通名词？
+3. 普通名词 → 加入 COMMON_KANJI
+4. 重新生成 clean 表
+
+此步骤 token 消耗低（~150 条目 × 简单分类），但效果显著。
 
 ### noun_checker.py
 
