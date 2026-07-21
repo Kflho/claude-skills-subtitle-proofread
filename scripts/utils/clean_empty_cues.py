@@ -11,10 +11,7 @@ import argparse
 import sys
 import os
 
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_ROOT_DIR = os.path.dirname(_SCRIPT_DIR)  # scripts/
-if _ROOT_DIR not in sys.path:
-    sys.path.insert(0, _ROOT_DIR)
+import lib._path  # noqa: F401
 
 from lib.whisper_utils import setup_windows_utf8
 from lib.ass_utils import read_ass_file, write_ass_file, iter_ass_files

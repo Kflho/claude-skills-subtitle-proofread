@@ -17,10 +17,7 @@ import re
 import sys
 from collections import defaultdict
 
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_ROOT_DIR = os.path.dirname(_SCRIPT_DIR)  # scripts/
-if _ROOT_DIR not in sys.path:
-    sys.path.insert(0, _ROOT_DIR)
+import lib._path  # noqa: F401
 
 from lib.japanese_utils import COMMON_KATAKANA as _COMMON_KATAKANA, COMMON_KANJI as _COMMON_KANJI, NON_WORD_RE
 

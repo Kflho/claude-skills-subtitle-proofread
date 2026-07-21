@@ -22,11 +22,7 @@ Usage:
 
 import sys, os, re, subprocess, json, argparse, tempfile, time, wave
 
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_ROOT_DIR = os.path.dirname(_SCRIPT_DIR)  # scripts/
-
-if _ROOT_DIR not in sys.path:
-    sys.path.insert(0, _ROOT_DIR)
+import lib._path  # noqa: F401
 
 from lib.whisper_utils import (
     setup_windows_utf8, extract_ep_number, to_seconds, format_tc,

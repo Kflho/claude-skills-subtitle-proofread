@@ -31,10 +31,9 @@ import sys
 from datetime import datetime
 
 # ── Path setup for importing from scripts dir ──
+import lib._path  # noqa: F401
+
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_ROOT_DIR = os.path.dirname(_SCRIPT_DIR)  # scripts/
-if _ROOT_DIR not in sys.path:
-    sys.path.insert(0, _ROOT_DIR)
 
 from lib.srt_utils import read_srt_file, parse_srt_cue
 from lib.whisper_utils import to_seconds, setup_windows_utf8
