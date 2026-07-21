@@ -43,8 +43,12 @@ scripts/
 │   ├── update_report.py         报告 6 层读写
 │   └── clean_empty_cues.py      清理空白 cue
 └── lib/
-    ├── srt_utils.py / ass_utils.py / whisper_utils.py
-    └── whisper_utils.py          🆕 looks_like_plausible_japanese()
+    ├── srt_utils.py             SRT 解析/写回（行列表模型）
+    ├── ass_utils.py             ASS 解析/写回
+    ├── whisper_utils.py         Whisper CLI + ffmpeg + VAD + 分类 + 置信度
+    ├── project_utils.py         模式检测 + 文件查找 + git 备份
+    ├── japanese_utils.py        日语常量：常见词、敬称、非对话标记
+    └── chinese_utils.py         繁→简映射表 + 拼音声调
 ```
 
 ## 规则

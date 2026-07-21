@@ -1,95 +1,78 @@
 # 检测脚本速查
 
-> 完整配置示例见各脚本 `--help`。所有脚本遵循 **检测 → JSON → Claude 审查 → fixes.json → apply_fixes.py** 流程。
+> 最后更新: 2026-07-21（审计清理）
+> 所有旧版独立脚本已合并到统一工作流中，本文档只列当前有效脚本。
 
-## 统一扫描（推荐入口，所有项目）
+## 统一扫描（L1）
 
 ```bash
 # 字符层统一扫描 — 单次遍历：garbled + repeat + 术语收集
-python unified_scanner.py --target-dir <DIR> \
+python scripts/scan/unified_scanner.py --target-dir AI审查后/ \
   --output-findings temp/scans/findings.json \
   --output-issues temp/scans/issues/ \
-  --build-glossary
+  --build-glossary --project-lang ja
 
-# 等价于旧版独立运行（已删除，功能已合并）:
+# 已合并的旧脚本（功能已迁移，文件已删除）:
 #   bilingual_detect.py + source_lang_detect.py + source_char_detect.py
 #   + repeat_detect.py + issue_tracker.py + romaji_fixer.py
 ```
 
-## 语义层检测脚本（翻译项目）
+## 一键全流程
 
 ```bash
-# 机翻幻觉（--lang 加载对应语言的预设模式）
-python garbled_detect.py --target-dir <DIR> --lang zh > garbled_findings.json
-
-# 固定格式变体（--lang 加载对应语言的预设模式）
-python format_detect.py --target-dir <DIR> --lang zh > format_findings.json
-
-# 感叹词残留（需配置 source_char_pattern）
-python interjection_detect.py --target-dir <DIR> --config interj_config.json
-
-# 专有名词对照（需要 --ref-dir 参考字幕）
-python proper_noun_detect.py --target-dir <DIR> --ref-dir <REF_DIR> > proper_nouns.json
-
-# OP/ED 时间码聚类（语言无关，SRT/ASS 兼容）
-python oped_timecode_detect.py --target-dir <DIR> --min-episodes 10
+python scripts/run_all.py --lang ja                    # 全量
+python scripts/run_all.py --lang ja --limit 5           # 前5集
+python scripts/run_all.py --lang ja -e EP001-EP010      # 指定范围
+python scripts/run_all.py --lang ja --apply-checklist   # 应用人工审查修正
+python scripts/run_all.py --lang ja --apply-ai-review   # 应用 AI 审查修正
 ```
 
-## ASS 格式修补
-
-> ⚠️ SRT only 项目全部跳过。`episode_workflow.py --repair-ass` 自动调用。
+## 单层调试
 
 ```bash
-# 一键运行所有检查
-python ass_repair.py --target-dir <DIR> --check all
+# L1: 扫描
+python scripts/scan/unified_scanner.py --target-dir AI审查后/ --project-lang ja
 
-# 单独检查
-python ass_repair.py --target-dir <DIR> --check names     # Name 字段语言分类
-python ass_repair.py --target-dir <DIR> --check styles    # 样式统计
-python ass_repair.py --target-dir <DIR> --check drawing   # 绘图指令检测
-python ass_repair.py --target-dir <DIR> --check comment   # Comment 行外语残留
-python ass_repair.py --target-dir <DIR> --check oped --oped-config config.json  # OP/ED 多样式对比
+# L2: 单集 Whisper
+python scripts/fix/fix_orchestrator.py EP002 --step whisper
+python scripts/fix/fix_orchestrator.py EP002 --step check    # 检查是否干净
+
+# L2.5 + L6: 生成审查清单
+python scripts/fix/fix_orchestrator.py EP002 --step review
+
+# L3: 专名
+python scripts/nouns/noun_checker.py AI审查后/ --lang ja --oped
+python scripts/nouns/auto_classify.py --candidates candidates.json --lang ja
+
+# L4: 批量修复
+python scripts/apply/apply_fixes.py --target-dir AI审查后/ --fixes fixes.json --lang ja
+
+# L5: ASS only（SRT 项目跳过）
+python scripts/ass/ass_repair.py --target-dir AI审查后/ --check all
 ```
 
-## 中文翻译项目脚本
-
-> ⚠️ 非中文目标语言项目全部跳过。
-
-```bash
-# 繁体→简体（--auto 直接转换，推荐）
-python trad_to_simp_detect.py --target-dir <DIR> --auto
-
-# 或先检测再审查
-python trad_to_simp_detect.py --target-dir <DIR> > trad_findings.json
-```
-
-## 工具脚本（通用）
+## 工具脚本
 
 ```bash
 # 清理空 cue
-python clean_empty_cues.py --target-dir <DIR>
-
-# 应用修复
-python apply_fixes.py --target-dir <DIR> --fixes fixes.json
-
-# 审查清单→SRT（含 VAD 打轴）
-python apply_review_fixes.py review-checklist.md --srt-dir <DIR>
+python scripts/utils/clean_empty_cues.py --target-dir AI审查后/
 
 # 报告查询（禁止直接 cat/Read！）
-python update_report.py reports/问题解决报告.md --summary
+python scripts/utils/update_report.py reports/问题解决报告.md --summary
 ```
 
 ## 项目特征 → 脚本选用
 
-| 项目特征 | 必做 | 可选 |
-|---------|------|------|
-| 所有项目 | `unified_scanner.py` | `oped_timecode_detect.py` |
-| ASS 格式 | + `ass_repair.py --check all` | |
-| 有参考字幕 | + `translate_srt.py` + `compare_srt.py` | `proper_noun_detect.py` |
-| 翻译项目 | | `garbled_detect.py --lang <LANG>`, `format_detect.py --lang <LANG>`, `interjection_detect.py` |
-| 中文目标 | | `trad_to_simp_detect.py --auto` |
+| 项目特征 | 执行方式 |
+|---------|---------|
+| 所有项目 | `run_all.py --lang <LANG>` 一键全流程 |
+| SRT only | 自动跳过 L5 (ASS 修补) |
+| ASS 格式 | L5 自动运行 `ass_repair.py --check all` |
+| 有参考字幕 | text 模式：翻译参考字幕 → 对照 |
+| 无参考字幕 | audio 模式：VAD + Whisper 转录 |
+| 中文目标 | L4 自动繁→简 + 翻译腔去机械化 |
 
-> 语言差异通过 `--lang` 标志处理，工作流本身不分支。日文项目 `--lang ja` → 语义检测自动空操作。
+> 语言差异通过 `--lang ja|zh` 处理，工作流本身不分支。
 
 ## fixes.json action 速查
 

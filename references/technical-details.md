@@ -8,17 +8,19 @@
 ## 目录
 
 1. [脚本总览](#1-脚本总览)
-2. [Whisper 管线](#2-whisper-管线)
-3. [VAD 语音检测](#3-vad-语音检测)
-4. [字符扫描 (unified_scanner)](#4-字符扫描-unified_scanner)
-5. [置信度系统](#5-置信度系统)
-6. [翻译对照](#6-翻译对照)
-7. [专名统一](#7-专名统一)
-8. [批量修复 (apply_fixes)](#8-批量修复-apply_fixes)
-9. [报告系统 (update_report)](#9-报告系统-update_report)
-10. [AI 审查层](#10-ai-审查层)
-11. [人工交付](#11-人工交付)
-12. [ASS 格式修补](#12-ass-格式修补)
+2. [数据流：一集从头到尾](#2-数据流一集从头到尾)
+3. [Whisper 管线](#3-whisper-管线)
+4. [VAD 语音检测](#4-vad-语音检测)
+5. [字符扫描 (unified_scanner)](#5-字符扫描-unified_scanner)
+6. [置信度系统](#6-置信度系统)
+7. [翻译对照](#7-翻译对照)
+8. [专名统一](#8-专名统一)
+9. [批量修复 (apply_fixes)](#9-批量修复-apply_fixes)
+10. [报告系统 (update_report)](#10-报告系统-update_report)
+11. [AI 审查层](#11-ai-审查层)
+12. [人工交付](#12-人工交付)
+13. [ASS 格式修补](#13-ass-格式修补)
+14. [已知技术债务](#14-已知技术债务)
 
 ---
 
@@ -29,45 +31,156 @@
 ```
 scripts/
 ├── run_all.py                     ← 批量编排器，逐集调 episode_workflow
-├── scan/unified_scanner.py     ← 单次遍历：乱码检测 + 重复检测 + 术语收集
+├── scan/unified_scanner.py        ← 单次遍历：乱码检测 + 重复检测 + 术语收集
 ├── fix/
-│   ├── fix_orchestrator.py           ← 统一修复模块：参考字幕 → Whisper → 人工
-│   ├── episode_workflow.py           ← 单集编排器（委托给 Fixer）
-│   ├── whisper_pipeline.py           ← Whisper Tier 1/2 重转录
-│   ├── translate_srt.py              ← 百度翻译 SRT（text 模式）
-│   └── compare_srt.py                ← 时间码对齐 + 文本相似度比对
+│   ├── fix_orchestrator.py        ← 统一修复模块（Fixer 类）：参考→Whisper→auto_triage
+│   ├── episode_workflow.py        ← 单集编排器（大部分逻辑已迁移到 Fixer）
+│   ├── whisper_pipeline.py        ← Whisper Tier 1 拼接 / Tier 2 整集 + VAD + build_clusters
+│   ├── translate_srt.py           ← 百度翻译 SRT（text 模式专用）
+│   └── compare_srt.py             ← 时间码对齐 + 文本相似度比对
 ├── nouns/
 │   ├── noun_checker.py            ← 专名一致性 + 跨集 OP/ED 统一
-│   └── build_glossary.py          ← 术语表自动生成
-├── apply/apply_fixes.py        ← 批量修复：繁→简 + 翻译腔 + fixes 应用
-├── ass/ass_repair.py           ← ASS 格式修补（5 种检查）
+│   ├── auto_classify.py           ← 专名自动分类（Jamdict + 规则，减少 AI 审查量）
+│   └── build_glossary.py          ← 术语表自动生成（含 Jamdict 过滤）
+├── apply/apply_fixes.py           ← 批量修复：繁→简 + 翻译腔 + fixes + review checklist
+├── ass/ass_repair.py              ← ASS 格式修补（SRT 项目跳过）
 ├── utils/
 │   ├── update_report.py           ← 问题解决报告 6 层读写
 │   └── clean_empty_cues.py        ← 清理空白 cue
 └── lib/
-    ├── srt_utils.py               ← SRT 解析/写回
-    ├── ass_utils.py               ← ASS 解析/写回
-    └── whisper_utils.py           ← Whisper CLI 调用 + ffmpeg + VAD + 置信度
+    ├── srt_utils.py               ← SRT 解析/写回（行列表模型）
+    ├── ass_utils.py               ← ASS 解析/写回（兼容 SRT）
+    ├── whisper_utils.py           ← Whisper CLI + ffmpeg + VAD + 分类 + 置信度（cue 字典模型）
+    ├── project_utils.py           ← 模式检测 + 文件查找 + git 备份
+    ├── japanese_utils.py          ← 日语常量：常见词、敬称、非对话标记
+    └── chinese_utils.py           ← 繁→简映射表 + 拼音声调
 ```
 
-### 脚本间调用关系
+### 关键区别：两套 SRT 数据模型
+
+| 模块 | 数据模型 | 用途 |
+|------|---------|------|
+| `srt_utils.py` | 行列表 (`list[str]`)，ASS 兼容 dict | 文件读写、逐行编辑、`apply_fixes.py` |
+| `whisper_utils.py` | cue 字典列表（`start_s`, `end_s`, `text`...） | 时间码运算、乱码分类、Whisper 管线 |
+
+两者通过 `whisper_utils.parse_srt()` 桥接：内部调 `srt_utils.parse_srt_cue()` 再包装为 cue dict。
+
+**SRT 写入也有两个入口**：`whisper_utils.write_srt(cues)` 接受 cue 列表；`srt_utils.write_srt_file(lines)` 接受行列表。调用方根据持有哪种模型选择。
+
+### 脚本间调用关系（6 层全流程）
 
 ```
-run_all.py
-  ├─→ unified_scanner.py           (1次，全量扫描)
-  ├─→ episode_workflow.py EPxxx    (逐集，subprocess)
-  │     ├─→ whisper_pipeline.py    (音频修复)
-  │     │     └─→ whisper-cli.exe  (Whisper 推理)
-  │     ├─→ translate_srt.py       (text 模式)
-  │     ├─→ compare_srt.py         (text 模式)
-  │     └─→ noun_checker.py        (专名审查)
-  ├─→ noun_checker.py              (1次，全量专名)
-  └─→ apply_fixes.py              (1次，批量应用)
+run_all.py (唯一入口)
+  ├─→ unified_scanner.py              L1: 全量扫描 → findings.json
+  ├─→ episode_workflow.py EPxxx       L2: 逐集（subprocess）
+  │     └─→ Fixer.run_auto()          (cascading: ref → Whisper → human)
+  │           ├─ fix_by_reference()    → translate_srt.py + compare_srt.py
+  │           ├─ fix_by_whisper()      → whisper_pipeline.py → whisper-cli.exe
+  │           ├─ review_ai()           L2.5: AI 短碎片清单
+  │           └─ review()              L6: 人工审查清单 + 视频片段
+  ├─→ step_nouns()                    L3: noun_checker + auto_classify
+  ├─→ step_apply_all()                L4: apply_fixes（收集所有 fixes 一次应用）
+  ├─→ step_ass_repair()               L5: ASS only → 跳过
+  └─→ step_deliver()                  L6: 统一审查清单生成/应用
 ```
 
 ---
 
-## 2. Whisper 管线
+## 2. 数据流：一集从头到尾
+
+> **目标**：清空上下文后，看这一节就能理解每一集的数据怎么流动。
+
+### SRT 文件流转
+
+```
+原始字幕/EP001.srt          ← 只读备份（git 管理，永不改）
+        │
+        ▼  (unified_scanner 扫描)
+AI审查后/EP001.srt          ← 工作目录（git 管理，唯一真相源）
+        │
+        ▼  (Fixer.fix_by_whisper 修复乱码 cue)
+AI审查后/EP001.srt          ← 原地修改（git commit 前备份）
+        │
+        ▼  (apply_fixes 批量应用)
+AI审查后/EP001.srt          ← 原地修改（繁→简、翻译腔、全局替换）
+```
+
+### 检测 → 修复 → 报告 链路
+
+```
+unified_scanner (L1)
+  │  扫描 AI审查后/*.srt
+  │  对每个 cue 调 classify_garbled_text()
+  │  输出 findings.json → per_episode_issues[EP001] = [乱码 cue 列表]
+  ▼
+Fixer.run_auto() (L2)
+  │  读 findings.json → 知道哪些集有乱码
+  │  parse_srt() → 重新 classify_garbled_text()（幂等，不会重复标记已修复的）
+  │  build_clusters() → 归并相邻乱码 cue（MAX_CLUSTER_GAP=60s）
+  │  Tier 1/2 Whisper → match_whisper_to_cues()
+  │  auto_triage: looks_like_plausible_japanese() → 分诊
+  │  ├── 可读 → 直接写 SRT + 报告 L2 ✅
+  │  ├── 短碎片 → 报告 L2.5 ⬜（等 AI 补全）
+  │  ├── 专名模式 → 报告 L3 ⬜（等 noun_checker）
+  │  └── 长乱码 → 报告 L6 ⬜（等人工）
+  ▼
+noun_checker + auto_classify (L3)
+  │  读 proper-nouns.md 专名表 → 匹配/发现变体
+  │  auto_classify(Jamdict+规则) → ACCEPT/REJECT/NEEDS_AI
+  │  NEEDS_AI → L3.5，等 AI 判断
+  ▼
+apply_fixes (L4)
+  │  收集所有 fixes（L3 auto_accepted + AI review + OP/ED）
+  │  一次写入所有 SRT
+  └─→ 问题解决报告.md 更新各层状态
+```
+
+### 关键函数调用链
+
+```
+parse_srt(path, mark_garbled=True)
+  └─→ srt_utils.parse_srt_cue()          ← 行列表 → ASS 兼容 dict
+  └─→ classify_garbled_text(text, lang)  ← 统一乱码判断（唯一检测源）
+  └─→ to_seconds()                        ← 时间码 → 浮点秒数
+
+build_clusters(cues)
+  └─→ 过滤 garbled_cues（只取 is_garbled=True 的）
+  └─→ 按 60s 间隔分组
+  └─→ 每组向左/右扩展到最近的 clean cue
+
+match_whisper_to_cues(whisper_segs, cluster, offset)
+  └─→ Round 1: 时间重叠匹配
+  └─→ Round 2: ±3s 宽窗口重试（_is_context_text 过滤左右上下文）
+  └─→ 未匹配 → confidence='none' → L6
+
+looks_like_plausible_japanese(text, lang)
+  └─→ 可读性优先判断（比 classify_garbled_text 更宽松）
+  └─→ True → 直接保留（不管 Whisper 置信度）
+```
+
+### auto_triage 分诊决策树
+
+```
+Whisper 输出 replacement
+  │
+  ├─ confidence='none' 或 无 replacement
+  │   └─→ L6 人工（无音频输出也路由到这里）
+  │
+  ├─ looks_like_plausible_japanese(replacement) → True
+  │   └─→ L2 ✅ 直接写入 SRT
+  │
+  └─ 不可读
+      ├─ is_proper_noun_pattern(original) → True
+      │   └─→ L3 专名审查
+      ├─ is_short_garbled_fragment(replacement) → True
+      │   └─→ L2.5 AI 上下文补全
+      └─ 其余
+          └─→ L6 人工
+```
+
+---
+
+## 3. Whisper 管线
 
 ### 核心调用
 
@@ -265,17 +378,17 @@ Tier 1/2 修复时，Whisper 置信度从 whisper segment **透传到 fix 条目
 
 ## 9. 报告系统 (update_report)
 
-### 7 层格式
+### 6+1 层格式
 
 ```
 ## 第1层: 字符扫描
-## 第2层: 语义修复
+## 第2层: 错误修复
 ## 第2.5层: AI短碎片补全
 ## 第3层: 专名统一
 ## 第3.5层: AI专名审查
 ## 第4层: 批量修复
 ## 第5层: 格式修补 [ASS only]
-## 第6层: 人工交付
+## 第6层: 人工审查
 ```
 
 ### API
@@ -323,32 +436,32 @@ noun_checker → auto_classify（Jamdict+规则）→ NEEDS_AI 候选项 → AI 
 
 ---
 
-## 11. 错误修复（统一 Layer 2）
+## 12. 人工交付
 
-### fix_orchestrator.py (Fixer)
+### 统一审查清单
 
-`Fixer` 类统一了 Layer 2（Whisper 修复）、Layer 2.5（AI 短碎片补全）和 Layer 6（人工审查），四级降级：
+`run_all.py:step_deliver()` 统一入口，两种模式：
 
-1. **参考字幕翻译对照**（`fix_by_reference`）— 有参考字幕时优先
-2. **Whisper 人声转录**（`fix_by_whisper`）— VAD + Tier 1/2 转录
-3. **auto_triage 分诊**（嵌入 `fix_by_whisper`）— 可读→保留/短碎片→AI补/专名→L3/长乱码→L6
-4. **AI 短碎片补全**（`review_ai`）— 无视频片段，AI 看上下文推测
-5. **人工审查**（`review` + `apply`）— checklist + 视频片段 + 人工修正
+1. **生成模式**（默认）：收集 L6 ⬜ 条目 → 按集分组 → 输出 `reports/manual-review/checklist.md`（version: 3 unified）
+2. **应用模式**（`--apply-checklist`）：解析 checklist → 逐集调 `Fixer.apply()` → VAD 时间对齐 → 写入 SRT
 
-所有修正通过统一的 SRT 写入 + 报告更新路径。SRT 是唯一真相源。
+⚠️ **兼容性陷阱**：`run_all.py` 使用 v3 unified 格式（`## EP001` header 分组），向后兼容 v2 per-ep 格式。`apply_fixes.py --review` 使用另一种旧格式解析器。**不要通过 `apply_fixes.py` 应用 unified checklist — 它无法解析。**
 
+### Fixer.apply() VAD 时间对齐
 
-功能已迁移到 `fix_orchestrator.py`。保留文件但不维护。
+人工填入的正确台词通过 VAD 找到精确起止时间：
+- VAD 1 段 → 用 VAD 边界替换 cue start/end
+- VAD N≠1 段 → fallback：保持原边界，只替换 text
+- VAD 0 段 → 标记无人声，建议删除
+- 无 VAD → fallback：保持原边界替换
 
-输出：`reports/manual-review/`
-- `EPxxx_HH-MM-SS-sss.mp4` — 视频片段（上下文包裹，ffmpeg）
-- `EPxxx_checklist.md` — 审查清单模板（version: 2）
+### 视频片段
 
-视频片段参数：libx264 CRF 28，AAC 64k，640px 宽，faststart。
+`Fixer.review()` 调用 ffmpeg 提取视频 clip 供人工判断（口型/场景）。参数：libx264 CRF 28，AAC 64k，640px 宽，faststart。
 
 ---
 
-## 12. ASS 格式修补
+## 13. ASS 格式修补
 
 `ass/ass_repair.py --check all` 覆盖 5 种检查：
 
@@ -370,3 +483,43 @@ ASS 文本解析：`split(',', 9)` 防逗号破坏；跳过 Display 样式。
 | Name/Style 字段 | 无 | 有 |
 | 文本分隔符 | `\n` | `\N` |
 | 特效层 | 无 | `{\k...}` 等 |
+
+---
+
+## 14. 已知技术债务
+
+> **目的**：记录当前设计中的已知问题，防止清空上下文后踩坑。
+> **最后更新**：2026-07-21
+> ✅ = 已修复  |  ⚠️ = 仍存在  |  🟢 = 设计如此，非债务
+
+### 14.1 ✅ 两套 checklist 解析器 — 已删除
+
+旧版 `apply_fixes.py:_parse_review_checklist()` 已删除，`--review` 标志改为报错并指引用户使用 `run_all.py --apply-checklist`。
+统一 checklist 只能通过 `run_all.py --apply-checklist` 应用。
+
+### 14.2 ✅ `step_nouns()` god function — 已拆分
+
+`run_all.py:step_nouns()` 拆为：
+- `step_nouns()` — 编排 OP/ED + noun table check
+- `_step_noun_classify()` — 运行 noun_checker + auto_classify subprocess
+- `_apply_classified_results()` — 处理分类结果（accepted/rejected/needs_ai）
+
+### 14.3 ✅ `step_deliver()` 双模式 — 已拆分
+
+拆为：
+- `step_deliver()` — 只生成 unified checklist
+- `step_apply_checklist()` — 只解析并应用 checklist
+
+### 14.4 ✅ `episode_workflow.py` 遗留兼容代码 — 已清理
+
+`step_apply()` 移除 legacy list 处理路径（~100 行），简化到只处理 `FixReport`。
+同时清理了 `_run_pipeline` 中对应的 `hasattr` 兼容检查。
+
+### 14.5 ✅ SKILL.md 架构图 — 已更新
+
+补全了 `lib/` 下所有 6 个文件，去除了重复的 `whisper_utils.py` 条目。
+
+### 14.6 🟢 两套 SRT 数据模型 — 设计如此
+
+`srt_utils.py`（行列表）和 `whisper_utils.py`（cue 字典）两层抽象是合理分层，
+通过 `whisper_utils.parse_srt()` 桥接。不视为债务。

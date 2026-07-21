@@ -358,11 +358,10 @@ def main():
 
     # Load fixes from JSON or review checklist
     if args.review:
-        print(f'[review] 解析审查清单: {args.review}')
-        fixes = _parse_review_checklist(args.review)
-        if not fixes:
-            print('[review] 未找到修复条目。')
-            return
+        print(f'[review] --review is deprecated.', file=sys.stderr)
+        print(f'  For unified checklists: python scripts/run_all.py --lang {args.lang} --apply-checklist', file=sys.stderr)
+        print(f'  For per-ep checklists:  python scripts/fix/fix_orchestrator.py <EP> --step apply --checklist <path>', file=sys.stderr)
+        sys.exit(1)
     elif args.fixes:
         with open(args.fixes, 'r', encoding='utf-8') as f:
             fixes = json.load(f)
@@ -632,70 +631,6 @@ def _run_degloss(target_dir, dry_run=False):
                     f.write(content)
             print(f'  {"[DRY-RUN]" if dry_run else ""} {fname}: {changed} 处', file=sys.stderr)
     print(f'[degloss] {"预览" if dry_run else "修正"}完成: {total} 处', file=sys.stderr)
-
-
-# ═══════════════════════════════════════════════════════════════
-# 审查清单解析（合并自 apply_review_fixes.py）
-# ═══════════════════════════════════════════════════════════════
-
-def _parse_review_checklist(path):
-    """解析人工审查清单 markdown，生成 fixes 列表。
-
-    清单格式:
-      EP019 | 00:08:10.569 ~ 00:08:42.810 | EP019_00-08-10_to_00-08-42.mp4
-      残留: 原始错误文本
-      修正:
-      修正后文本第一行
-      修正后文本第二行
-    """
-    fixes = []
-    with open(path, 'r', encoding='utf-8') as f:
-        content = f.read()
-
-    header_pattern = re.compile(
-        r'^(EP)?(\d+)\s*\|\s*([\d:,.-]+)\s*~\s*([\d:,.-]+)\s*\|\s*(.+\.mp4)')
-    raw_lines = content.split('\n')
-
-    for i, line in enumerate(raw_lines):
-        m = header_pattern.match(line.strip())
-        if not m:
-            continue
-        ep = f'EP{m.group(2)}'
-        start = m.group(3).replace('.', ',').replace('-', ':')
-        end = m.group(4).replace('.', ',').replace('-', ':')
-
-        # Collect correction lines
-        corrected_lines = []
-        in_correction = False
-        j = i + 1
-        while j < len(raw_lines):
-            s = raw_lines[j].strip()
-            if s.startswith('修正:'):
-                in_correction = True
-                # Check if correction is on same line
-                text = s[2:].strip()
-                if text:
-                    corrected_lines.append(text)
-            elif in_correction:
-                if s.startswith('残留:') or header_pattern.match(s) or s == '---':
-                    break
-                if s:
-                    corrected_lines.append(s)
-                else:
-                    break
-            j += 1
-
-        if corrected_lines:
-            replacement = '\n'.join(corrected_lines)
-            fixes.append({
-                'action': 'replace_text',
-                'file': f'{ep}.srt',
-                'start': start, 'end': end,
-                'replacement': replacement,
-                'note': f'清单修正 ({len(corrected_lines)} 行)',
-            })
-
-    return fixes
 
 
 if __name__ == '__main__':

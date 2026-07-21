@@ -177,121 +177,28 @@ def step_audio(project_dir, episode, scan_result, dry_run=False, video_dir=None)
 # Step: apply — apply fixes to the SRT file + AI confidence review
 # ═══════════════════════════════════════════════════════════════
 
-# Thresholds for flagging low-confidence Whisper output for AI review
-from lib.whisper_utils import (
-    AI_REVIEW_AVG_LOGPROB_THRESHOLD,
-    AI_REVIEW_COMPRESSION_THRESHOLD,
-    AI_REVIEW_NO_SPEECH_THRESHOLD,
-)
-
-
 def step_apply(project_dir, episode, fixes_or_report, scan_result, no_backup=False):
     """Log AI confidence review JSON for low-confidence Whisper items.
 
-    Note: SRT writing and report updates are now handled internally by
-    Fixer.fix_by_whisper(). This step only generates the per-episode
-    AI review JSON for --step ai-review.
+    SRT writing and report updates are handled internally by Fixer.fix_by_whisper().
+    This step only generates the per-episode AI review JSON for --step ai-review.
 
     Args:
-        fixes_or_report: FixReport from step_audio(), or legacy fixes list
+        fixes_or_report: FixReport from step_audio()
     """
-    # Handle legacy fixes list (backward compat)
-    if isinstance(fixes_or_report, list):
-        fixes = fixes_or_report
-        if not fixes:
-            print('[apply] No fixes to report.')
-            return [], []
-        fixed = [f for f in fixes if f.get('confidence') in ('high', 'retry')]
-        unfixed = [f for f in fixes if f.get('confidence') == 'none']
-    else:
-        # FixReport from Fixer
-        report = fixes_or_report
-        if report.applied == 0 and report.failed == 0:
-            print('[apply] No fixes to report.')
-            return [], []
-        # AI review items are in report.details
-        ai_review_items = report.details if isinstance(report.details, list) else []
-        print(f'[apply] {report.applied} fixed, {report.ai_review} AI review, '
-              f'{report.failed} unfixable (already applied to SRT & report)')
-        # Generate AI review JSON if needed
-        if ai_review_items:
-            _write_ai_review_json(project_dir, episode, ai_review_items)
-        return [], ai_review_items
+    # FixReport from Fixer (only path — legacy list path removed 2026-07-21)
+    report = fixes_or_report
+    if hasattr(report, 'applied') and report.applied == 0 and report.failed == 0:
+        print('[apply] No fixes to report.')
+        return [], []
 
-    srt_name, srt_path = find_srt(project_dir, episode)
-
-    print(f'[apply] {len(fixed)} fixed, {len(unfixed)} unmatched '
-          f'(already written to SRT by Whisper)', file=sys.stderr)
-
-    # ── Filter low-confidence items from "fixed" for AI review ──
-    ai_review_items = []
-    for f in fixed:
-        alp = f.get('avg_logprob')
-        cr = f.get('compression_ratio')
-        nsp = f.get('no_speech_prob', -1.0)
-        reasons = []
-        if alp is not None and alp < AI_REVIEW_AVG_LOGPROB_THRESHOLD:
-            reasons.append(f'avg_logprob={alp:.2f}')
-        if cr is not None and cr > AI_REVIEW_COMPRESSION_THRESHOLD:
-            reasons.append(f'compression_ratio={cr:.1f}')
-        if nsp >= 0 and nsp > AI_REVIEW_NO_SPEECH_THRESHOLD:
-            reasons.append(f'no_speech_prob={nsp:.2f}')
-        if reasons:
-            ai_review_items.append({**f, 'flag_reasons': reasons})
+    ai_review_items = report.details if hasattr(report, 'details') and isinstance(report.details, list) else []
+    print(f'[apply] {report.applied} fixed, {report.ai_review} AI review, '
+          f'{report.failed} unfixable (already applied to SRT & report)')
 
     if ai_review_items:
-        print(f'[apply] ⚠ {len(ai_review_items)}/{len(fixed)} fixed items have low '
-              f'Whisper confidence → AI review needed', file=sys.stderr)
-
-    # ── Read context for AI review items ──
-    cues = None
-    if ai_review_items and srt_path:
-        try:
-            from lib.srt_utils import read_srt_file, parse_srt_cue
-            cues = read_srt_file(srt_path)
-            if isinstance(cues, list) and cues and isinstance(cues[0], str):
-                cues = parse_srt_cue(cues)
-        except ImportError:
-            pass
-
-    # ── Generate AI review JSON ──
-    _write_ai_review_json(project_dir, episode, ai_review_items, cues)
-
-    # ── Log to report (legacy path — Fixer doesn't handle this for old callers) ──
-    try:
-        from utils.update_report import upsert_entries
-        report_path = os.path.join(project_dir, 'reports', '问题解决报告.md')
-
-        high_conf = [f for f in fixed if f not in ai_review_items]
-        if high_conf:
-            upsert_entries(report_path, step='2', entries=[
-                {'ep': episode, 'time': f.get('start', ''),
-                 'original': f.get('original', '')[:80],
-                 'corrected': f.get('replacement', '')[:80],
-                 'status': '✅'}
-                for f in high_conf
-            ])
-
-        if ai_review_items:
-            upsert_entries(report_path, step='2.5', entries=[
-                {'ep': episode, 'time': f.get('start', ''),
-                 'original': f.get('original', '')[:80],
-                 'corrected': f.get('replacement', '')[:80],
-                 'status': '⬜'}
-                for f in ai_review_items
-            ])
-
-        if unfixed:
-            upsert_entries(report_path, step='6', entries=[
-                {'ep': episode, 'time': f.get('start', ''),
-                 'original': f.get('original', '')[:80],
-                 'corrected': '', 'status': '⬜'}
-                for f in unfixed
-            ])
-    except Exception as e:
-        print(f'[apply] Report update error: {e}', file=sys.stderr)
-
-    return fixed, ai_review_items
+        _write_ai_review_json(project_dir, episode, ai_review_items)
+    return [], ai_review_items
 
 
 def _write_ai_review_json(project_dir, episode, ai_review_items, cues=None):
@@ -529,7 +436,8 @@ def _run_pipeline(project_dir, episode, mode, args):
     issues = per_ep.get(episode, [])
     scan_result = {'issues': issues} if issues else None
 
-    fixes = []
+    from fix.fix_orchestrator import FixReport
+    fixes = FixReport(source='workflow')
     applied = []
     ai_review_items = []
     translated_path = None
@@ -556,7 +464,7 @@ def _run_pipeline(project_dir, episode, mode, args):
 
         elif step == 'apply':
             if args.dry_run:
-                n = fixes.applied + fixes.failed if hasattr(fixes, 'applied') else len(fixes)
+                n = fixes.applied + fixes.failed
                 print(f'[apply] DRY RUN — {n} fixes would be applied')
                 print(f'[apply] Would backup, then write to SRT')
             else:
@@ -571,10 +479,9 @@ def _run_pipeline(project_dir, episode, mode, args):
 
     # Final summary + auto-generate checklists for unfixable items
     if not args.dry_run and 'apply' in steps:
-        total_issues = len(scan_result.get('issues', [])) if scan_result else 0
-        n_fixed = fixes.applied if hasattr(fixes, 'applied') else (len(applied) if isinstance(applied, list) else 0)
-        n_ai = fixes.ai_review if hasattr(fixes, 'ai_review') else (len(ai_review_items) if isinstance(ai_review_items, list) else 0)
-        n_failed = fixes.failed if hasattr(fixes, 'failed') else 0
+        n_fixed = fixes.applied
+        n_ai = fixes.ai_review
+        n_failed = fixes.failed
 
         # Auto-generate checklists for unfixable items
         from fix.fix_orchestrator import Fixer

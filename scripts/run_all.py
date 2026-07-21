@@ -196,103 +196,106 @@ def step_nouns(project_dir, lang):
 
     # Noun table check (only if glossary exists)
     if os.path.exists(glossary):
-        print('\n[nouns] Noun table check...', file=sys.stderr)
-        _run(['python', checker, f'"{target}"', '--lang', lang,
-              '--noun-table', f'"{glossary}"',
-              '-o', os.path.join(project_dir, 'temp', 'scans', 'noun_check.json')],
-             project_dir, desc='nouns')
-
-        # Auto-classify unknown/mismatch candidates before AI review
-        noun_json = load_json(os.path.join(project_dir, 'temp', 'scans', 'noun_check.json'))
-        if noun_json:
-            unknowns = [r for r in noun_json.get('results', [])
-                       if r.get('status') in ('unknown', 'mismatch')]
-            results['total_unknown'] = len(unknowns)
-
-            if unknowns:
-                # Deduplicate and rank by frequency
-                from collections import Counter
-                cands = Counter(r['candidate'] for r in unknowns)
-
-                # Run auto_classify to pre-filter
-                candidates_for_classify = [
-                    {'candidate': c, 'count': n,
-                     'context': next((r.get('context', '') for r in unknowns
-                                      if r['candidate'] == c), '')}
-                    for c, n in cands.most_common(50)
-                ]
-
-                classified_path = os.path.join(
-                    project_dir, 'temp', 'scans', 'noun_classified.json')
-                _run([
-                    'python',
-                    os.path.join(_SCRIPT_DIR, 'nouns', 'auto_classify.py'),
-                    '--candidates',
-                    f'"{os.path.join(project_dir, "temp", "scans", "noun_candidates.json")}"',
-                    '--lang', lang,
-                    '--output', f'"{classified_path}"',
-                ], project_dir, desc='auto_classify')
-
-                # Save candidates for auto_classify
-                cand_path = os.path.join(project_dir, 'temp', 'scans',
-                                        'noun_candidates.json')
-                os.makedirs(os.path.dirname(cand_path), exist_ok=True)
-                with open(cand_path, 'w', encoding='utf-8') as f:
-                    json.dump(candidates_for_classify, f, ensure_ascii=False, indent=2)
-
-                # Run auto_classify inline (don't rely on subprocess)
-                try:
-                    from nouns.auto_classify import classify_batch
-                    classified = classify_batch(candidates_for_classify, lang=lang)
-
-                    # Accepted → add to fixes
-                    if classified['accepted']:
-                        accepted_fixes = [
-                            {'action': 'replace_global',
-                             'original': c['candidate'],
-                             'replacement': c['candidate'],
-                             'note': f'auto_classify: {c["reason"]}'}
-                            for c in classified['accepted']
-                        ]
-                        fixes_path = os.path.join(
-                            project_dir, 'temp', 'scans', 'noun_accepted_fixes.json')
-                        with open(fixes_path, 'w', encoding='utf-8') as f:
-                            json.dump(accepted_fixes, f, ensure_ascii=False, indent=2)
-                        # Append to proper-nouns.md
-                        _append_to_glossary(project_dir, classified['accepted'])
-
-                    # Rejected → log only
-                    if classified['rejected']:
-                        results['auto_rejected'] = len(classified['rejected'])
-
-                    # Needs AI → save for AI review
-                    if classified['needs_ai']:
-                        results['ai_review_count'] = len(classified['needs_ai'])
-                        results['ai_candidates'] = [
-                            {'candidate': c['candidate'], 'count': c.get('count', 1),
-                             'reason': c.get('reason', '')}
-                            for c in classified['needs_ai']
-                        ]
-                        ai_path = os.path.join(
-                            project_dir, 'temp', 'scans', 'ai_review_candidates.json')
-                        with open(ai_path, 'w', encoding='utf-8') as f:
-                            json.dump(results['ai_candidates'], f, ensure_ascii=False, indent=2)
-                        results['ai_review_file'] = ai_path
-                except ImportError:
-                    # Fallback: if auto_classify not available, all go to AI
-                    results['ai_review_count'] = len(unknowns)
-                    results['ai_candidates'] = [
-                        {'candidate': c, 'count': n}
-                        for c, n in cands.most_common(20)
-                    ]
-                    ai_path = os.path.join(
-                        project_dir, 'temp', 'scans', 'ai_review_candidates.json')
-                    with open(ai_path, 'w', encoding='utf-8') as f:
-                        json.dump(results['ai_candidates'], f, ensure_ascii=False, indent=2)
-                    results['ai_review_file'] = ai_path
+        results.update(_step_noun_classify(project_dir, lang, checker, target, glossary))
     else:
         print('\n[nouns] No proper-nouns.md — skipping noun table check.', file=sys.stderr)
         print('[nouns] Run unified_scanner --build-glossary first to generate.', file=sys.stderr)
+
+    return results
+
+
+def _step_noun_classify(project_dir, lang, checker, target, glossary):
+    """Run noun_checker + auto_classify for unknown proper noun candidates."""
+    print('\n[nouns] Noun table check...', file=sys.stderr)
+    _run(['python', checker, f'"{target}"', '--lang', lang,
+          '--noun-table', f'"{glossary}"',
+          '-o', os.path.join(project_dir, 'temp', 'scans', 'noun_check.json')],
+         project_dir, desc='nouns')
+
+    noun_json = load_json(os.path.join(project_dir, 'temp', 'scans', 'noun_check.json'))
+    if not noun_json:
+        return {}
+
+    unknowns = [r for r in noun_json.get('results', [])
+                if r.get('status') in ('unknown', 'mismatch')]
+    if not unknowns:
+        return {'total_unknown': 0}
+
+    # Deduplicate and rank by frequency
+    from collections import Counter
+    cands = Counter(r['candidate'] for r in unknowns)
+    candidates_for_classify = [
+        {'candidate': c, 'count': n,
+         'context': next((r.get('context', '') for r in unknowns
+                          if r['candidate'] == c), '')}
+        for c, n in cands.most_common(50)
+    ]
+
+    # Save candidates JSON for auto_classify subprocess
+    cand_path = os.path.join(project_dir, 'temp', 'scans', 'noun_candidates.json')
+    os.makedirs(os.path.dirname(cand_path), exist_ok=True)
+    with open(cand_path, 'w', encoding='utf-8') as f:
+        json.dump(candidates_for_classify, f, ensure_ascii=False, indent=2)
+
+    # Also run via subprocess for logging (non-essential — failure ignored)
+    classified_path = os.path.join(project_dir, 'temp', 'scans', 'noun_classified.json')
+    _run([
+        'python', os.path.join(_SCRIPT_DIR, 'nouns', 'auto_classify.py'),
+        '--candidates', f'"{cand_path}"',
+        '--lang', lang,
+        '--output', f'"{classified_path}"',
+    ], project_dir, desc='auto_classify')
+
+    return _apply_classified_results(project_dir, candidates_for_classify, unknowns, cands, lang)
+
+
+def _apply_classified_results(project_dir, candidates, unknowns, cands, lang):
+    """Run auto_classify inline and distribute results to fixes/glossary/AI review."""
+    results = {'total_unknown': len(unknowns)}
+
+    try:
+        from nouns.auto_classify import classify_batch
+        classified = classify_batch(candidates, lang=lang)
+    except ImportError:
+        # Fallback: if auto_classify not available, all go to AI
+        results['ai_review_count'] = len(unknowns)
+        results['ai_candidates'] = [{'candidate': c, 'count': n}
+                                    for c, n in cands.most_common(20)]
+        ai_path = os.path.join(project_dir, 'temp', 'scans', 'ai_review_candidates.json')
+        with open(ai_path, 'w', encoding='utf-8') as f:
+            json.dump(results['ai_candidates'], f, ensure_ascii=False, indent=2)
+        results['ai_review_file'] = ai_path
+        return results
+
+    # Accepted → add to fixes
+    if classified['accepted']:
+        accepted_fixes = [
+            {'action': 'replace_global',
+             'original': c['candidate'], 'replacement': c['candidate'],
+             'note': f'auto_classify: {c["reason"]}'}
+            for c in classified['accepted']
+        ]
+        fixes_path = os.path.join(project_dir, 'temp', 'scans', 'noun_accepted_fixes.json')
+        with open(fixes_path, 'w', encoding='utf-8') as f:
+            json.dump(accepted_fixes, f, ensure_ascii=False, indent=2)
+        _append_to_glossary(project_dir, classified['accepted'])
+
+    # Rejected → log only
+    if classified['rejected']:
+        results['auto_rejected'] = len(classified['rejected'])
+
+    # Needs AI → save for AI review
+    if classified['needs_ai']:
+        results['ai_review_count'] = len(classified['needs_ai'])
+        results['ai_candidates'] = [
+            {'candidate': c['candidate'], 'count': c.get('count', 1),
+             'reason': c.get('reason', '')}
+            for c in classified['needs_ai']
+        ]
+        ai_path = os.path.join(project_dir, 'temp', 'scans', 'ai_review_candidates.json')
+        with open(ai_path, 'w', encoding='utf-8') as f:
+            json.dump(results['ai_candidates'], f, ensure_ascii=False, indent=2)
+        results['ai_review_file'] = ai_path
 
     return results
 
@@ -392,16 +395,11 @@ def step_clean(project_dir):
 
 
 def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True,
-                 video_dir=None, apply_checklist=False):
-    """Human review delivery or checklist application — UNIFIED format.
+                 video_dir=None):
+    """Generate unified human review checklist from Layer 6 ⬜ entries.
 
-    One checklist file (reports/manual-review/checklist.md) covers ALL
-    episodes.  Entries are grouped by episode with ## EP### headers.
-
-    - Without --apply-checklist: collects all Layer 6 ⬜ entries,
-      generates the unified checklist.
-    - With --apply-checklist: parses the unified checklist and applies
-      corrections for each episode.
+    One file (reports/manual-review/checklist.md) covers ALL episodes.
+    Entries grouped by episode with ## EP### headers.
     """
     review_dir = os.path.join(project_dir, 'reports', 'manual-review')
     os.makedirs(review_dir, exist_ok=True)
@@ -410,99 +408,100 @@ def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True,
 
     from utils.update_report import read_report
     report_data = read_report(report_path)
+    layer6 = report_data.get('6', [])
+    pending = [e for e in layer6 if e.get('status') == '⬜']
 
-    if apply_checklist:
-        # ── Apply unified checklist ──
-        if not os.path.exists(unified_path):
-            print('[deliver] Unified checklist not found.', file=sys.stderr)
-            return False
-
-        from fix.fix_orchestrator import Fixer
-        corrections_by_ep = _parse_unified_checklist(unified_path)
-        if not corrections_by_ep:
-            print('[deliver] No corrections found in checklist.', file=sys.stderr)
-            return False
-
-        total_applied = 0
-        for ep in sorted(corrections_by_ep.keys()):
-            ep_corrections = corrections_by_ep[ep]
-            # Write a temporary per-ep checklist for Fixer.apply() compatibility
-            tmp_path = os.path.join(review_dir, f'{ep}_checklist.md')
-            _write_ep_checklist(tmp_path, ep, ep_corrections)
-            fixer = Fixer(ep, project_dir, video_dir=video_dir)
-            applied = fixer.apply(tmp_path)
-            total_applied += applied
-            print(f'[deliver] {ep}: {applied} corrections applied', file=sys.stderr)
-
-        print(f'\n[deliver] Total: {total_applied} corrections applied across '
-              f'{len(corrections_by_ep)} episodes', file=sys.stderr)
-        return total_applied > 0
-
-    else:
-        # ── Generate unified checklist ──
-        layer6 = report_data.get('6', [])
-        pending = [e for e in layer6 if e.get('status') == '⬜']
-
-        if not pending:
-            print('[deliver] No pending Layer 6 entries — all clean.',
-                  file=sys.stderr)
-            return True
-
-        # Group by episode
-        by_ep = {}
-        for e in pending:
-            ep = e.get('ep', '?')
-            by_ep.setdefault(ep, []).append(e)
-
-        # Build unified checklist markdown
-        from datetime import datetime
-        today = datetime.now().strftime('%Y-%m-%d')
-        lines = [
-            f'# 人工审查清单',
-            f'> 导出: {today}',
-            f'> 共 {len(by_ep)} 集 {len(pending)} 条待审查',
-            f'> version: 3  (unified)',
-            f'>',
-            f'> **填写方法**：看视频 + 读上下文 → 在「修正:」后写正确台词。',
-            f'> 写「删除」移除该 cue。填完运行 --apply-checklist。',
-            f'>',
-            f'---',
-            f'',
-        ]
-
-        for ep in sorted(by_ep.keys()):
-            entries = by_ep[ep]
-            lines.append(f'## {ep} ({len(entries)}条)')
-            lines.append('')
-            for entry in entries:
-                timecode = entry.get('time', '?')
-                original = entry.get('original', '')
-                corrected = entry.get('corrected', '')
-                # Find video clip if exists (from Fixer.review())
-                safe_tc = timecode.replace(':', '-').replace(',', '-').replace('.', '-')
-                clip_name = f'{ep}_{safe_tc}.mp4'
-                clip_path = os.path.join(review_dir, clip_name)
-                clip_str = clip_name if os.path.exists(clip_path) else '(需先生成)'
-                lines.append(
-                    f'{ep} | {timecode}\n'
-                    f'残留: {original}\n'
-                    f'片段: {clip_str}\n'
-                    f'修正: {corrected}\n'
-                    f'\n---\n'
-                )
-
-        with open(unified_path, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(lines))
-
-        print(f'\n[deliver] Unified checklist: {unified_path}',
-              file=sys.stderr)
-        print(f'[deliver] {len(pending)} pending items across {len(by_ep)} episodes',
-              file=sys.stderr)
-        print(f'[deliver] After filling corrections, run:',
-              file=sys.stderr)
-        print(f'  python scripts/run_all.py --lang {lang} --apply-checklist',
-              file=sys.stderr)
+    if not pending:
+        print('[deliver] No pending Layer 6 entries — all clean.', file=sys.stderr)
         return True
+
+    # Group by episode
+    by_ep = {}
+    for e in pending:
+        ep = e.get('ep', '?')
+        by_ep.setdefault(ep, []).append(e)
+
+    # Build unified checklist markdown
+    from datetime import datetime
+    today = datetime.now().strftime('%Y-%m-%d')
+    lines = [
+        f'# 人工审查清单',
+        f'> 导出: {today}',
+        f'> 共 {len(by_ep)} 集 {len(pending)} 条待审查',
+        f'> version: 3  (unified)',
+        f'>',
+        f'> **填写方法**：看视频 + 读上下文 → 在「修正:」后写正确台词。',
+        f'> 写「删除」移除该 cue。填完运行 --apply-checklist。',
+        f'>',
+        f'---',
+        f'',
+    ]
+
+    for ep in sorted(by_ep.keys()):
+        entries = by_ep[ep]
+        lines.append(f'## {ep} ({len(entries)}条)')
+        lines.append('')
+        for entry in entries:
+            timecode = entry.get('time', '?')
+            original = entry.get('original', '')
+            corrected = entry.get('corrected', '')
+            safe_tc = timecode.replace(':', '-').replace(',', '-').replace('.', '-')
+            clip_name = f'{ep}_{safe_tc}.mp4'
+            clip_path = os.path.join(review_dir, clip_name)
+            clip_str = clip_name if os.path.exists(clip_path) else '(需先生成)'
+            lines.append(
+                f'{ep} | {timecode}\n'
+                f'残留: {original}\n'
+                f'片段: {clip_str}\n'
+                f'修正: {corrected}\n'
+                f'\n---\n'
+            )
+
+    with open(unified_path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines))
+
+    print(f'\n[deliver] Unified checklist: {unified_path}', file=sys.stderr)
+    print(f'[deliver] {len(pending)} pending items across {len(by_ep)} episodes',
+          file=sys.stderr)
+    print(f'[deliver] After filling corrections, run:',
+          file=sys.stderr)
+    print(f'  python scripts/run_all.py --lang {lang} --apply-checklist',
+          file=sys.stderr)
+    return True
+
+
+def step_apply_checklist(project_dir, lang, video_dir=None):
+    """Apply filled unified human review checklist → SRT + report.
+
+    Parses reports/manual-review/checklist.md (v3 unified format),
+    applies corrections per-episode via Fixer.apply() with VAD alignment.
+    """
+    review_dir = os.path.join(project_dir, 'reports', 'manual-review')
+    unified_path = os.path.join(review_dir, 'checklist.md')
+
+    if not os.path.exists(unified_path):
+        print('[apply-checklist] Unified checklist not found.', file=sys.stderr)
+        return False
+
+    from fix.fix_orchestrator import Fixer
+    corrections_by_ep = _parse_unified_checklist(unified_path)
+    if not corrections_by_ep:
+        print('[apply-checklist] No corrections found in checklist.', file=sys.stderr)
+        return False
+
+    total_applied = 0
+    for ep in sorted(corrections_by_ep.keys()):
+        ep_corrections = corrections_by_ep[ep]
+        tmp_path = os.path.join(review_dir, f'{ep}_checklist.md')
+        _write_ep_checklist(tmp_path, ep, ep_corrections)
+        fixer = Fixer(ep, project_dir, video_dir=video_dir)
+        applied = fixer.apply(tmp_path)
+        total_applied += applied
+        print(f'[apply-checklist] {ep}: {applied} corrections applied', file=sys.stderr)
+
+    print(f'\n[apply-checklist] Total: {total_applied} corrections across '
+          f'{len(corrections_by_ep)} episodes', file=sys.stderr)
+    return total_applied > 0
 
 
 def _parse_unified_checklist(path):
@@ -771,9 +770,7 @@ Examples:
         print(f'\n{"─"*40}', file=sys.stderr)
         print('  Apply human review checklist (fast)', file=sys.stderr)
         print(f'{"─"*40}', file=sys.stderr)
-        step_deliver(project_dir, args.lang, processed_episodes=episodes,
-                     is_full_run=is_full_run, video_dir=video_dir,
-                     apply_checklist=True)
+        step_apply_checklist(project_dir, args.lang, video_dir=video_dir)
         return
 
     # ── Layer 1: Scan ──
@@ -816,16 +813,12 @@ Examples:
     print(f'{"─"*40}', file=sys.stderr)
     step_ass_repair(project_dir)
 
-    # ── Human review (part of Layer 2, convenience wrapper) ──
+    # ── Human review checklist generation ──
     print(f'\n{"─"*40}', file=sys.stderr)
-    if args.apply_checklist:
-        print('  Apply: Human review corrections → SRT', file=sys.stderr)
-    else:
-        print('  Review: Check generated checklists', file=sys.stderr)
+    print('  Review: Generate human review checklist', file=sys.stderr)
     print(f'{"─"*40}', file=sys.stderr)
     step_deliver(project_dir, args.lang, processed_episodes=processed,
-                 is_full_run=is_full_run, video_dir=video_dir,
-                 apply_checklist=args.apply_checklist)
+                 is_full_run=is_full_run, video_dir=video_dir)
 
     # ── Clean ──
     step_clean(project_dir)
