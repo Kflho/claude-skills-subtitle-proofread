@@ -76,6 +76,22 @@ returns 0 fixes — a silent failure.
 | `[whisper] EP00N: No video file found` | Video directory is wrong or empty |
 | `Pipeline complete — all layers passed` | Orchestrator ran all layers without crashing |
 
+### Step 5.5: Auto AI review (do NOT skip — part of the pipeline)
+
+If the pipeline prints `[ai-review] N pending` entries (non-zero), Claude MUST
+immediately handle them:
+
+1. **Read** each `reports/manual-review/{EP}/ai_review.md`
+2. **For each ⬜ item**, read the context (上文/下文) and the Whisper attempt,
+   then infer the correct Japanese text. Fill in the `修正:` field.
+   - Trust context over Whisper — Whisper often drops or garbles words.
+   - If the original text looks correct except for a loanword (e.g. "OK"),
+     keep it as-is — the scanner flags Latin but common loanwords are fine.
+   - If truly uncertain, leave `修正:` blank and it stays ⬜ for L6 human.
+3. **Run** `python run_all.py --lang <lang> --apply-ai-review` to apply.
+
+This is the "Claude AI" in L2.5 — do it inline, don't wait for the user to ask.
+
 ### Step 6: Post-pipeline fast paths (standalone — do NOT combine with full run)
 
 These flags run a **single action** and exit. They do NOT scan, run Whisper,
