@@ -736,6 +736,12 @@ Examples:
     args = parser.parse_args()
 
     project_dir = args.target_dir or os.getcwd()
+
+    # Ensure subprocess-called scripts can find lib/ via import lib._path
+    if _SCRIPT_DIR not in os.environ.get('PYTHONPATH', ''):
+        existing = os.environ.get('PYTHONPATH', '')
+        os.environ['PYTHONPATH'] = _SCRIPT_DIR + (os.pathsep + existing if existing else '')
+
     mode = detect_mode(project_dir)
     fmt = detect_format(project_dir)
 

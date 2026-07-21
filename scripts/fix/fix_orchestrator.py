@@ -571,11 +571,14 @@ class Fixer:
                       file=sys.stderr)
                 translate_script = os.path.join(_SCRIPT_DIR, 'translate_srt.py')
                 try:
+                    env = os.environ.copy()
+                    if _SCRIPT_DIR not in env.get('PYTHONPATH', ''):
+                        env['PYTHONPATH'] = _SCRIPT_DIR + (os.pathsep + env['PYTHONPATH'] if env.get('PYTHONPATH') else '')
                     subprocess.run([
                         sys.executable, translate_script,
                         ref_srt, '--to', self.target_lang,
                         '--output', translated_srt,
-                    ], capture_output=False, timeout=1800, check=False)
+                    ], capture_output=False, timeout=1800, check=False, env=env)
                 except Exception as e:
                     print(f'[{self.episode}] Translation failed: {e}',
                           file=sys.stderr)

@@ -88,7 +88,10 @@ def step_translate(project_dir, episode, scan_result, dry_run=False):
 
     print(f'[translate] Translating: {os.path.basename(ref_path)} → ja')
     try:
-        result = subprocess.run([str(p) for p in cmd_parts], cwd=project_dir,
+        env = os.environ.copy()
+        if _SCRIPT_DIR not in env.get('PYTHONPATH', ''):
+            env['PYTHONPATH'] = _SCRIPT_DIR + (os.pathsep + env['PYTHONPATH'] if env.get('PYTHONPATH') else '')
+        result = subprocess.run([str(p) for p in cmd_parts], cwd=project_dir, env=env,
                                 capture_output=False, timeout=1800)
         if result.returncode != 0:
             print(f'[translate] Translation failed (exit {result.returncode})')
