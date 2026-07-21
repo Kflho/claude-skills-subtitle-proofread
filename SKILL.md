@@ -1,7 +1,7 @@
 ---
 name: subtitle-proofread
 description: >
-  Automate subtitle proofreading for SRT/ASS files. 7-layer pipeline: scan garbled
+  Automate subtitle proofreading for SRT/ASS files. 6-layer pipeline: scan garbled
   characters → fix via translation or Whisper ASR → AI confidence review → unify proper
   nouns → AI noun review → apply batch fixes (trad→simp, translationese) → repair ASS
   formatting → human review delivery. Single command: run_all.py. Supports any language
@@ -12,7 +12,7 @@ description: >
 when_to_use: >
   Auto-trigger when the user's project contains SRT/ASS subtitle files OR the user
   explicitly mentions subtitles, captions, proofreading, or Whisper transcription.
-  This skill provides a fully automated 7-layer pipeline — always prefer it over
+  This skill provides a fully automated 6-layer pipeline — always prefer it over
   manual script-by-script execution.
 argument-hint: [目标目录] [参考字幕目录]
 ---
@@ -28,6 +28,7 @@ scripts/
 ├── run_all.py                  ← 一键全流程
 ├── 01_scan/unified_scanner.py   字符扫描 + 术语收集
 ├── 02_fix/
+│   ├── fix_orchestrator.py      统一修复（参考字幕 → Whisper → 人工）
 │   ├── episode_workflow.py      单集编排器
 │   ├── whisper_pipeline.py      Whisper 重转录（Tier 1 拼接 / Tier 2 整集）
 │   ├── translate_srt.py         百度翻译（text 模式）
@@ -39,8 +40,8 @@ scripts/
 ├── 05_ass/ass_repair.py         ASS 格式修补
 ├── utils/
 │   ├── check_progress.py        进度统计
-│   ├── update_report.py         报告 7 层读写
-│   ├── extract_review_clips.py  人工审查交付
+│   ├── update_report.py         报告 6 层读写
+│   ├── extract_review_clips.py  [废弃 → fix_orchestrator]
 │   └── clean_empty_cues.py      清理空白 cue
 └── lib/
     ├── srt_utils.py / ass_utils.py / whisper_utils.py
@@ -77,10 +78,17 @@ python scripts/run_all.py --lang ja                    # 全量
 python scripts/run_all.py --lang ja --limit 5           # 前5集
 python scripts/run_all.py --lang ja -e EP001-EP010      # 指定范围
 python scripts/run_all.py --lang ja --resume            # AI审查后继续
+python scripts/run_all.py --lang ja --apply-checklist   # 应用人工审查修正
 
 # 单集
 python scripts/02_fix/episode_workflow.py EP064         # 全流程
 python scripts/02_fix/episode_workflow.py EP064 --step ai-review  # AI审查
+
+# Fixer 直接调用
+python scripts/02_fix/fix_orchestrator.py EP002 --step check     # 检查是否干净
+python scripts/02_fix/fix_orchestrator.py EP002 --step whisper   # 只跑 Whisper
+python scripts/02_fix/fix_orchestrator.py EP002 --step review    # 生成审查清单
+python scripts/02_fix/fix_orchestrator.py EP002 --step apply --checklist <path>  # 应用修正
 
 # 单层调试
 python scripts/01_scan/unified_scanner.py --target-dir AI审查后/ --project-lang ja

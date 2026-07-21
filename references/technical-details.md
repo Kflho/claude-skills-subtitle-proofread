@@ -31,10 +31,11 @@ scripts/
 ├── run_all.py                     ← 批量编排器，逐集调 episode_workflow
 ├── 01_scan/unified_scanner.py     ← 单次遍历：乱码检测 + 重复检测 + 术语收集
 ├── 02_fix/
-│   ├── episode_workflow.py        ← 单集编排器：VAD → Whisper → review → apply → diff
-│   ├── whisper_pipeline.py        ← Whisper Tier 1/2 重转录
-│   ├── translate_srt.py           ← 百度翻译 SRT（text 模式）
-│   └── compare_srt.py             ← 时间码对齐 + 文本相似度比对
+│   ├── fix_orchestrator.py           ← 统一修复模块：参考字幕 → Whisper → 人工
+│   ├── episode_workflow.py           ← 单集编排器（委托给 Fixer）
+│   ├── whisper_pipeline.py           ← Whisper Tier 1/2 重转录
+│   ├── translate_srt.py              ← 百度翻译 SRT（text 模式）
+│   └── compare_srt.py                ← 时间码对齐 + 文本相似度比对
 ├── 03_nouns/
 │   ├── noun_checker.py            ← 专名一致性 + 跨集 OP/ED 统一
 │   └── build_glossary.py          ← 术语表自动生成
@@ -42,8 +43,8 @@ scripts/
 ├── 05_ass/ass_repair.py           ← ASS 格式修补（5 种检查）
 ├── utils/
 │   ├── check_progress.py          ← 进度统计
-│   ├── update_report.py           ← 问题解决报告 7 层读写
-│   ├── extract_review_clips.py    ← 人工审查：视频片段 + 审查清单
+│   ├── update_report.py           ← 问题解决报告 6 层读写
+│   ├── extract_review_clips.py    ← [废弃 → 02_fix/fix_orchestrator.py]
 │   └── clean_empty_cues.py        ← 清理空白 cue
 └── lib/
     ├── srt_utils.py               ← SRT 解析/写回
@@ -327,19 +328,25 @@ noun_checker 输出中 `unknown/mismatch > 0` → 抽样 top 20 高频候选 →
 
 ---
 
-## 11. 人工交付
+## 11. 错误修复（统一 Layer 2）
 
-### extract_review_clips.py
+### fix_orchestrator.py (Fixer)
 
-收集来源：
-1. Whisper fixes（`confidence=none`）
-2. 报告 L6 条目（`status=⬜`）
-3. L2.5 升级条目
-4. noun_checker unresolved
+`Fixer` 类统一了原来的 Layer 2（Whisper 修复）和 Layer 6（人工审查），三级降级：
+
+1. **参考字幕翻译对照**（`fix_by_reference`）— 有参考字幕时优先，比较+采纳
+2. **Whisper 人声转录**（`fix_by_whisper`）— 提取音频（上下文包裹）+ Tier 1/2 转录
+3. **人工审查**（`review` + `apply`）— checklist 生成 + 人工修正应用
+
+所有修正通过统一的 SRT 写入 + 报告更新路径。SRT 是唯一真相源。
+
+### extract_review_clips.py [废弃]
+
+功能已迁移到 `fix_orchestrator.py`。保留文件但不维护。
 
 输出：`reports/manual-review/`
-- `EPxxx_HH-MM-SS-sss.mp4` — 每个条目一个视频片段（ffmpeg，前后 3s padding）
-- `review-checklist.md` — 审查清单模板
+- `EPxxx_HH-MM-SS-sss.mp4` — 视频片段（上下文包裹，ffmpeg）
+- `EPxxx_checklist.md` — 审查清单模板（version: 2）
 
 视频片段参数：libx264 CRF 28，AAC 64k，640px 宽，faststart。
 
