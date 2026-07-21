@@ -890,8 +890,7 @@ class Fixer:
                 f'\n---\n'
             )
 
-        checklist_path = os.path.join(out_dir,
-                                       f'{self.episode}_ai_review.md')
+        checklist_path = os.path.join(out_dir, 'ai_review.md')
         header = (f'# AI 短碎片补全清单 — {self.episode}\n'
                   f'> 导出: {today}\n'
                   f'> 共 {len(entries_md)} 条\n'
