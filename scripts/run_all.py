@@ -340,8 +340,10 @@ def _apply_classified_results(project_dir, candidates, unknowns, cands, lang):
             for c in classified['accepted']
         ]
         fixes_path = os.path.join(project_dir, 'temp', 'scans', 'noun_accepted_fixes.json')
+        # Wrap in dict with 'fixes' key so step_apply_all can read it
         with open(fixes_path, 'w', encoding='utf-8') as f:
-            json.dump(accepted_fixes, f, ensure_ascii=False, indent=2)
+            json.dump({'fixes': accepted_fixes}, f, ensure_ascii=False, indent=2)
+        results['auto_accepted'] = len(classified['accepted'])
         _append_to_glossary(project_dir, classified['accepted'])
 
     # Rejected → log only
