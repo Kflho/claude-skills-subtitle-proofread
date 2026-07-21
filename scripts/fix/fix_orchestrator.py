@@ -539,8 +539,8 @@ class Fixer:
             if ai_short_fragments:
                 self._upsert_layer('2.5', [
                     {'ep': self.episode, 'time': f['start'],
-                     'original': f.get('original', '')[:80],
-                     'corrected': f.get('replacement', '')[:80],
+                     'original': (f.get('replacement') or '')[:80] or f.get('original', '')[:80],
+                     'corrected': '',
                      'status': '⬜'}
                     for f in ai_short_fragments
                 ])
