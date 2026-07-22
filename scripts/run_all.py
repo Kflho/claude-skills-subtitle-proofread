@@ -31,7 +31,7 @@ if _ROOT_DIR not in sys.path:
 from utils.update_report import upsert_entries as _upsert_report
 from utils.update_report import replace_layer as _replace_layer
 
-from lib.project_utils import load_json, detect_resources, resources_summary, detect_format, detect_project_lang
+from lib.project_utils import load_json, detect_resources, resources_summary, can_use_whisper, detect_format, detect_project_lang
 
 
 # ── Helpers ──
@@ -222,7 +222,7 @@ def _filter_by_start(episodes, start_from):
     return [ep for ep in episodes if ep >= start_ep]
 
 
-def step_fix_episodes(project_dir, lang, resources, video_dir=None,
+def step_fix_episodes(project_dir, lang, resources,
                       skip_whisper=False, episodes=None, limit=0, start_from=None,
                       skip_if_clean=True):
     """Phase 2: Unified error-fix via Fixer (reference → Whisper → human).
@@ -289,7 +289,7 @@ def step_fix_episodes(project_dir, lang, resources, video_dir=None,
         step = None
         dry_run = False
 
-    can_whisper = (not skip_whisper and resources['has_video'] and resources['has_whisper'])
+    can_whisper = can_use_whisper(resources, skip_whisper=skip_whisper)
     if skip_whisper:
         print('[fix] --skip-whisper: Whisper disabled by user', file=sys.stderr)
     elif not resources['has_video']:
@@ -308,10 +308,7 @@ def step_fix_episodes(project_dir, lang, resources, video_dir=None,
                   file=sys.stderr)
             continue
         args = _Args()
-        if video_dir:
-            args.video_dir = video_dir
-        else:
-            args.video_dir = None
+        args.video_dir = resources.get('video_dir')
         args.no_backup = False
         print(f'[fix] {ep} ({i+1}/{len(selected)})', file=sys.stderr)
         try:
@@ -1144,7 +1141,7 @@ Examples:
         print(f'\n{"─"*40}', file=sys.stderr)
         print('  Phase 2/3: Error fix + AI fragment completion', file=sys.stderr)
         print(f'{"─"*40}', file=sys.stderr)
-        processed = step_fix_episodes(project_dir, resolved_lang, resources, video_dir=video_dir,
+        processed = step_fix_episodes(project_dir, resolved_lang, resources,
                                       skip_whisper=args.skip_whisper,
                                       episodes=episodes, limit=args.limit,
                                       start_from=args.start_from,

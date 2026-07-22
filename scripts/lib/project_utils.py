@@ -195,7 +195,7 @@ def detect_resources(project_dir, video_dir=None):
 
     Returns:
         dict with keys: has_target_subs, has_video, video_dir, has_whisper,
-                        has_reference, reference_dir, has_demucs
+                        has_reference, reference_dir
     """
     resources = {
         'has_target_subs': False,
@@ -204,7 +204,6 @@ def detect_resources(project_dir, video_dir=None):
         'has_whisper': False,
         'has_reference': False,
         'reference_dir': None,
-        'has_demucs': False,
     }
 
     # ── Target subtitles (required) ──
@@ -244,16 +243,6 @@ def detect_resources(project_dir, video_dir=None):
             resources['has_reference'] = True
             resources['reference_dir'] = ref_dir
 
-    # ── demucs (optional vocal separation) ──
-    try:
-        result = subprocess.run(
-            ['python', '-c', 'import demucs'],
-            capture_output=True, timeout=10
-        )
-        resources['has_demucs'] = result.returncode == 0
-    except Exception:
-        pass
-
     return resources
 
 
@@ -266,9 +255,15 @@ def resources_summary(resources):
         f"视频{_ok(resources['has_video'])}",
         f"Whisper{_ok(resources['has_whisper'])}",
         f"参考{_ok(resources['has_reference'])}",
-        f"demucs{_ok(resources['has_demucs'])}",
     ]
     return 'Resources: ' + ' '.join(parts)
+
+
+def can_use_whisper(resources, skip_whisper=False):
+    """Single source of truth: can we run Whisper audio fix?"""
+    return (not skip_whisper
+            and resources.get('has_video', False)
+            and resources.get('has_whisper', False))
 
 
 def detect_format(project_dir):

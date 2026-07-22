@@ -36,7 +36,7 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _SCRIPTS_DIR = os.path.dirname(_SCRIPT_DIR)  # scripts/ — needed for subprocess PYTHONPATH
 
 from lib.whisper_utils import to_seconds, setup_windows_utf8, parse_srt
-from lib.project_utils import load_json, norm_ep, find_srt
+from lib.project_utils import load_json, norm_ep, find_srt, can_use_whisper
 setup_windows_utf8()
 
 
@@ -415,7 +415,7 @@ def _run_pipeline(project_dir, episode, resources, args):
     # ── Dynamic step list based on available resources ──
     if args.step is None:
         steps = []
-        if resources['has_video'] and resources['has_whisper'] and not getattr(args, 'skip_whisper', False):
+        if can_use_whisper(resources, skip_whisper=getattr(args, 'skip_whisper', False)):
             steps.append('audio')
         steps.extend(['apply', 'diff'])
     else:
