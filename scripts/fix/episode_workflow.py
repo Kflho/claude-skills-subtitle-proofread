@@ -148,21 +148,24 @@ def step_audio(project_dir, episode, scan_result, dry_run=False, video_dir=None,
     """
     if not scan_result or not scan_result.get('issues'):
         print('[audio] No garbled cues to process.')
-        return []
+        from fix.fix_orchestrator import FixReport
+        return FixReport(source='audio')
 
     issues = scan_result['issues']
     print(f'[audio] {len(issues)} garbled cue(s) → VAD + Whisper')
 
     if dry_run:
         print(f'\n[audio] DRY RUN — would call Fixer.fix_by_whisper()')
-        return issues
+        from fix.fix_orchestrator import FixReport
+        return FixReport(source='audio', applied=len(issues))
 
     from fix.fix_orchestrator import Fixer
 
     fixer = Fixer(episode, project_dir, target_lang=target_lang, video_dir=video_dir)
     if fixer.is_clean():
         print('[audio] Already clean — nothing to fix.')
-        return []
+        from fix.fix_orchestrator import FixReport
+        return FixReport(source='audio')
 
     print(f'\n[audio] Running Whisper via Fixer...')
     report = fixer.fix_by_whisper(separate_vocals=True)
