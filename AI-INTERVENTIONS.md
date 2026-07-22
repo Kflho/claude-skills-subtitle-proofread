@@ -77,8 +77,9 @@ AI **可以修改任意一句**（或两者）以使整体通顺：
 
 **Apply**:
 ```bash
-python run_all.py --lang ja --apply-ai-review
+python run_all.py --lang ja --apply-ai-review --video-dir "<VIDEO_DIR>"
 ```
+> ⚠️ 必须带 `--video-dir`，否则无法为人工审查项提取视频片段。
 
 **After apply — VAD escalation**:
 AI 无法修复的 fragment 进入 VAD 检查：

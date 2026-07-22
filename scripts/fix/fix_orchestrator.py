@@ -702,13 +702,20 @@ class Fixer:
 
             if bounds is not None:
                 clip_start, clip_end = bounds
-                if not os.path.exists(clip_path) and self._video_path:
-                    ok = self._extract_clip(self._video_path, clip_start,
-                                            clip_end, clip_path)
-                    if ok:
-                        extracted += 1
+                if not os.path.exists(clip_path):
+                    if self._video_path:
+                        ok = self._extract_clip(self._video_path, clip_start,
+                                                clip_end, clip_path)
+                        if ok:
+                            extracted += 1
+                        else:
+                            skipped += 1
                     else:
+                        clip_name = '(无片段 — 未提供视频路径)'
                         skipped += 1
+                        print(f'  ⚠ [{self.episode}] No video path — '
+                              f'pass --video-dir to extract clips.',
+                              file=sys.stderr)
                 elif os.path.exists(clip_path):
                     extracted += 1
             else:
