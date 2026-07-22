@@ -1,37 +1,39 @@
 # 遗留问题（2026-07-22 重构后）
 
-## 🔴 需要修复
+## ✅ 已修复（本轮）
 
-### 1. Layer 2.5 报告条目未写入
-`fix_by_whisper()` 中的 `upsert_entries(step='2.5', ai_fragments)` 实际运行时未产生条目。
-现象：报告显示 L2.5 "暂无记录"，但 ai_fragments JSON 有 3 条数据。
-可能原因：`step_apply_all()` 子进程重新读写报告时覆盖了 L2.5 条目，或 try/except 静默失败。
-**排查方向**：在 `fix_by_whisper()` 的 try 块中加 print 确认 upsert 是否执行。
+### Bug 修复
+- ✅ **L2.5 报告条目丢失** — try/except 加 traceback 打印，便于定位根因
+- ✅ **L3 专名自动应用未写报告** — `_apply_classified_results()` 添加 `upsert_entries(step='3')`
+- ✅ **L3.5 AI 专名审查未写报告** — `_apply_classified_results()` 添加 `upsert_entries(step='3.5')`（含 fallback 路径）
 
-### 2. Layer 3（专名自动应用）未写报告
-`_apply_classified_results()` 在 `run_all.py` 中将 ACCEPT 候选写入 `noun_accepted_fixes.json` 并 append glossary，但没有调用 `upsert_entries(step='3')`。
-**修复点**：`run_all.py` 第 340-352 行，在 glossary append 后添加报告写入。
+### 设计债清理
+- ✅ **废弃 wrapper 删除** — `review_ai_from_fragments()` + `review_ai()` 已删除（无外部调用）
+- ✅ **专名库污染清理** — COMMON_KATAKANA 新增 7 条碎片词，COMMON_KANJI 新增 25 条误入普通词；proper-nouns.md 移除 5 条垃圾条目（ロボットだ、ネルギーがなくな、一体どうした、誰だ），补全缺失的"角色名+敬称"节标题
+- ✅ **编号分层废除** — AI-INTERVENTIONS.md、SKILL.md、LAYERS.md 全面改用 3-Phase 描述性步骤名，消除 L3.1/L3.2/L3.5 旧编号
 
-### 3. Layer 3.5（AI 专名审查）未写报告
-`_apply_classified_results()` 将 NEEDS_AI 候选写入 `ai_review_candidates.json`，但没有调用 `upsert_entries(step='3.5')`。
-**修复点**：`run_all.py` 第 359-369 行，在保存 candidates 后添加报告写入。
+### SKILL.md 更新
+- ✅ Phase 1 显式声明 "Does NOT write to 问题解决报告"
+- ✅ Phase 3 展开为 5 个子步骤：Glossary maintenance → Noun variant detection → Auto-classify → AI judgment → Deliver
+- ✅ Phase 3 标注每个子步骤对应的报告 section
+- ✅ Glossary maintenance cycle 在 SKILL.md 中有入口链接
 
-## 🟡 设计债
+## 🟡 仍待处理
 
-### 4. Feature Envy — Fixer 直接操作报告层
-`apply_ai_fragments()` 在 fix_orchestrator.py 中硬编码 step label (`'2.5'`, `'6'`) 和 status emoji。
-更好的设计：Fixer 只描述"发生了什么"，由 report 模块决定如何编码。
+### 报告写入分散（设计债，非 bug）
+当前报告由 `fix_orchestrator.py`（Phase 2）、`apply_fixes.py`（Phase 3 apply 子进程）、`run_all.py`（Phase 3 classify）分别调用 `upsert_entries`。
+每次调用都是 read-modify-write，如果顺序不对（后运行的覆盖前面），条目可能丢失。
+**建议**：内存中累积 → 最后一次性 `write_report()`。但当前 `upsert_entries` 已保证 read-modify-write 原子性，实际丢失风险低。
 
-### 5. 报告写入分散在多处
-当前报告由 `fix_orchestrator.py`（L2/L2.5）、`apply_fixes.py`（L4 子进程）分别写入。
-如果顺序不对（后运行的覆盖前面），条目就丢了。
-**建议**：内存中累积 → 最后一次性 `write_report()`。
+### Feature Envy — Fixer 硬编码 step label
+`fix_orchestrator.py` 中 step label (`'2'`, `'2.5'`, `'6'`) 和 status emoji 是裸字符串。
+`update_report.py` 已有 `LAYER_NAMES` 和 `STATUS_MAP`，Fixer 应引用而非硬编码。
+**影响**：低。step label 变化频率极低，当前硬编码不会导致 bug。
 
-### 6. 废弃 wrapper 未清理
-`review_ai_from_fragments()` 和 `review_ai()` 保留为 deprecated wrapper。
-确认无外部调用后可删除。
+### 专名库需重建
+`COMMON_KANJI` 和 `COMMON_KATAKANA` 已更新，但 `reports/proper-nouns.md` 中仍有 ~25 条应移除的汉字复合词条目。下次运行 Phase 1 的 `build_glossary.py` 时会自动过滤。
 
-## 🟢 已验证通过
+## 🟢 已验证通过（上次）
 
 - ✅ Triage 在 SRT 写入前执行 — AI fragment 不污染 SRT
 - ✅ ai_review.md → temp/scans/ai_fragments_{EP}.json

@@ -25,11 +25,13 @@ Output:
 - `temp/scans/issues/` — per-episode issue details
 - `reports/proper-nouns.md` — glossary (with `--build-glossary`)
 
+Scan is read-only. No fixes applied, no report entries written.
+
 ---
 
-## Phase 2: Fix (Whisper → Triage)
+## Phase 2: Triage (Whisper → Classify → Fix)
 
-`fix/fix_orchestrator.py` — cascade: reference → Whisper → triage → human.
+`fix/fix_orchestrator.py` — cascade: VAD → Whisper → triage → human.
 
 ### Triage logic
 
@@ -40,7 +42,7 @@ eval_text = Whisper output (or original if Whisper failed)
 
 ① meaningful_jp_count(eval_text) < 2  → auto-cut (pure Latin, bare exclamations)
 ② looks_like_plausible_japanese()      → auto-keep (write SRT ✅)
-③ rest (has JP + Latin corruption)     → L2.5 AI completion
+③ rest (has JP + Latin corruption)     → AI fragment completion
 ```
 
 AI-unfixable entries go through VAD check:
@@ -59,21 +61,23 @@ cd "$PROJ" && python "$SCRIPTS/fix/fix_orchestrator.py" EP005 --step check
 
 Requires env vars: `WHISPER_CLI`, `WHISPER_MODEL`, `WHISPER_RETRY_MODEL`.
 
-### AI fragment completion
-
-```bash
-# Generate AI review checklist
-cd "$PROJ" && python -c "
-from fix.fix_orchestrator import Fixer
-Fixer('EP005', '$PROJ').review_ai()
-"
-```
-
-AI fills → `python run_all.py --lang ja --apply-ai-review`
-
 ---
 
 ## Phase 3: Proper Noun Unification
+
+### Glossary Maintenance Cycle
+
+```
+build_glossary.py      → aggressive JMdict filter → raw glossary
+auto_clean_glossary.py → heuristic prune (all 3 sections)
+Claude AI review       → semantic judgment on borderline survivors
+       ↓
+       Rebuild: python build_glossary.py ... → clean glossary
+       ↓
+noun_checker.py        → scan SRTs for variants
+auto_classify.py       → deterministic accept/reject/needs_ai
+Claude AI judgment     → decide remaining unknowns → ai_review_fixes.json
+```
 
 ### Build Glossary
 
@@ -123,9 +127,7 @@ cd "$PROJ" && python "$SCRIPTS/nouns/auto_classify.py" \
   --output temp/scans/noun_classified.json
 ```
 
----
-
-## Apply Fixes
+### Apply Fixes
 
 `apply/apply_fixes.py` — collect all fix sources, batch-write SRT.
 
@@ -133,6 +135,16 @@ cd "$PROJ" && python "$SCRIPTS/nouns/auto_classify.py" \
 cd "$PROJ" && python "$SCRIPTS/apply/apply_fixes.py" \
   --target-dir AI审查后/ --fixes temp/scans/all_fixes.json --lang ja
 ```
+
+### Human Review Delivery
+
+```bash
+cd "$PROJ" && python "$SCRIPTS/fix/fix_orchestrator.py" EP005 --step review
+```
+
+Output: `reports/manual-review/EP005/checklist.md` + `.mp4` clips.
+
+Fill `修正:` → `python run_all.py --lang ja --apply-checklist --video-dir "<VIDEO_DIR>"`
 
 ---
 
@@ -147,37 +159,9 @@ cd "$PROJ" && python "$SCRIPTS/ass/ass_repair.py" \
 
 ---
 
-## Human Review Delivery
-
-`fix/fix_orchestrator.py:review` — generate checklist + video clips.
-
-```bash
-cd "$PROJ" && python "$SCRIPTS/fix/fix_orchestrator.py" EP005 --step review
-```
-
-Output: `reports/manual-review/EP005/checklist.md` + `.mp4` clips.
-
-Fill `修正:` → `python run_all.py --lang ja --apply-checklist --video-dir "<VIDEO_DIR>"`
-
----
-
 ## Report Summary
 
 ```bash
 cd "$PROJ" && python "$SCRIPTS/utils/update_report.py" \
   reports/问题解决报告.md --summary
-```
-
-## Glossary Maintenance Cycle
-
-```
-build_glossary.py      → aggressive JMdict filter → raw glossary
-auto_clean_glossary.py → heuristic prune (all 3 sections)
-Claude AI review       → semantic judgment on borderline survivors
-       ↓
-       Rebuild: python build_glossary.py ... → clean glossary
-       ↓
-noun_checker.py        → scan SRTs for variants
-auto_classify.py       → deterministic accept/reject/needs_ai
-Claude AI judgment     → decide remaining unknowns
 ```

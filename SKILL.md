@@ -26,23 +26,35 @@ cd "<project-root>" && python run_all.py --lang ja --video-dir "<VIDEO_DIR>" [--
 ## Pipeline
 
 ```
-Phase 1: Scan       → findings.json + proper-nouns.md
-Phase 2: Triage     → VAD → Whisper → classify:
-                       ├─ readable JP           → write SRT ✅
-                       ├─ noise (mj < 2)        → auto-cut 🗑️
-                       └─ JP + Latin corruption → ai_fragments_{EP}.json (🤖 AI补全)
-                           ├─ AI fills correction → --apply-ai-review
-                           └─ AI can't fix      → VAD check
-                               ├─ no speech     → auto-cut 🗑️
-                               └─ has speech    → checklist.md (👤 人工)
-Phase 3: Unify      → proper nouns (collect → classify → apply)
-                    → deliver: human checklist + video clips
+Phase 1: Scan
+  → unified_scanner: garbled chars, repeat patterns, term frequency
+  → Output: findings.json + proper-nouns.md
+  → Does NOT write to 问题解决报告（scan is read-only, no fixes applied）
 
-Report: reports/问题解决报告.md（Phase分组，自动生成）
+Phase 2: Triage
+  → VAD → Whisper → classify each garbled cue:
+      ├─ readable JP           → write SRT ✅ (→ 报告: Whisper 自动修复)
+      ├─ noise (mj < 2)        → auto-cut 🗑️
+      └─ JP + Latin corruption → ai_fragments_{EP}.json (🤖 AI补全)
+          ├─ AI fills correction → --apply-ai-review (→ 报告: AI 短碎片补全)
+          └─ AI can't fix      → VAD check
+              ├─ no speech     → auto-cut 🗑️
+              └─ has speech    → checklist.md (👤 人工 → 报告: 人工审查)
+
+Phase 3: Unify
+  ├─ Glossary maintenance: auto_clean → AI review borderline entries → rebuild
+  ├─ Noun variant detection: noun_checker scans SRTs against glossary
+  ├─ Auto-classify: deterministic accept (→ 报告: 专名自动应用)
+  │                 / reject / needs_ai (🤖 → 报告: AI 专名审查)
+  ├─ AI noun judgment: Claude decides borderline candidates → --resume
+  └─ Deliver: apply all fixes + human checklist + video clips
+
+Report: reports/问题解决报告.md（自动生成，按 Phase 分组）
 ```
 
 > **mj** = meaningful Japanese character count (kana/kanji minus exclamation kana like あっ！えーっ！). mj < 2 = noise.
 > AI fragments write to `temp/scans/ai_fragments_{EP}.json` (machine-readable), NOT markdown.
+> Glossary maintenance cycle: build → auto_clean → AI review → rebuild. See [LAYERS.md](LAYERS.md).
 
 ## Output → action
 

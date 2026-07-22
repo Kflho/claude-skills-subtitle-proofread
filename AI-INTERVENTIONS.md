@@ -1,6 +1,7 @@
 # AI Intervention Points — Subtitle Proofread
 
 Each 🤖 point: trigger condition, procedure, judgment rules.
+Organized by the 3-Phase pipeline.
 
 ---
 
@@ -8,12 +9,12 @@ Each 🤖 point: trigger condition, procedure, judgment rules.
 
 **Trigger**: Pipeline output `[ai-review] N pending`
 
-**Data**: `reports/manual-review/{EP}/ai_review.md`
+**Data**: `temp/scans/ai_fragments_{EP}.json`
 
 **Flow**:
-1. Read each EP's `ai_review.md`
-2. For each ⬜ entry, read surrounding context and Whisper attempt text
-3. Infer correct Japanese, fill `修正:` field
+1. Read each EP's fragment JSON
+2. For each fragment, read surrounding context and Whisper attempt text
+3. Infer correct Japanese, fill `"correction"` field
 4. Can't determine → leave blank
 
 **Judgment rules**:
@@ -35,9 +36,11 @@ No manual operation needed. Run `--apply-checklist` after filling human checklis
 
 ---
 
-## L3.1: Auto-clean Glossary
+## Phase 3: Proper Noun Unification
 
-**Trigger**: L1 scan rebuilt `reports/proper-nouns.md` — runs automatically
+### Glossary Auto-Clean
+
+**Trigger**: Phase 1 scan rebuilt `reports/proper-nouns.md` — runs automatically
 
 **Flow**:
 ```bash
@@ -57,13 +60,13 @@ cd "<project>" && PYTHONPATH="<scripts>" python \
 ```
 
 **auto_clean filters**:
-- Katakana: onomatopoeia (ワンワン), laughter (ハッハー), daily words (パパママ), fragments (ネルギー)
+- Katakana: onomatopoeia, laughter, daily words, fragments
 - Kanji: verb stems, time/number fragments, modifier fragments, pronoun fragments
-- Keeps: real names (アーサー), places, honorifics, known anime terms
+- Keeps: real names, places, honorifics, known anime terms
 
 ---
 
-## L3.2: AI Glossary Review
+### Glossary AI Review
 
 **Trigger**: After auto_clean — review borderline glossary entries
 
@@ -77,11 +80,20 @@ cd "<project>" && PYTHONPATH="<scripts>" python \
 
 **Reference**: 鉄腕アトム (1963) character knowledge, Japanese name patterns (surname+given, honorifics), whether a word makes sense as a name vs. common noun.
 
-**Apply** (same as L3.1): Edit `japanese_utils.py` → re-run `build_glossary.py`
+**Apply**: Edit `japanese_utils.py` → re-run `build_glossary.py`
 
 ---
 
-## L3.5: AI Proper Noun Judgment
+### Noun Variant Detection + Auto-Classify
+
+Runs automatically in Phase 3. `noun_checker.py` scans SRTs for proper noun spelling variants, then `auto_classify.py` uses Jamdict + rules to pre-classify candidates into:
+- **Accepted** → applied automatically (report section: 专名自动应用)
+- **Rejected** → logged only
+- **Needs AI** → triggers Proper Noun AI Judgment below
+
+---
+
+### Proper Noun AI Judgment
 
 **Trigger**: Pipeline output `AI REVIEW NEEDED: N proper noun candidates`
 (auto_classify handled the rest; these are the borderline cases)

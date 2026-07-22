@@ -539,7 +539,9 @@ class Fixer:
                         for f in ai_fragments
                     ])
             except Exception as e:
+                import traceback
                 print(f'[whisper] Report write failed: {e}', file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
 
             print(f'[whisper] {report.applied} auto-keep, '
                   f'{report.ai_review} → AI, '
@@ -980,43 +982,6 @@ class Fixer:
             pass
 
         return applied
-
-    # ── Legacy wrappers for backward compatibility ──
-
-    def review_ai_from_fragments(self, fragments: list,
-                                   output_dir: str = None) -> str | None:
-        """[Deprecated] Use _write_ai_fragments_json() instead.
-
-        Kept for backward compatibility — delegates to the new JSON writer.
-        """
-        return self._write_ai_fragments_json(fragments)
-
-    def review_ai(self, output_dir: str = None) -> str | None:
-        """[Legacy] Generate AI-review checklist by reading report L2.5.
-
-        Delegates to review_ai_from_fragments() after loading from report.
-        """
-        out_dir = output_dir or self._review_dir
-
-        from utils.update_report import read_report
-        data = read_report(self._report_path)
-        entries = data.get('2.5', [])
-        pending = [e for e in entries
-                   if e.get('status') == '⬜' and e.get('ep') == self.episode]
-
-        if not pending:
-            print(f'[{self.episode}] review_ai: nothing pending',
-                  file=sys.stderr)
-            return None
-
-        fragments = [{
-            'start': e.get('time', ''),
-            'end': e.get('end', ''),
-            'original': e.get('original', ''),
-            'replacement': e.get('corrected', ''),
-        } for e in pending]
-
-        return self.review_ai_from_fragments(fragments, out_dir)
 
     def apply(self, checklist_path: str) -> int:
         """Apply corrections from a filled checklist.

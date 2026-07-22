@@ -64,6 +64,14 @@ COMMON_KATAKANA = frozenset({
     'パパー',  # common non-name word
     'バイバーイ',  # common non-name word
     'ボカーン',  # sound effect / onomatopoeia
+    # ── Fragments from Whisper splitting ──
+    'ーアトム',  # fragment (starts with ー)
+    'ニウム',  # fragment (suffix)
+    'ロボットラン',  # fragment of ロボットランド
+    'ベルトコンベ',  # fragment of ベルトコンベア
+    'グランプリレ',  # fragment of グランプリレース
+    'プリンセスラ',  # fragment
+    'ブラックルッ',  # fragment of ブラックルックス
 })
 
 # Common kanji compounds — expanded from build_glossary.py's _COMMON_KANJI.
@@ -132,6 +140,13 @@ COMMON_KANJI = frozenset({
     '後分','年以上','時私','一度見','万年後','時間経','僕探',
     '君大丈夫','見下','救援頼','口出','宝探','一体君',
     '証拠不十','秒読','日一人','年経','一儲','本日午後',
+    # ── Batch: noun phrases misidentified as proper nouns (2026-07-22 cleanup) ──
+    '攻撃準備','攻撃開始','戦闘準備','新兵器','秘密研究',
+    '全人類','最新型','世界最高','地球最後','人間軍',
+    '児童相談','小型電子','電子図','電子計算','物質縮小',
+    '誘爆装置','美術品泥','地球大統','博士様買','省長官',
+    '番街','日本科学','地球防衛','宇宙博覧','人工太陽',
+)
     '後私','人一緒','本文上','大儲','一音','今夜中','一番近',
     '全然違','冗談言','人騒','一度言','絶対大丈','分待',
     '何百年','何十年','一番強','全部揃','全部俺','家行',
