@@ -23,7 +23,7 @@
 export PYTHONIOENCODING=utf-8   # 防 Windows GBK 乱码
 export PYTHONPATH="<skill_scripts_dir>"
 
-# Whisper 后端选择（三选一，根据 init-wizard 检测结果填写）
+# Whisper 后端选择（三选一，根据 first-run 检测结果填写）
 export WHISPER_BACKEND='<whisper-cpp|faster-whisper|openai-whisper>'
 
 # ── whisper.cpp 后端（WHISPER_BACKEND=whisper-cpp 时填写以下三项）──

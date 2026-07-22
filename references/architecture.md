@@ -1,6 +1,6 @@
 # Skill 架构
 
-> 开发者速览：5 分钟理解系统结构。
+> AI 调试参考：脚本结构、调用关系与数据流概览。
 
 ## 脚本总览
 
@@ -104,5 +104,3 @@ Whisper 输出 replacement
       ├─ is_short_garbled_fragment(replacement) → AI 上下文补全
       └─ 其余 → 人工
 ```
-
-> 完整实现细节见 `references/technical-details.md`

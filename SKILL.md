@@ -17,7 +17,7 @@ description: >
 
 检查项目 `CLAUDE.md` 末尾是否有 `## SKILL INITIALIZED: true`。
 
-**没有** → 首次使用。读取 `user/init-wizard.md`，跟随初始化向导完成配置后再继续。
+**没有** → 首次使用。读取 `references/first-run.md`，跟随初始化向导完成配置后再继续。
 
 **有** → 已初始化。从 CLAUDE.md 获取路径，直接进入 pipeline。
 
@@ -153,7 +153,7 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 **触发**: `[ai-review] N pending`（N > 0）
 
 1. 读 `temp/scans/ai_fragments_EP*.json`
-2. 填每个 fragment 的 `correction` 字段（判断规则 → [AI-INTERVENTIONS.md](AI-INTERVENTIONS.md)）
+2. 填每个 fragment 的 `correction` 字段（判断规则 → [references/interventions.md](references/interventions.md)）
 3. 运行：`python run_all.py --apply-ai-review --video-dir "<VIDEO_DIR>"`
 4. 重跑后检查报告，确认该 EP 无 ⬜
 
@@ -168,7 +168,7 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 5. **迭代**直到 `Needs AI: 0`（12→6→3→0 是正常收敛）
 6. **收敛后**：向用户展示最终专有名词表（`reports/proper-nouns.md`），询问是否采用当前词表。用户确认后再进入 Phase 3 交付步骤
 
-> 详细规则 → [AI-INTERVENTIONS.md § Phase 3](AI-INTERVENTIONS.md)
+> 详细规则 → [references/interventions.md](references/interventions.md)
 
 ### OP/ED 审查
 
@@ -198,12 +198,15 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 
 ## AI 介入点
 
-→ [AI-INTERVENTIONS.md](AI-INTERVENTIONS.md) — 每个 🤖 点：触发条件、操作流程、判断规则。
+→ [references/interventions.md](references/interventions.md) — 每个 🤖 点：触发条件、操作流程、判断规则。
 
 ## 参考
 
-→ [user/run-reference.md](user/run-reference.md) — 独立命令、环境验证、调试指南。
-→ [user/full-mode.md](user/full-mode.md) — 有参考字幕时的完整工作流。
+→ [references/phase1-scan.md](references/phase1-scan.md) — Phase 1 扫描命令参考。
+→ [references/phase2-triage.md](references/phase2-triage.md) — Phase 2 Whisper 修复命令参考。
+→ [references/phase3-unify.md](references/phase3-unify.md) — Phase 3 专名统一 + 交付命令参考。
+→ [references/full-mode.md](references/full-mode.md) — 有参考字幕时的完整工作流。
+→ [references/architecture.md](references/architecture.md) — 脚本架构与数据流（调试时查阅）。
 
 ## Flags
 
