@@ -95,24 +95,49 @@ AI **可以修改任意一句**（或两者）以使整体通顺：
 ```
 → 删除碎片邻居，修复目标 cue。apply 时输出 `2 corrections applied`。
 
-**Judgment rules**:
-- Trust context, don't trust Whisper (Whisper often drops/corrupts words)
-- **有 `reference_text`** → 参考字幕原文（不翻译），AI 读原文 + 上下文 → 直接写日文 correction。参考字幕可能有错，需结合上下文判断
-- Original is correct but contains Latin letters (e.g. "OK") → keep as-is
-- **原文纯拉丁/单音节（mj < 2）且 Whisper 输出可读** → 直接填 Whisper 输出（噪声→改善）
+**Judgment rules** — 按优先级，能用上层就不走下層：
+
+**Tier 1：AI 直接推断（0 开销，优先使用）**
+
+满足以下任一条件，AI 直接从上下文推断 correction，不跑 Whisper：
+
+- **原文可读部分 ≥ 50%**（mj ≥ 3）且乱码只是短前缀/后缀（如 `です書 ii 江戸前は連れてきたかよ` → 去掉前缀即可）
+- **Whisper pipeline 已有输出且可读**（whisper_attempt 非 null、非空）→ 直接采纳或微调
 - **邻居是明显碎片**（如 `の手紙なんだ` 是前句的尾巴）→ `__DELETE__`
-- **`whisper_attempt` 为 null 但 `whisper_context` 有内容** → 用 `whisper_context` 的周围段推断：看 Whisper 在该时段说了什么，结合 `episode_title` 的场景线索，综合判断正确台词
-- **`whisper_attempt` 为 null 且有视频文件** → **先不要升级人工**。提取该片段音频，用 Whisper 单独转录（主模型+备用模型各一次）。pipeline 整体转录失败不代表短片段也失败——短片段上下文干净，成功率远高于 30s 窗口。两个模型都失败再升级。
-  ```bash
-  # 从视频提取片段音频（片段 mp4 已在 manual-review 目录下）
-  ffmpeg -y -i "reports/manual-review/{EP}/00-XX-XX-XXX.mp4" -vn -ac 1 -ar 16000 temp/fragment_retry.wav
-  # 主模型
-  "$WHISPER_CLI" -m "$WHISPER_MODEL" -l ja -f temp/fragment_retry.wav --no-timestamps
-  # 备用模型
-  "$WHISPER_CLI" -m "$WHISPER_RETRY_MODEL" -l ja -f temp/fragment_retry.wav --no-timestamps
-  ```
-- **`episode_title` 线索** → 帮助缩小语义范围（e.g. 标题含"宇宙"时，"星"更可能是"宇宙"而非"明星"）
-- Uncertain → leave blank（仅在上述手段全部耗尽后）
+- **原文纯拉丁/单音节**（mj < 2）且 Whisper pipeline 输出可读 → 直接用 Whisper 输出
+- **上下文语义清晰**（context_before/after 干净且主题连贯）→ AI 能可靠推断
+- 有 `reference_text` → 参考字幕原文 + 上下文 → 直接写日文 correction
+
+**Tier 2：Whisper 批量重试（~2s/ep，仅 Tier 1 无法确定时）**
+
+触发条件：Tier 1 走完后仍有 fragment 的 correction 为空，且：
+- whisper_attempt 为 null（pipeline 完全失败）
+- 或原文大部分不可读（mj < 3）
+- 或原文不构成可理解的日语句子
+
+**批量策略（一个 episode 只加载一次模型）**：
+```bash
+# 1. 将该 episode 所有待重试片段合并为一个音频文件
+#    每个片段前后各留 0.5s 静音间隔
+ffmpeg -y -i "视频.mkv" \
+  -ss 00:03:07 -to 00:03:12 -ss 00:14:48 -to 00:14:53 \
+  -filter_complex "[0:a]atrim=...concat=n=N:v=0:a=1" \
+  -ac 1 -ar 16000 temp/ep099_retry_batch.wav
+
+# 2. 一次性跑 Whisper（只付一次模型加载成本）
+"$WHISPER_CLI" -m "$WHISPER_MODEL" -l ja -f temp/ep099_retry_batch.wav --no-timestamps
+
+# 3. 将输出按时间边界切分回各个 fragment
+```
+
+> 单条跑：N × 1.5s。批量跑：1.1s + N × 0.4s。N=6 时批量省 ~5s，N=20 时省 ~20s。
+> 两个模型都跑不出可读结果 → 升级 Tier 3。
+
+**Tier 3：升级人工（Tier 1+2 均无法确定）**
+
+- Whisper 输出为空或与上下文矛盾
+- 对话关键剧情节点，错误代价高
+- 多个合理解读无法取舍
 
 **Apply**:
 ```bash
