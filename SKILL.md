@@ -46,6 +46,7 @@ test -d "<VIDEO_DIR>" && echo "[OK] video" || echo "[MISSING] video"
 ### 2.5. 验证 Python 依赖
 
 ```bash
+python --version           # 需要 Python 3.12+
 python -c "from jamdict import Jamdict; Jamdict(); print('[OK] jamdict')" 2>/dev/null \
   || { echo "[INSTALL] jamdict..."; pip install jamdict; }
 ```

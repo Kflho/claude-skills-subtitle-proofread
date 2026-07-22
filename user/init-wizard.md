@@ -193,7 +193,17 @@ if not ok:
 
 ## Step 3.5：Python 依赖安装
 
-### 3.5.1 核心依赖：jamdict（日语词典）
+### 3.5.1 Python 版本
+
+此 skill 需要 **Python 3.12+**。验证：
+
+```bash
+python --version  # 应为 Python 3.12.x 或更高
+```
+
+> Python 是房间里的那头大象 — 太基础反而容易被忽略。请确认版本后再继续。
+
+### 3.5.2 核心依赖：jamdict（日语词典）
 
 日语项目依赖 `jamdict`（JMdict + JMnedict 词典），用于 Phase 3 专名自动分类 — 区分"普通日语词"和"专有名词"。包体很小（~500KB），pip 一键安装。
 
@@ -213,7 +223,7 @@ python -c "from jamdict import Jamdict; j = Jamdict(); print('OK:', len(j.lookup
 
 > ⚠️ 安装失败时警告用户但不阻止继续。`jamdict` 不可用时 Phase 3 退回规则分类（精度略降），仍可运行。
 
-### 3.5.2 开源许可说明
+### 3.5.3 开源许可说明
 
 jamdict 使用的 JMdict/JMnedict 词典数据遵循 [CC-BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) 许可。此 skill 仅通过 jamdict 库查询词典数据，不捆绑或分发词典文件。
 
