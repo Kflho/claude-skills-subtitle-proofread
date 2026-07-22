@@ -464,46 +464,70 @@ class OpedFixer:
         }
 
     def apply_ai_fixes(self, ai_review_path: str) -> list[dict]:
-        """Read AI-reviewed file and generate fixes."""
+        """Read AI-reviewed file and generate fixes for all cluster entries.
+
+        Uses in-memory cluster data (self.vocal_clusters) to generate fixes for
+        ALL entries, not just the sample_times preview in the JSON.
+        """
         with open(ai_review_path, 'r', encoding='utf-8') as f:
             review = json.load(f)
 
-        fixes = []
+        # Build lookup: (region, time_position_s) → canonical
+        decisions = {}
         for candidate in review.get('candidates', []):
             canonical = candidate.get('canonical', '').strip()
             if not canonical:
-                continue  # AI skipped this one
+                continue
+            key = (candidate['region'], candidate['time_position_s'])
+            decisions[key] = canonical
+
+        if not decisions:
+            return []
+
+        # Match decisions to in-memory clusters and generate fixes
+        fixes = []
+        matched_clusters = 0
+        for cluster in self.vocal_clusters:
+            key = (cluster.region, cluster.bucket_start)
+            canonical = decisions.get(key)
+            if not canonical:
+                continue
+            matched_clusters += 1
 
             if canonical == '__INSTRUMENTAL__':
-                # AI determined this is instrumental → clean up
-                for sample in candidate.get('sample_times', []):
-                    text = sample.get('text', '')
+                # AI determined this is instrumental → clean up all entries
+                for entry in cluster.entries:
+                    text = entry['text'].strip()
                     if _is_music_marker(text):
                         continue
                     fixes.append({
                         'action': 'replace_text',
-                        'file': sample['ep'],
-                        'start': sample['start'],
+                        'file': entry['ep'],
+                        'start': entry['start'],
                         'original': text,
                         'replacement': '[音楽]',
-                        'note': (f'{candidate["region"]} AI判定:器楽 → [音楽]'),
+                        'note': (f'{cluster.region} AI判定:器楽 → [音楽] '
+                                 f'(クラスタ {cluster.bucket_start:.1f}s)'),
                     })
-                continue
+            else:
+                # Apply canonical text to all non-matching entries
+                for entry in cluster.entries:
+                    text = entry['text'].strip()
+                    if text == canonical:
+                        continue  # Already correct
+                    fixes.append({
+                        'action': 'replace_text',
+                        'file': entry['ep'],
+                        'start': entry['start'],
+                        'original': text,
+                        'replacement': canonical,
+                        'note': (f'{cluster.region} 歌詞統一: {canonical}'),
+                    })
 
-            # Apply canonical text to all episodes at this time position
-            for sample in candidate.get('sample_times', []):
-                text = sample.get('text', '')
-                if text == canonical:
-                    continue  # Already correct
-
-                fixes.append({
-                    'action': 'replace_text',
-                    'file': sample['ep'],
-                    'start': sample['start'],
-                    'original': text,
-                    'replacement': canonical,
-                    'note': (f'{candidate["region"]} 歌詞統一: {canonical}'),
-                })
+        if matched_clusters > 0:
+            print(f'[oped] AI review: {matched_clusters}/{len(decisions)} '
+                  f'decisions matched to clusters → {len(fixes)} raw fixes',
+                  file=sys.stderr)
 
         return fixes
 
