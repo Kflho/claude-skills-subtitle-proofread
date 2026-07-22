@@ -42,10 +42,13 @@ except Exception:
 # Heuristic rules
 # ═══════════════════════════════════════════════════════════════
 
+# NOTE: bare って is EXCLUDED — it matches te-form verbs (待って, 分かって) and
+# particles (だって, ロボットだって) far more often than actual introductions.
+# Only explicit citation forms (って言う, って呼ぶ) are kept.
+_INTRO_SUFFIX = r'(って言う|っていう|って呼ぶ|って呼ばれ|という|と言う|と呼ぶ|と呼ばれ|といいます|とは)'
+
 # Patterns indicating the candidate is embedded in an introduction
-_INTRO_PATTERNS = re.compile(
-    r'(って|という|と言う|と呼ぶ|って言う|といいます|って呼ばれ|とは|と呼ばれ)'
-)
+_INTRO_PATTERNS = re.compile(_INTRO_SUFFIX)
 
 # Patterns indicating a name + honorific
 _HONORIFIC_PATTERNS = re.compile(
@@ -139,8 +142,7 @@ def classify_candidate(candidate_text, context_cue='', episode_count=1, lang='ja
 
     # Appears in self-introduction context
     if context_cue and re.search(
-        re.escape(text) + r'(って|という|と言う|と呼ぶ|って言う|といいます)',
-        context_cue
+        re.escape(text) + _INTRO_SUFFIX, context_cue
     ):
         return {'verdict': 'ACCEPT', 'reason': 'appears in intro pattern'}
 

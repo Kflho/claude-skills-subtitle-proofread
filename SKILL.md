@@ -29,23 +29,26 @@ cd "<project-root>" && python run_all.py --lang ja --video-dir "<VIDEO_DIR>" [--
 Phase 1: Scan       → findings.json + proper-nouns.md
 Phase 2: Triage     → VAD → Whisper → classify:
                        ├─ readable JP           → write SRT ✅
-                       ├─ noise (mj < 2)        → auto-cut
-                       └─ JP + Latin corruption → ai_review.md (🤖 AI补全)
-                           ├─ AI fixes          → --apply-ai-review
+                       ├─ noise (mj < 2)        → auto-cut 🗑️
+                       └─ JP + Latin corruption → ai_fragments_{EP}.json (🤖 AI补全)
+                           ├─ AI fills correction → --apply-ai-review
                            └─ AI can't fix      → VAD check
-                               ├─ no speech     → auto-cut
+                               ├─ no speech     → auto-cut 🗑️
                                └─ has speech    → checklist.md (👤 人工)
 Phase 3: Unify      → proper nouns (collect → classify → apply)
                     → deliver: human checklist + video clips
+
+Report: reports/问题解决报告.md（Phase分组，自动生成）
 ```
 
 > **mj** = meaningful Japanese character count (kana/kanji minus exclamation kana like あっ！えーっ！). mj < 2 = noise.
+> AI fragments write to `temp/scans/ai_fragments_{EP}.json` (machine-readable), NOT markdown.
 
 ## Output → action
 
 | Pipeline prints | What to do | Done when |
 |-----------------|------------|-----------|
-| `[ai-review] N pending` | Read `reports/manual-review/{EP}/ai_review.md`, fill `修正:` for each ⬜ entry, then `--apply-ai-review` | All entries have `修正:` filled or intentionally blank |
+| `[ai-review] N pending` | Read `temp/scans/ai_fragments_EP*.json`, fill `"correction"` field per fragment, then `--apply-ai-review` | All fragments have `"correction"` filled or intentionally blank |
 | `AI REVIEW NEEDED: N` | Read `temp/scans/ai_review_candidates.json`, judge each candidate, write `ai_review_fixes.json`, re-run `--resume` | `--resume` completes without error |
 | `Pipeline complete` + checklists exist | Read `reports/manual-review/{EP}/checklist.md`, fill `修正:` for entries you can fix from video context, leave audio-dependent ones ⬜, then `--apply-checklist` | `--apply-checklist` reports applied count |
 | `Done: 0 fixed` + no `[whisper]` | `--video-dir` is missing or wrong — verify path in CLAUDE.md | Whisper runs and produces output |

@@ -30,6 +30,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from utils.update_report import upsert_entries, update_entry_status
 from dataclasses import dataclass, field
 from datetime import datetime
 import lib._path  # noqa: F401
@@ -433,19 +434,14 @@ class Fixer:
                         fixes = merged
                         tier = 2
 
-            # Step 3: Apply fixes to SRT
-            applied_fixes = [f for f in fixes if f.get('replacement')]
-            if applied_fixes:
-                apply_fixes_to_srt(self._srt_path, applied_fixes)
-
-            # Step 4: Simplified triage — pre-filter noise, keep good, route rest to AI
+            # Step 3: Triage FIRST — classify before writing to SRT
             #
             #  eval_text = Whisper replacement, or original if Whisper failed
             #
             #  ① meaningful_jp < 2  → auto-cut (pure Latin, bare exclamations)
             #  ② looks plausible     → auto-keep (write to SRT ✅)
-            #  ③ rest                → L2.5 AI completion
-            #       └─ AI fails → VAD check → cut or escalate to L6 human
+            #  ③ rest                → L2.5 AI completion (temp JSON, NOT to SRT)
+            #       └─ AI fills → apply → VAD check → cut or escalate to L6 human
             report = FixReport(source='whisper', tier=tier,
                               deleted=deleted_count)
 
@@ -500,23 +496,50 @@ class Fixer:
                         print(f'  [cut] {f["start"]}: '
                               f'"{f.get("original", "")[:60]}"', file=sys.stderr)
 
-            # ── Auto-keep: SRT already has the fix (applied above) ──
-            # SRT is the source of truth — no report write needed.
+            # ── Apply ONLY auto-keep fixes to SRT ──
+            # AI fragments are NOT written to SRT — they stay as original
+            # garbled text until AI provides a correction.
+            if auto_keep:
+                keep_fixes = [f for f in auto_keep if f.get('replacement')]
+                if keep_fixes:
+                    apply_fixes_to_srt(self._srt_path, keep_fixes)
 
-            # ── AI-fixable fragments → generate ai_review.md directly ──
+            # ── AI-fixable fragments → write temp JSON for AI review ──
             if ai_fragments:
-                frag_data = [{
-                    'start': f['start'],
-                    'end': f.get('end', ''),
-                    'original': f.get('original', '')[:200],
-                    'replacement': f.get('replacement', ''),
-                } for f in ai_fragments]
-                self.review_ai_from_fragments(frag_data)
+                self._write_ai_fragments_json(ai_fragments)
 
             report.applied = len(auto_keep)
             report.ai_review = len(ai_fragments)
             report.failed = 0   # nothing goes directly to L6 anymore
             report.details = []
+
+            # ── Write to 问题解决报告 ──
+            try:
+                if auto_keep:
+                    upsert_entries(self._report_path, step='2', entries=[
+                        {'ep': self.episode, 'time': f.get('start', ''),
+                         'original': f.get('original', '')[:120],
+                         'corrected': f.get('replacement', '')[:120],
+                         'status': '✅'}
+                        for f in auto_keep
+                    ])
+                if auto_cut:
+                    upsert_entries(self._report_path, step='2', entries=[
+                        {'ep': self.episode, 'time': f.get('start', ''),
+                         'original': f.get('original', '')[:120],
+                         'corrected': '(VAD已删除)', 'status': '🗑️'}
+                        for f in auto_cut
+                    ])
+                if ai_fragments:
+                    upsert_entries(self._report_path, step='2.5', entries=[
+                        {'ep': self.episode, 'time': f.get('start', ''),
+                         'original': f.get('original', '')[:120],
+                         'corrected': f.get('replacement', '')[:120],
+                         'status': '⬜'}
+                        for f in ai_fragments
+                    ])
+            except Exception as e:
+                print(f'[whisper] Report write failed: {e}', file=sys.stderr)
 
             print(f'[whisper] {report.applied} auto-keep, '
                   f'{report.ai_review} → AI, '
@@ -737,29 +760,25 @@ class Fixer:
     # Source 3b: AI short fragment completion (Layer 2.5)
     # ═══════════════════════════════════════════════════════════
 
-    def review_ai_from_fragments(self, fragments: list,
-                                   output_dir: str = None) -> str | None:
-        """Generate AI-review checklist from explicit fragment list.
+    def _write_ai_fragments_json(self, fragments: list) -> str | None:
+        """Write AI fragments to temp JSON for AI review (replaces ai_review.md).
 
-        Like review_ai() but accepts fragment data directly instead of
-        reading from the report. Each fragment dict has keys:
-        'start', 'end', 'original', 'replacement'.
+        Each fragment dict has keys: 'start', 'end', 'original', 'replacement'.
+        Writes to temp/scans/ai_fragments_{EP}.json — a machine-readable
+        format that AI can fill and apply directly, no markdown parsing needed.
 
         Returns:
-            Path to ai_review.md, or None if fragments is empty
+            Path to JSON file, or None if fragments is empty
         """
         if not fragments:
-            print(f'[{self.episode}] review_ai_from_fragments: empty list',
-                  file=sys.stderr)
             return None
 
-        out_dir = output_dir or self._review_dir
         cues = self._load_cues() or parse_srt(
             self._srt_path, mark_garbled=False)
 
-        os.makedirs(out_dir, exist_ok=True)
+        os.makedirs(self._temp_dir, exist_ok=True)
         today = datetime.now().strftime('%Y-%m-%d')
-        entries_md = []
+        entries = []
 
         for f in fragments:
             start_ts = f.get('start', '')
@@ -784,35 +803,193 @@ class Fixer:
                     elif cs > end_s + 1 and len(context_after) < 2:
                         context_after.append(ct)
 
-            entries_md.append(
-                f'{self.episode} | {start_ts} ~ {end_ts or "?"}\n'
-                f'来源: short garbled fragment\n'
-                f'残留: {original}\n'
-                f'Whisper尝试: {corrected}\n'
-                f'上文: {"  |  ".join(context_before) if context_before else "(无)"}\n'
-                f'下文: {"  |  ".join(context_after) if context_after else "(无)"}\n'
-                f'修正:\n'
-                f'\n---\n'
-            )
+            entries.append({
+                'start': start_ts,
+                'end': end_ts,
+                'original': original[:200],
+                'whisper_attempt': corrected,
+                'context_before': context_before,
+                'context_after': context_after,
+                'correction': '',  # AI fills this
+            })
 
-        checklist_path = os.path.join(out_dir, 'ai_review.md')
-        header = (f'# AI 短碎片补全清单 — {self.episode}\n'
-                  f'> 导出: {today}\n'
-                  f'> 共 {len(entries_md)} 条\n'
-                  f'> version: 2\n'
-                  f'>\n'
-                  f'> **AI任务**：读上下文，推测正确台词填入「修正:」后。\n'
-                  f'> 不确定则留空，不要猜。格式与人工清单相同，apply() 自动应用。\n'
-                  f'>\n'
-                  f'---\n\n')
-        with open(checklist_path, 'w', encoding='utf-8') as fh:
-            fh.write(header)
-            for entry_md in entries_md:
-                fh.write(entry_md)
+        json_path = os.path.join(self._temp_dir, f'ai_fragments_{self.episode}.json')
+        data = {
+            'episode': self.episode,
+            'exported': today,
+            'fragments': entries,
+        }
+        with open(json_path, 'w', encoding='utf-8') as fh:
+            json.dump(data, fh, ensure_ascii=False, indent=2)
 
-        print(f'[{self.episode}] review_ai_from_fragments: {len(entries_md)} '
-              f'entries → {checklist_path}', file=sys.stderr)
-        return checklist_path
+        print(f'[{self.episode}] _write_ai_fragments_json: {len(entries)} '
+              f'entries → {json_path}', file=sys.stderr)
+        return json_path
+
+    def apply_ai_fragments(self, json_path: str = None) -> int:
+        """Apply AI-filled corrections from temp JSON to SRT.
+
+        Reads temp/scans/ai_fragments_{EP}.json, applies every fragment
+        with a non-empty 'correction' field to SRT.  Skipped fragments
+        (correction left blank) are escalated via VAD check.
+
+        Returns count of applied corrections.
+        """
+        if json_path is None:
+            json_path = os.path.join(self._temp_dir,
+                                     f'ai_fragments_{self.episode}.json')
+        if not os.path.exists(json_path):
+            print(f'[apply-ai] JSON not found: {json_path}', file=sys.stderr)
+            return 0
+
+        with open(json_path, 'r', encoding='utf-8') as fh:
+            data = json.load(fh)
+
+        fragments = data.get('fragments', [])
+        if not fragments:
+            print(f'[apply-ai] No fragments in JSON', file=sys.stderr)
+            return 0
+
+        if not self._srt_path or not os.path.exists(self._srt_path):
+            print(f'[apply-ai] SRT not found for {self.episode}', file=sys.stderr)
+            return 0
+
+        cues = parse_srt(self._srt_path, mark_garbled=False)
+        speech_segs = self._load_speech_segs()
+        review_clusters = self._load_review_clusters()
+        applied = 0
+        unfilled = []
+
+        for frag in fragments:
+            timecode = frag.get('start', '')
+            correction = frag.get('correction', '').strip()
+
+            if not correction:
+                # Escalate unfilled → VAD check below
+                unfilled.append({
+                    'ep': self.episode, 'time': timecode,
+                    'original': frag.get('original', ''),
+                })
+                continue
+
+            if correction == '删除':
+                target_idx = self._find_cue_index(cues, timecode)
+                if target_idx is None:
+                    print(f'[apply-ai] Cue not found for delete: {timecode}',
+                          file=sys.stderr)
+                    continue
+                removed = cues.pop(target_idx)
+                print(f'[apply-ai] Deleted: {timecode} '
+                      f'"{removed["text"][:60]}"', file=sys.stderr)
+                applied += 1
+                continue
+
+            target_idx = self._find_cue_index(cues, timecode)
+            if target_idx is None:
+                print(f'[apply-ai] Cue not found: {timecode} — may be fixed',
+                      file=sys.stderr)
+                continue
+
+            cluster = self._find_cluster_for_timecode(review_clusters, timecode)
+            if cluster and speech_segs and self._video_path:
+                aligned = self._vad_align_correction(
+                    cluster, speech_segs, correction, cues[target_idx])
+                if aligned:
+                    cues[target_idx]['start'] = aligned['start']
+                    cues[target_idx]['end'] = aligned['end']
+                    cues[target_idx]['text'] = aligned['text']
+                    tag = '[VAD]'
+                else:
+                    cues[target_idx]['text'] = correction
+                    tag = '[text-only]'
+            else:
+                cues[target_idx]['text'] = correction
+                tag = '[text-only]'
+
+            print(f'[apply-ai] {tag} {timecode} → "{correction[:60]}"',
+                  file=sys.stderr)
+            applied += 1
+
+            # Update report: mark Layer 2.5 entry as fixed
+            try:
+                update_entry_status(self._report_path, step='2.5',
+                                    ep=self.episode, time=timecode,
+                                    corrected=correction, status='✅')
+            except Exception:
+                pass
+
+        if applied > 0:
+            write_srt(self._srt_path, cues)
+            print(f'[apply-ai] {applied} corrections written to '
+                  f'{os.path.basename(self._srt_path)}', file=sys.stderr)
+
+        # ── VAD check for unfilled fragments ──
+        auto_cut = 0
+        escalated = []
+        if unfilled and speech_segs:
+            for entry in unfilled:
+                ts = entry['time']
+                start_s = to_seconds(ts) if ts else 0
+                has_speech = any(
+                    es >= start_s and ss <= start_s + 5.0
+                    for ss, es in speech_segs
+                )
+                if has_speech:
+                    escalated.append(entry)
+                else:
+                    cues = [c for c in cues
+                            if c.get('start', '') != ts]
+                    auto_cut += 1
+                    # Report: mark as deleted in L2.5 (VAD confirmed no speech)
+                    try:
+                        update_entry_status(self._report_path, step='2.5',
+                                            ep=self.episode, time=ts,
+                                            corrected='(VAD无语音)', status='🗑️')
+                    except Exception:
+                        pass
+            if auto_cut > 0:
+                write_srt(self._srt_path, cues)
+
+        if escalated:
+            pending_path = os.path.join(self._temp_dir,
+                                        f'{self.episode}_pending_human.json')
+            os.makedirs(self._temp_dir, exist_ok=True)
+            with open(pending_path, 'w', encoding='utf-8') as f:
+                json.dump(escalated, f, ensure_ascii=False, indent=2)
+            # Report: move from L2.5 to L6 for human review
+            try:
+                for entry in escalated:
+                    ts = entry['time']
+                    update_entry_status(self._report_path, step='2.5',
+                                        ep=self.episode, time=ts,
+                                        corrected='', status='🗑️')
+                    upsert_entries(self._report_path, step='6', entries=[{
+                        'ep': self.episode, 'time': ts,
+                        'original': entry.get('original', '')[:120],
+                        'corrected': '', 'status': '⬜',
+                    }])
+            except Exception:
+                pass
+            print(f'[apply-ai] {len(escalated)} escalated to human, '
+                  f'{auto_cut} auto-cut', file=sys.stderr)
+
+        # Cleanup: remove the temp JSON
+        try:
+            os.remove(json_path)
+        except OSError:
+            pass
+
+        return applied
+
+    # ── Legacy wrappers for backward compatibility ──
+
+    def review_ai_from_fragments(self, fragments: list,
+                                   output_dir: str = None) -> str | None:
+        """[Deprecated] Use _write_ai_fragments_json() instead.
+
+        Kept for backward compatibility — delegates to the new JSON writer.
+        """
+        return self._write_ai_fragments_json(fragments)
 
     def review_ai(self, output_dir: str = None) -> str | None:
         """[Legacy] Generate AI-review checklist by reading report L2.5.

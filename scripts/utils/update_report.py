@@ -28,39 +28,20 @@ import datetime
 from collections import OrderedDict
 
 # ═══════════════════════════════════════════════════════════════
-# 层定义（5层工作流 + AI审查 + 人工交付，与 SKILL.md 一致）
+# 层定义（与 SKILL.md 3-Phase 流水线对应）
+#
+#  Phase 1 (扫描)     — 不产生报告条目，发现的问题由下方各 Phase 记录
+#  Phase 2 (错误修复) — Whisper 自动修复 + 自动删除 + AI补全
+#  Phase 3 (专名统一) — 专名自动应用 + AI审查 + 人工审查交付
 # ═══════════════════════════════════════════════════════════════
 
 LAYER_NAMES = OrderedDict([
-    ('1',   '字符扫描'),
-    ('2',   '错误修复'),
-    ('2.5', 'AI短碎片补全'),
-    ('3',   '专名统一'),
-    ('3.5', 'AI专名审查'),
-    ('4',   '批量修复'),
-    ('5',   '格式修补 [ASS only]'),
+    ('2',   'Whisper 自动修复'),
+    ('2.5', 'AI 短碎片补全'),
+    ('3',   '专名自动应用'),
+    ('3.5', 'AI 专名审查'),
     ('6',   '人工审查'),
 ])
-
-# 旧步骤名 → 新层号映射（用于迁移旧报告数据）
-STEP_TO_LAYER = {
-    1:  '1',     # 卡死重复清理 → 字符扫描
-    2:  '4',     # 繁体→简体 → 批量修复
-    3:  '1',     # 双语混合清理 → 字符扫描
-    4:  '1',     # 纯源语言行处理 → 字符扫描
-    5:  '1',     # 多语言字符残留 → 字符扫描
-    6:  '4',     # 感叹词残留 → 批量修复
-    7:  '5',     # Name字段异常 → 格式修补
-    8:  '5',     # Comment行残留 → 格式修补
-    9:  '5',     # 样式异常清理 → 格式修补
-    10: '5',     # 绘图指令误译 → 格式修补
-    11: '4',     # 固定格式变体 → 批量修复
-    12: '2',     # 机翻幻觉检测 → 语义修复
-    13: '5',     # OP/ED异常 → 格式修补
-    14: '3',     # 专有名词变体 → 专名统一
-    15: '2',     # Whisper乱码修复 → 语义修复
-    16: '6',     # 人工审查修正 → 人工交付
-}
 
 STATUS_MAP = {
     '✅': '已修复',
@@ -126,25 +107,33 @@ REPORT_HEADER = """# 问题解决报告
 > 最后更新: {date}
 > 总览: {fixed}条已解决 / {pending}条待处理 / {deleted}条已删除
 >
-> 格式: 5层工作流（+ AI审查 + 人工交付）
+> 格式: 3-Phase 流水线（扫描 → 错误修复 → 专名统一+交付）
 """
+
+# Phase grouping for report output
+# Maps layer_id → (phase_header, sub_header)
+_PHASE_GROUPS = OrderedDict([
+    ('2',   ('## Phase 2: 错误修复（Whisper + Triage）\n', '### Whisper 自动修复\n')),
+    ('2.5', (None, '### AI 短碎片补全\n')),
+    ('3',   ('## Phase 3: 专名统一 + 交付\n', '### 专名自动应用\n')),
+    ('3.5', (None, '### AI 专名审查\n')),
+    ('6',   (None, '### 人工审查\n')),
+])
 
 # ═══════════════════════════════════════════════════════════════
 # 解析
 # ═══════════════════════════════════════════════════════════════
 
 def _parse_layer_header(line):
-    """解析 '## 第N层: 名称' 或旧格式 '## 步骤N: 名称'，返回 (layer_id, name) 或 None。"""
-    # 新格式: 第N层 或 第N.M层
+    """解析 '## Phase N: ...' 或 '### 名称'，返回 (layer_id, name) 或 None。"""
+    # 新格式: ### Whisper 自动修复 或 ### AI 短碎片补全 等
+    for lid, name in LAYER_NAMES.items():
+        if f'### {name}' in line:
+            return lid, name
+    # 兼容旧格式: ## 第N层: 名称
     m = re.match(r'^##\s*第([\d.]+)层:\s*(.+)', line)
     if m:
         return m.group(1), m.group(2).strip()
-    # 兼容旧格式: 步骤N
-    m = re.match(r'^##\s*步骤(\d+):\s*(.+)', line)
-    if m:
-        old_step = int(m.group(1))
-        layer_id = STEP_TO_LAYER.get(old_step, str(old_step))
-        return layer_id, m.group(2).strip()
     return None
 
 
@@ -216,10 +205,20 @@ def read_report(path):
 # ═══════════════════════════════════════════════════════════════
 
 def _build_layer_section(layer_id, entries):
-    """构建单个层的 markdown 段落。"""
+    """构建单个层的 markdown 段落（含 Phase 分组标题）。"""
+    group = _PHASE_GROUPS.get(layer_id)
+    if group is None:
+        return ''
+
+    phase_header, sub_header = group
+    lines = []
+
+    # Phase header (only for first layer in each phase group)
+    if phase_header:
+        lines.append(f'\n{phase_header}\n')
+
     name = LAYER_NAMES.get(layer_id, f'第{layer_id}层')
-    header_num = f'第{layer_id}层'
-    lines = [f'\n## {header_num}: {name}\n']
+    lines.append(f'{sub_header}\n')
 
     if not entries:
         lines.append('*（暂无记录）*\n')
