@@ -102,8 +102,17 @@ AI **可以修改任意一句**（或两者）以使整体通顺：
 - **原文纯拉丁/单音节（mj < 2）且 Whisper 输出可读** → 直接填 Whisper 输出（噪声→改善）
 - **邻居是明显碎片**（如 `の手紙なんだ` 是前句的尾巴）→ `__DELETE__`
 - **`whisper_attempt` 为 null 但 `whisper_context` 有内容** → 用 `whisper_context` 的周围段推断：看 Whisper 在该时段说了什么，结合 `episode_title` 的场景线索，综合判断正确台词
+- **`whisper_attempt` 为 null 且有视频文件** → **先不要升级人工**。提取该片段音频，用 Whisper 单独转录（主模型+备用模型各一次）。pipeline 整体转录失败不代表短片段也失败——短片段上下文干净，成功率远高于 30s 窗口。两个模型都失败再升级。
+  ```bash
+  # 从视频提取片段音频（片段 mp4 已在 manual-review 目录下）
+  ffmpeg -y -i "reports/manual-review/{EP}/00-XX-XX-XXX.mp4" -vn -ac 1 -ar 16000 temp/fragment_retry.wav
+  # 主模型
+  "$WHISPER_CLI" -m "$WHISPER_MODEL" -l ja -f temp/fragment_retry.wav --no-timestamps
+  # 备用模型
+  "$WHISPER_CLI" -m "$WHISPER_RETRY_MODEL" -l ja -f temp/fragment_retry.wav --no-timestamps
+  ```
 - **`episode_title` 线索** → 帮助缩小语义范围（e.g. 标题含"宇宙"时，"星"更可能是"宇宙"而非"明星"）
-- Uncertain → leave blank
+- Uncertain → leave blank（仅在上述手段全部耗尽后）
 
 **Apply**:
 ```bash
