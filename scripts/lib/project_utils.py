@@ -19,6 +19,24 @@ def load_json(path):
         return json.load(f)
 
 
+def get_target_dir(project_dir):
+    """Return the directory containing subtitle files to process.
+
+    Resolution order:
+      1. Env var SUBTITLE_INPUT_DIR (absolute or relative to project_dir)
+      2. Env var INPUT_DIR (set by run_all.py --input-dir)
+      3. Default: project_dir/AI审查后
+    """
+    env_val = os.environ.get('SUBTITLE_INPUT_DIR') or os.environ.get('INPUT_DIR')
+    if env_val:
+        if env_val == '.':
+            return project_dir
+        if os.path.isabs(env_val):
+            return env_val
+        return os.path.join(project_dir, env_val)
+    return os.path.join(project_dir, 'AI审查后')
+
+
 # ═══════════════════════════════════════════════════════════════
 # Language auto-detection — replaces --lang ja/zh hard requirement
 # ═══════════════════════════════════════════════════════════════
@@ -113,7 +131,7 @@ def detect_project_lang(project_dir: str, sample_size: int = 100,
     # ── Sample SRT files ──
     from lib.whisper_utils import parse_srt as _parse_srt
 
-    target_dir = os.path.join(project_dir, 'AI审查后')
+    target_dir = get_target_dir(project_dir)
     if not os.path.isdir(target_dir):
         return 'ja'  # Default: Japanese (most common for this tool)
 
@@ -207,7 +225,7 @@ def detect_resources(project_dir, video_dir=None):
     }
 
     # ── Target subtitles (required) ──
-    target_dir = os.path.join(project_dir, 'AI审查后')
+    target_dir = get_target_dir(project_dir)
     if os.path.isdir(target_dir):
         srt_files = [f for f in os.listdir(target_dir)
                      if f.endswith(('.srt', '.ass'))]
@@ -294,7 +312,7 @@ def detect_format(project_dir):
             'srt_count': int,
         }
     """
-    target_dir = os.path.join(project_dir, 'AI审查后')
+    target_dir = get_target_dir(project_dir)
     if not os.path.isdir(target_dir):
         return {'has_ass': False, 'has_srt': False, 'primary': None,
                 'ass_count': 0, 'srt_count': 0}
@@ -359,12 +377,19 @@ def find_video(project_dir, episode, video_dir=None):
 
 
 def find_srt(project_dir, episode):
-    """Find the SRT file for an episode. Returns (filename, full_path) or (None, None)."""
-    target_dir = os.path.join(project_dir, 'AI审查后')
-    ep_num = episode[2:]  # '064' from 'EP064'
+    """Find the subtitle file for an episode. Returns (filename, full_path) or (None, None)."""
+    target_dir = get_target_dir(project_dir)
+    if episode.startswith('EP') and len(episode) > 2 and episode[2:].isdigit():
+        ep_num = episode[2:]  # '064' from 'EP064'
+    else:
+        ep_num = episode  # file stem for non-EP IDs
     for fname in os.listdir(target_dir):
-        if fname.endswith('.srt') and ep_num in fname:
-            return fname, os.path.join(target_dir, fname)
+        if fname.endswith(('.srt', '.ass')):
+            stem = os.path.splitext(fname)[0]
+            if ep_num.isdigit() and ep_num in fname:
+                return fname, os.path.join(target_dir, fname)
+            elif stem == ep_num:
+                return fname, os.path.join(target_dir, fname)
     return None, None
 
 
@@ -373,7 +398,7 @@ def find_original_srt(project_dir, episode):
     orig_dir = os.path.join(project_dir, '原始字幕')
     if not os.path.isdir(orig_dir):
         return None
-    ep_num = episode[2:]
+    ep_num = episode[2:] if episode.startswith('EP') else episode
     for fname in os.listdir(orig_dir):
         if fname.endswith('.srt') and ep_num in fname:
             return os.path.join(orig_dir, fname)

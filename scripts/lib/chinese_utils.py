@@ -62,6 +62,26 @@ PINYIN_TONES = str.maketrans({
 
 
 # ═══════════════════════════════════════════════════════════════
+# ── Common kanji/hanzi — populated by auto_clean_glossary.py during pipeline runs ──
+# Words added here are filtered out by build_glossary.py.  Initially empty;
+# grows as auto_clean identifies non-proper-noun compounds in zh projects.
+COMMON_KANJI = frozenset({
+    # ── auto_clean_glossary placeholder ──
+    # ── auto_clean_glossary (3 words, lang=zh) ──
+    '好了',  # stop word
+    '对吧',  # stop word
+    '等等',  # stop word
+})
+
+# ── Proper noun whitelist — override jieba false positives ──
+# Words that jieba's dictionary marks as common but are actually proper nouns
+# in the project context (character names, place names, etc.).
+# Populated by auto_clean_glossary.py AI review or manual intervention.
+# Words here SKIP all common-word checks in build_glossary and are always kept.
+PROPER_NOUNS_WHITELIST = frozenset({
+    # ── auto_clean_glossary placeholder ──
+})
+
 # Common words — frequent Chinese compounds that are NOT proper nouns
 # Used by build_glossary.py + auto_classify.py for zh projects
 # ═══════════════════════════════════════════════════════════════

@@ -177,8 +177,10 @@ Claude sees them directly — no file read needed. Typical count: 5-20 entries.
 **Flow**:
 1. Pipeline prints candidates inline (see them in the scan output)
 2. Judge each: proper noun or common word?
-3. Common word → add to `lib/japanese_utils.py` COMMON_KANJI or COMMON_KATAKANA
-4. Proper noun → leave as-is
+3. Common word → add to the language-specific utils file:
+   - ja: `lib/japanese_utils.py` COMMON_KANJI or COMMON_KATAKANA
+   - zh: `lib/chinese_utils.py` COMMON_KANJI
+4. Proper noun → leave as-is (or add to PROPER_NOUNS_WHITELIST for jieba false positives)
 5. Next `--force-rescan` will rebuild with updated filters
 
 **Judgment rules**:
@@ -215,9 +217,10 @@ candidates into:
 1. Read `ai_review_candidates.json` — ONLY this small file, NOT the full glossary
 2. Judge each candidate: proper noun? yes/no
 3. **Yes** → 提供规范形式，写入 `ai_review_fixes.json`
-4. **No** → **立即加入 `lib/japanese_utils.py` COMMON_KANJI**（或 COMMON_KATAKANA，如果候选是片假名）
-   - 在 `COMMON_KANJI = frozenset({` 的最后一个条目后追加
-   - 格式：`'候補詞',` + 注释
+4. **No** → 加入对应语言的 COMMON_KANJI：
+   - ja: 编辑 `lib/japanese_utils.py`（片假名候选 → COMMON_KATAKANA）
+   - zh: 编辑 `lib/chinese_utils.py` COMMON_KANJI
+   - 在 `frozenset({` 的最后一个条目后追加：`'候補詞',  # 注释`
 5. Write `ai_review_fixes.json`（仅包含 Yes 的候補）：
    ```json
    [{"action":"replace_global","original":"候補","replacement":"規範形"}, ...]

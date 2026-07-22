@@ -10,8 +10,8 @@
 
 | 资源 | 路径 |
 |------|------|
-| 目标字幕 | <target_sub_dir> |
-| 视频文件 | <video_dir> |
+| 目标字幕 | <target_sub_dir>（子目录名，如 `机翻电影字幕`） |
+| 视频文件 | <video_dir or "无"> |
 | 参考字幕 | <ref_sub_dir or "无"> |
 | demucs | 可选（人声分离，减少 BGM 幻觉） |
 
@@ -44,10 +44,16 @@ export WHISPER_RETRY_MODEL='<backup_model_path>'
 
 ```bash
 cd "<project_root>"
-python "<skill_scripts_dir>/run_all.py" --video-dir "<video_dir>"
+python "<skill_scripts_dir>/run_all.py" \
+  --input-dir "<input_sub_dir>" \
+  [--video-dir "<video_dir>"] \
+  [--skip-whisper]
 ```
 
 常用变体：`--limit N`（前N集）、`-e EP001-EP010`（指定范围）、`--dry-run`、`--force-rescan`。
+
+> `<input_sub_dir>` 是字幕文件所在子目录。默认 `AI审查后`，指向项目根目录下直接包含字幕的文件夹。
+> 无视频时加 `--skip-whisper`，生成 `reports/问题解决报告.md`（⬜ 待人工处理）。
 
 > ⚠️ `--apply-ai-review` 和 `--apply-checklist` 是后处理快速路径，不能和 full run 一起用。
 > 正确用法：先跑 full run，AI/人工审查完成后，再单独带 flag 跑一次。

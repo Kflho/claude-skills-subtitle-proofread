@@ -98,24 +98,27 @@ class Fixer:
                  video_dir: str = None,
                  whisper_cli: str = None,
                  model: str = None,
-                 retry_model: str = None):
+                 retry_model: str = None,
+                 srt_dir: str = None):
         """Create a fix session for one episode.
 
         Args:
             episode: 'EP002'
-            project_dir: project root (contains AI审查后/, temp/, reports/)
+            project_dir: project root (contains temp/, reports/)
             target_lang: target language 'ja' | 'zh'
             video_dir: video files directory (auto-detected if None)
             whisper_cli: path to whisper-cli.exe
             model: path to main Whisper model
             retry_model: path to fallback Whisper model
+            srt_dir: subtitle files directory (default: from get_target_dir)
         """
         self.episode = episode
         self.project_dir = project_dir
         self.target_lang = target_lang
 
         # Paths
-        self._srt_dir = os.path.join(project_dir, 'AI审查后')
+        from lib.project_utils import get_target_dir
+        self._srt_dir = srt_dir or get_target_dir(project_dir)
         self._temp_dir = os.path.join(project_dir, 'temp', 'scans')
         self._report_path = os.path.join(project_dir, 'reports', '问题解决报告.md')
         self._review_dir = os.path.join(project_dir, 'reports', 'manual-review')
@@ -147,13 +150,25 @@ class Fixer:
     # ── Path resolution ──
 
     def _resolve_paths(self):
-        """Find SRT and video files for this episode."""
-        ep_num = self.episode[2:]  # '064' from 'EP064'
+        """Find SRT/ASS and video files for this episode."""
+        # Build search token: for EP###, use the number; for non-EP, use the stem
+        if self.episode.startswith('EP') and len(self.episode) > 2 and self.episode[2:].isdigit():
+            search_token = self.episode[2:]  # '064' from 'EP064'
+        else:
+            search_token = self.episode  # file stem, e.g. 'Sally the Witch (1990)'
 
-        # Find SRT
+        # Find SRT/ASS
         if os.path.isdir(self._srt_dir):
             for fname in sorted(os.listdir(self._srt_dir)):
-                if fname.endswith('.srt') and ep_num in fname:
+                if not fname.endswith(('.srt', '.ass')):
+                    continue
+                stem = os.path.splitext(fname)[0]
+                if search_token.isdigit():
+                    if search_token in fname:
+                        self._srt_path = os.path.join(self._srt_dir, fname)
+                        self._srt_name = fname
+                        break
+                elif stem == search_token:
                     self._srt_path = os.path.join(self._srt_dir, fname)
                     self._srt_name = fname
                     break

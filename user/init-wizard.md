@@ -28,7 +28,16 @@
 > | 2 | **参考字幕目录** | 高质量人工字幕，AI 校对时可对照参考 | 可选 |
 > | 3 | **参考视频目录** | mkv/mp4，Whisper 提取音频 | 可选（推荐） |
 
-**⚠️ 如果用户未提供 #3 参考视频目录 → 残血运行。** 告知用户：无视频时管线跳过 Whisper 音频修复，仍可扫描乱码+统一专名，但无法自动修复乱码片段。
+**⚠️ 如果用户未提供 #3 参考视频目录 → 残血运行。** 告知用户：
+
+> 无视频时管线跳过 Whisper 音频修复。Phase 1 扫描出的乱码会原样保留，写入 `reports/问题解决报告.md` 的「未修复乱码」section（带 ⬜ 标记），需手动/AI 对照参考字幕逐条处理。
+
+残血模式产出：
+| 有 | 无 |
+|----|----|
+| ✅ 乱码扫描 + 分类 | ❌ Whisper 音频修复 |
+| ✅ 专有名词词表 | ❌ AI 碎片补全 |
+| ✅ 问题解决报告（⬜ 待处理） | ❌ 视频片段提取 |
 
 **多项目处理**：提醒用户最好一个项目一个文件夹。如果用户提到有其他项目，记录到 CLAUDE.md 的项目索引表中：
 
@@ -203,29 +212,64 @@ python --version  # 应为 Python 3.12.x 或更高
 
 > Python 是房间里的那头大象 — 太基础反而容易被忽略。请确认版本后再继续。
 
-### 3.5.2 核心依赖：jamdict（日语词典）
+### 3.5.2 核心依赖：jamdict（日语词典）+ Janome（形态素解析）
 
-日语项目依赖 `jamdict`（JMdict + JMnedict 词典），用于 Phase 3 专名自动分类 — 区分"普通日语词"和"专有名词"。包体很小（~500KB），pip 一键安装。
+日语项目依赖两个库：
+
+| 库 | 用途 | 阶段 | 包大小 |
+|------|------|------|------|
+| **Janome** | 形态素解析 → 词汇提取（替代 n-gram） | Phase 1 | ~2MB |
+| **jamdict** | JMdict 词典查询 → 专名分类 | Phase 3 | ~500KB |
 
 ```bash
-pip install jamdict
+pip install janome jamdict
 ```
 
-`jamdict` 首次运行时自动下载 JMdict 词典数据库（SQLite，~50MB），仅一次。
+`jamdict` 首次运行时自动下载 JMdict 词典数据库（SQLite，~50MB），仅一次。Janome 的词表随 pip 包安装，无需额外下载。
 
 **验证**：
 
 ```bash
+python -c "from janome.tokenizer import Tokenizer; Tokenizer().tokenize('テスト'); print('[OK] janome')"
 python -c "from jamdict import Jamdict; j = Jamdict(); print('OK:', len(j.lookup('日本').entries), 'entries')"
 ```
 
-期望输出 `OK: N entries` → 安装成功。
+期望输出 `[OK] janome` + `OK: N entries` → 安装成功。
 
-> ⚠️ 安装失败时警告用户但不阻止继续。`jamdict` 不可用时 Phase 3 退回规则分类（精度略降），仍可运行。
+> ⚠️ 安装失败时警告用户但不阻止继续。
+> - **Janome** 不可用 → Phase 1 退回 n-gram 切分（~40% 碎片率），Phase 3 照常
+> - **jamdict** 不可用 → Phase 3 退回规则分类（精度略降）
 
 ### 3.5.3 开源许可说明
 
 jamdict 使用的 JMdict/JMnedict 词典数据遵循 [CC-BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) 许可。此 skill 仅通过 jamdict 库查询词典数据，不捆绑或分发词典文件。
+
+### 3.5.4 核心依赖：jieba（中文分词）
+
+中文项目依赖 `jieba`（结巴分词），用于 Phase 1 词汇提取 + Phase 3 词典过滤 — 对标日语项目的 jamdict。词表（~498K 词）随 pip 包一起安装，无需额外下载。
+
+```bash
+pip install jieba
+```
+
+**验证**：
+
+```bash
+python -c "import jieba; jieba.initialize(); print('OK:', len(jieba.dt.FREQ), 'words')"
+```
+
+期望输出 `OK: 498113 words` → 安装成功。
+
+> ⚠️ 安装失败时警告用户但不阻止继续。`jieba` 不可用时 Phase 1 退回 n-gram 切分，Phase 3 退回规则分类（精度略降），仍可运行。
+
+**ja ↔ zh 依赖对照**：
+
+| 功能 | ja（日语） | zh（中文） |
+|------|------|------|
+| 词典库 | jamdict (JMdict, ~50MB) | jieba (dict.txt, ~5MB) |
+| 词条数 | ~200K | ~498K |
+| 首次下载 | 自动（JMdict SQLite） | 无需（随 pip） |
+| 分词 | 形态素（内置） | jieba.lcut() |
 
 ---
 
@@ -234,7 +278,7 @@ jamdict 使用的 JMdict/JMnedict 词典数据遵循 [CC-BY-SA 4.0](https://crea
 扫描目标字幕目录，自动检测：
 
 1. **格式**：SRT 还是 ASS（看文件扩展名）
-2. **语言**：扫描几个 SRT 文本，判断 ja（有假名）还是 zh（有汉字+无假名）
+2. **语言**：扫描几个文本，判断 ja（有假名）还是 zh（有汉字+无假名）
 
 将检测结果告知用户确认：
 
@@ -244,7 +288,11 @@ jamdict 使用的 JMdict/JMnedict 词典数据遵循 [CC-BY-SA 4.0](https://crea
 >
 > 是否正确？
 
-确认后写入 CLAUDE.md。
+确认后写入 CLAUDE.md。**同时告知语言选择的影响**：
+
+> **日语 (ja)**：Whisper kotoba 模型 → jamdict 词典过滤 → 片假名/汉字专名提取
+> **中文 (zh)**：Whisper 需中文模型 → jieba 分词 + 词典过滤 → 汉字专名提取
+> 无视频时两种语言均可残血运行（跳过 Whisper，扫描 + 专名统一照常）。
 
 ---
 
@@ -253,8 +301,9 @@ jamdict 使用的 JMdict/JMnedict 词典数据遵循 [CC-BY-SA 4.0](https://crea
 读取 `templates/CLAUDE-template.md`，将用户的回答填入模板：
 
 - `<PROJECT_NAME>` → 项目目录名
-- `<target_sub_dir>` → 用户提供的目标字幕目录
-- `<video_dir>` → 用户提供的视频目录
+- `<target_sub_dir>` → 用户提供的目标字幕目录名
+- `<input_sub_dir>` → 字幕子目录名（同 `<target_sub_dir>`，用于 `--input-dir` 参数）
+- `<video_dir>` → 用户提供的视频目录，或"无"
 - `<ref_sub_dir or "无">` → 用户提供的参考字幕目录，或"无"
 - `<skill_scripts_dir>` → 当前 skill 的 `scripts/` 目录绝对路径
 - `<whisper_cli_path>` → Whisper CLI 路径

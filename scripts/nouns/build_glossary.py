@@ -99,6 +99,7 @@ def build_glossary(term_freq, min_freq=_MIN_FREQ, lang='ja', use_jamdict=True,
     _COMMON_KATAKANA = getattr(_LU, 'COMMON_KATAKANA', frozenset())
     _COMMON_KANJI = getattr(_LU, 'COMMON_KANJI', frozenset())
     _COMMON_WORDS = getattr(_LU, 'COMMON_WORDS', frozenset())
+    _PROPER_NOUNS_WHITELIST = getattr(_LU, 'PROPER_NOUNS_WHITELIST', frozenset())
     NON_WORD_RE = getattr(_LU, 'NON_WORD_RE', re.compile(r'$^'))
 
     # ── Jamdict pre-filter (Japanese only) ──
@@ -115,17 +116,45 @@ def build_glossary(term_freq, min_freq=_MIN_FREQ, lang='ja', use_jamdict=True,
                       file=sys.stderr)
                 _jamdict_warned = True
 
+    # ── jieba pre-filter (Chinese only) ──
+    _jieba_freq = None
+    _jieba_warned = False
+    if use_jamdict and lang == 'zh':
+        try:
+            import jieba
+            jieba.initialize()
+            _jieba_freq = jieba.dt.FREQ
+        except (ImportError, Exception) as e:
+            if not _jieba_warned:
+                print(f'WARNING: jieba unavailable ({e}) — '
+                      f'falling back to COMMON_KANJI frozenset only.',
+                      file=sys.stderr)
+                _jieba_warned = True
+
+    # jieba internal frequency threshold: words with freq ≤ this are likely
+    # proper nouns that happen to be in jieba's dict (e.g. rare names)
+    _JIEBA_MIN_FREQ = 10
+
     def _is_common_word(word):
         """Check if a word is a common (non-proper-noun) entry.
 
-        ja: Jamdict + COMMON_KANJI/COMMON_KATAKANA
-        zh/en: COMMON_WORDS frozenset only
+        Filter chain (first match wins):
+          1. PROPER_NOUNS_WHITELIST → skip, always KEEP
+          2. COMMON_KANJI / COMMON_KATAKANA → REJECT (AI-confirmed)
+          3. COMMON_WORDS → REJECT (language built-ins)
+          4. ja: Jamdict lookup → REJECT if in JMdict
+          5. zh: jieba dict lookup → REJECT if freq > _JIEBA_MIN_FREQ
+          6. Fall through → KEEP (candidate proper noun)
         """
-        # Hard override: language-specific common word lists
+        # 1. Whitelist override (jieba false-positive protection)
+        if word in _PROPER_NOUNS_WHITELIST:
+            return False
+
+        # 2-3. Hard override: language-specific common word lists
         if word in _COMMON_KANJI or word in _COMMON_KATAKANA or word in _COMMON_WORDS:
             return True
 
-        # Jamdict: Japanese only — in JMdict → common word
+        # 4. Jamdict: Japanese only — in JMdict → common word
         if _jam:
             try:
                 result = _jam.lookup(word.strip())
@@ -133,6 +162,13 @@ def build_glossary(term_freq, min_freq=_MIN_FREQ, lang='ja', use_jamdict=True,
                     return True
             except Exception:
                 pass
+
+        # 5. jieba: Chinese only — in dict with high freq → common word
+        if _jieba_freq is not None:
+            freq = _jieba_freq.get(word, 0)
+            if freq > _JIEBA_MIN_FREQ:
+                return True
+            # Low/zero freq → proper noun candidate (keep)
 
         return False
 

@@ -300,6 +300,124 @@ def _parse_glossary_section(content, section_header, stop_headers):
     return words
 
 
+# ── Chinese glossary cleaning (lang=zh) ──
+
+# Common Chinese stop words / function words that are never proper nouns
+_ZH_STOP_WORDS = frozenset({
+    '什么', '怎么', '为什么', '怎么样', '这是', '那是', '不是', '可以', '没有',
+    '一个', '这个', '那个', '我们', '你们', '他们', '她们', '它们',
+    '现在', '已经', '还是', '但是', '因为', '所以', '如果', '虽然',
+    '非常', '真的', '就是', '的话', '而且', '或者', '不过',
+    '了吧', '了吗', '了啊', '吧', '呢', '吗', '啊', '哦', '嗯',
+    '好的', '好吧', '行了', '好了', '对了', '是吧', '对吧',
+    '等等', '然后', '接着', '最后', '首先', '前面', '后面',
+    '里面', '外面', '上面', '下面', '旁边', '中间',
+    '很多', '很少', '一些', '一点', '快点', '快点',
+    '一定', '必须', '应该', '需要', '可能', '可以',
+    '知道', '看到', '听到', '找到', '觉得', '以为',
+    '来说', '来看', '来讲', '来看', '的话',
+    '全部', '所有', '这里', '那里', '哪里',
+    '今天', '明天', '昨天', '每天', '那天',
+    '她的', '他的', '它的', '我的', '你的',
+    '说话', '过来', '回去', '起来', '出来', '进去',
+    '只是', '可是', '倒是', '就是', '还有',
+    '真的吗', '怎么办', '太好了', '没问题',
+})
+
+
+def _clean_zh_glossary(glossary_path):
+    """Clean a Chinese glossary (lang=zh) — second pass after build_glossary.
+
+    L1 (build_glossary.py) already filters common words via jieba dictionary.
+    What arrives here are candidate proper nouns (jieba → not-in-dict or
+    low-frequency).  This second pass catches remaining edge cases:
+      - Stop words jieba missed (low dict frequency)
+      - Bilingual fragments, particles, sentence fragments
+      - Provides entries for AI review / whitelist management
+
+    Returns same dict shape as scan_glossary() for compatibility.
+    """
+    if not os.path.exists(glossary_path):
+        return {'error': f'Glossary not found: {glossary_path}'}
+
+    with open(glossary_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    # Parse table rows: | 词语 | count |
+    entries = []
+    for line in content.split('\n'):
+        line = line.strip()
+        if not line.startswith('|') or not line.endswith('|'):
+            continue
+        cells = [c.strip() for c in line.split('|')[1:-1]]
+        if len(cells) < 2:
+            continue
+        word, count_str = cells[0], cells[1]
+        try:
+            count = int(count_str)
+        except ValueError:
+            continue
+        if word and word not in ('日语', '---', '------'):
+            entries.append((word, count))
+
+    suggestions = []  # words to remove (common, not proper nouns)
+    kept = []         # words to keep (likely proper nouns)
+
+    for word, count in entries:
+        clean_word = word.strip()
+
+        # Rule 1: Skip empty / pure punctuation / pure numbers
+        if not clean_word or all(c in '，。！？、；：""''（）…—　 ' for c in clean_word):
+            suggestions.append((word, count, 'empty/punctuation', '汉字复合词'))
+            continue
+        if clean_word.isdigit():
+            suggestions.append((word, count, 'pure number', '汉字复合词'))
+            continue
+
+        # Rule 2: Skip single character (too fragmented)
+        if len(clean_word) == 1:
+            suggestions.append((word, count, 'single char fragment', '汉字复合词'))
+            continue
+
+        # Rule 3: Skip entries with non-CJK letters mixed (bilingual fragments)
+        has_cjk = any('一' <= c <= '鿿' for c in clean_word)
+        has_latin = any(c.isascii() and c.isalpha() for c in clean_word)
+        if has_latin and has_cjk:
+            suggestions.append((word, count, 'bilingual fragment', '汉字复合词'))
+            continue
+
+        # Rule 4: Skip known stop words
+        if clean_word in _ZH_STOP_WORDS:
+            suggestions.append((word, count, 'stop word', '汉字复合词'))
+            continue
+
+        # Rule 5: Skip entries that look like sentence fragments (too many chars)
+        if len(clean_word) > 6:
+            suggestions.append((word, count, 'sentence fragment (>6 chars)', '汉字复合词'))
+            continue
+
+        # Rule 6: Skip entries starting/ending with common particles
+        particles = {'的', '了', '着', '过', '在', '是', '不', '很', '都', '也', '就', '还', '和', '与', '被', '把', '让', '给'}
+        if clean_word[0] in particles or clean_word[-1] in particles:
+            suggestions.append((word, count, 'starts/ends with particle', '汉字复合词'))
+            continue
+
+        # Keep: looks like a proper noun (2-6 chars, no stop words, no particles)
+        kept.append((word, count, '汉字复合词'))
+
+    print(f'[auto_clean] zh mode: {len(suggestions)} filtered, {len(kept)} kept '
+          f'(from {len(entries)} raw terms)', file=sys.stderr)
+
+    return {
+        'suggestions': suggestions,
+        'kept': kept,
+        'total_scanned': len(entries),
+        'jamdict_available': False,
+        'skipped': False,
+        'lang': 'zh',
+    }
+
+
 def scan_glossary(glossary_path, lang='ja'):
     """Scan ALL sections of proper-nouns.md for common words that should be filtered.
 
@@ -315,6 +433,8 @@ def scan_glossary(glossary_path, lang='ja'):
         }
     """
     if lang != 'ja':
+        if lang == 'zh':
+            return _clean_zh_glossary(glossary_path)
         print(f'[auto_clean] Skipping — lang={lang} not supported (Japanese-only glossary cleaning).',
               file=sys.stderr)
         return {'suggestions': [], 'kept': [], 'total_scanned': 0,
@@ -401,54 +521,67 @@ def scan_glossary(glossary_path, lang='ja'):
 # Apply: edit japanese_utils.py
 # ═══════════════════════════════════════════════════════════════
 
-def _get_japanese_utils_path():
-    """Find japanese_utils.py relative to this script."""
+def _get_lang_utils_path(lang='ja'):
+    """Find the language utils file for the given language."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(script_dir, '..', 'lib', 'japanese_utils.py')
+    lib_dir = os.path.join(script_dir, '..', 'lib')
+    if lang == 'zh':
+        return os.path.join(lib_dir, 'chinese_utils.py')
+    elif lang == 'en':
+        return os.path.join(lib_dir, 'english_utils.py')
+    else:
+        return os.path.join(lib_dir, 'japanese_utils.py')
 
 
-def apply_suggestions(suggestions):
-    """Add suggested words to COMMON_KANJI / COMMON_KATAKANA in japanese_utils.py.
+def apply_suggestions(suggestions, lang='ja'):
+    """Add suggested words to the appropriate language utils file.
 
-    Katakana words go to COMMON_KATAKANA; kanji words go to COMMON_KANJI.
+    - ja: COMMON_KANJI / COMMON_KATAKANA in japanese_utils.py
+    - zh: COMMON_KANJI in chinese_utils.py
+    - en: COMMON_WORDS in english_utils.py
+
     Returns the number of words actually added.
     """
-    utils_path = _get_japanese_utils_path()
+    utils_path = _get_lang_utils_path(lang)
 
     if not os.path.exists(utils_path):
-        print(f'ERROR: japanese_utils.py not found at {utils_path}', file=sys.stderr)
+        print(f'ERROR: utils file not found at {utils_path}', file=sys.stderr)
         return 0
 
     with open(utils_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
-    # Find existing words in both frozensets
-    existing = set(_COMMON_KANJI) | set(_COMMON_KATAKANA)
+    # Collect existing words from the file
+    existing = set()
     for m in re.finditer(r"'([^']+)'", content):
         existing.add(m.group(1))
+    # Dynamically import the correct lang module to get current frozensets
+    from lib.language_utils import get_lang_utils
+    lu = get_lang_utils(lang)
+    existing |= set(getattr(lu, 'COMMON_KANJI', frozenset()))
+    existing |= set(getattr(lu, 'COMMON_KATAKANA', frozenset()))
 
-    # Separate katakana from kanji suggestions
+    # Separate katakana from kanji/other suggestions
     katakana_words = []
-    kanji_words = []
+    other_words = []
     for s in suggestions:
         word = s[0]
         freq = s[1]
         reason = s[2]
-        # s[3] is section name — used to determine type
         section = s[3] if len(s) > 3 else ''
         if word in existing:
             continue
-        # Katakana check: has katakana range chars
-        if bool(re.search(r'[゠-ヿ]', word)):
+        # Katakana check: has katakana range chars (Japanese only)
+        if lang == 'ja' and bool(re.search(r'[゠-ヿ]', word)):
             katakana_words.append((word, freq, reason))
         else:
-            kanji_words.append((word, freq, reason))
+            other_words.append((word, freq, reason))
         existing.add(word)
 
     total_added = 0
     modified = content
 
-    # ── Insert into COMMON_KATAKANA ──
+    # ── Insert into COMMON_KATAKANA (Japanese only) ──
     if katakana_words:
         insert_lines = []
         insert_lines.append(f'    # ── auto_clean_glossary ({len(katakana_words)} katakana words) ──')
@@ -462,19 +595,24 @@ def apply_suggestions(suggestions):
             total_added += len(katakana_words)
             print(f'Added {len(katakana_words)} words to COMMON_KATAKANA', file=sys.stderr)
 
-    # ── Insert into COMMON_KANJI ──
-    if kanji_words:
+    # ── Insert into COMMON_KANJI (ja/zh) or COMMON_WORDS (en) ──
+    if other_words:
+        if lang in ('ja', 'zh'):
+            frozenset_name = 'COMMON_KANJI'
+        else:
+            frozenset_name = 'COMMON_WORDS'
         insert_lines = []
-        insert_lines.append(f'    # ── auto_clean_glossary ({len(kanji_words)} kanji words) ──')
-        for word, freq, reason in kanji_words:
+        insert_lines.append(f'    # ── auto_clean_glossary ({len(other_words)} words, lang={lang}) ──')
+        for word, freq, reason in other_words:
             insert_lines.append(f"    '{word}',  # {reason}")
         insert_block = '\n'.join(insert_lines) + '\n'
 
-        result = _insert_into_frozenset(modified, 'COMMON_KANJI', insert_block)
+        result = _insert_into_frozenset(modified, frozenset_name, insert_block)
         if result:
             modified = result
-            total_added += len(kanji_words)
-            print(f'Added {len(kanji_words)} words to COMMON_KANJI', file=sys.stderr)
+            total_added += len(other_words)
+            print(f'Added {len(other_words)} words to {frozenset_name} ({os.path.basename(utils_path)})',
+                  file=sys.stderr)
 
     if total_added:
         with open(utils_path, 'w', encoding='utf-8') as f:
@@ -632,20 +770,22 @@ Examples:
         return
 
     # ── Apply mode ──
+    lang = getattr(args, 'lang', 'ja')
+    target_file = os.path.basename(_get_lang_utils_path(lang))
     if not args.yes:
-        print(f'\nAbout to add {len(suggestions)} words to japanese_utils.py:')
+        print(f'\nAbout to add {len(suggestions)} words to {target_file}:')
         for s in suggestions:
             word, freq, reason = s[0], s[1], s[2]
-            target = 'KATAKANA' if bool(re.search(r'[゠-ヿ]', word)) else 'KANJI'
+            target = 'KATAKANA' if lang == 'ja' and bool(re.search(r'[゠-ヿ]', word)) else 'KANJI'
             print(f'  + [{target}] {word}  ({reason})')
         response = input('\nProceed? [y/N] ')
         if response.lower() not in ('y', 'yes'):
             print('Aborted.')
             return
 
-    n_added = apply_suggestions(suggestions)
+    n_added = apply_suggestions(suggestions, lang=lang)
     if n_added:
-        print(f'[OK] Added {n_added} words to COMMON_KANJI.')
+        print(f'[OK] Added {n_added} words to {target_file}.')
         print(f'\nRe-run build_glossary.py to regenerate the clean glossary:')
         print(f'  python nouns/build_glossary.py --findings temp/scans/findings.json \\')
         print(f'    --output reports/proper-nouns.md --lang ja')

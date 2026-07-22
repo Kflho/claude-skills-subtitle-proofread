@@ -106,13 +106,13 @@ def _save_glossary_borderline(project_dir, glossary_path, lang):
           f'in japanese_utils.py.', file=sys.stderr)
 
 
-def step_scan(project_dir, lang, force_rescan=False):
+def step_scan(project_dir, lang, force_rescan=False, target_dir=None):
     """Layer 1: unified_scanner + build_glossary.
 
     If findings.json already exists and SRT files haven't changed since
     last scan, skip re-scanning (idempotent). Use --force-rescan to override.
     """
-    target = os.path.join(project_dir, 'AI审查后')
+    target = target_dir or os.path.join(project_dir, 'AI审查后')
     findings = os.path.join(project_dir, 'temp', 'scans', 'findings.json')
     issues = os.path.join(project_dir, 'temp', 'scans', 'issues')
     ai_nouns = os.path.join(project_dir, 'temp', 'scans', 'ai_nouns.json')
@@ -125,7 +125,7 @@ def step_scan(project_dir, lang, force_rescan=False):
             srt_changed = False
             if os.path.isdir(target):
                 for fname in os.listdir(target):
-                    if fname.endswith('.srt'):
+                    if fname.endswith(('.srt', '.ass')):
                         srt_path = os.path.join(target, fname)
                         if os.path.getmtime(srt_path) > findings_mtime:
                             srt_changed = True
@@ -224,7 +224,7 @@ def _filter_by_start(episodes, start_from):
 
 def step_fix_episodes(project_dir, lang, resources,
                       skip_whisper=False, episodes=None, limit=0, start_from=None,
-                      skip_if_clean=True):
+                      skip_if_clean=True, target_dir=None):
     """Phase 2: Unified error-fix via Fixer (reference → Whisper → human).
 
     Each episode goes through the cascading priority:
@@ -244,12 +244,16 @@ def step_fix_episodes(project_dir, lang, resources,
     elif findings:
         selected = sorted(findings.get('per_episode_issues', {}).keys())
     else:
-        # No findings — try to find all SRT files in target
-        target = os.path.join(project_dir, 'AI审查后')
-        selected = sorted([
-            f'EP{re.search(r"(\d+)", f).group(1):0>3}'
-            for f in os.listdir(target) if f.endswith('.srt') and re.search(r'(\d+)', f)
-        ]) if os.path.isdir(target) else []
+        # No findings — try to find all subtitle files in target
+        target = target_dir or os.path.join(project_dir, 'AI审查后')
+        from lib.whisper_utils import extract_file_id
+        selected = []
+        if os.path.isdir(target):
+            for f in sorted(os.listdir(target)):
+                if f.endswith(('.srt', '.ass')):
+                    fid = extract_file_id(f)
+                    if fid and fid != '???':
+                        selected.append(fid)
 
     if start_from:
         selected = _filter_by_start(selected, start_from)
@@ -270,7 +274,7 @@ def step_fix_episodes(project_dir, lang, resources,
         clean_eps = []
         for ep in selected:
             try:
-                if Fixer(ep, project_dir).is_clean():
+                if Fixer(ep, project_dir, srt_dir=target_dir).is_clean():
                     clean_eps.append(ep)
             except Exception:
                 pass
@@ -319,9 +323,9 @@ def step_fix_episodes(project_dir, lang, resources,
     return selected
 
 
-def step_nouns(project_dir, lang):
+def step_nouns(project_dir, lang, target_dir=None):
     """Layer 3: noun_checker — proper nouns + OP/ED consistency."""
-    target = os.path.join(project_dir, 'AI审查后')
+    target = target_dir or os.path.join(project_dir, 'AI审查后')
     glossary = os.path.join(project_dir, 'reports', 'proper-nouns.md')
     checker = os.path.join(_SCRIPT_DIR, 'nouns', 'noun_checker.py')
 
@@ -534,9 +538,9 @@ def _dedup_fixes(fixes):
     return result
 
 
-def step_apply_all(project_dir, lang):
+def step_apply_all(project_dir, lang, target_dir=None):
     """Layer 4: apply_fixes — collect all fixes, apply at once."""
-    target = os.path.join(project_dir, 'AI审查后')
+    target = target_dir or os.path.join(project_dir, 'AI审查后')
     apply_script = os.path.join(_SCRIPT_DIR, 'apply', 'apply_fixes.py')
 
     # Collect fixes from all sources
@@ -581,14 +585,14 @@ def step_apply_all(project_dir, lang):
     ], project_dir, desc='apply')
 
 
-def step_ass_repair(project_dir):
+def step_ass_repair(project_dir, target_dir=None):
     """Layer 5: ASS format repair (ASS only)."""
     fmt = detect_format(project_dir)
     if fmt['primary'] != 'ass':
         print('[ass] SRT project — skipping.', file=sys.stderr)
         return True
 
-    target = os.path.join(project_dir, 'AI审查后')
+    target = target_dir or os.path.join(project_dir, 'AI审查后')
     repair = os.path.join(_SCRIPT_DIR, 'ass', 'ass_repair.py')
     return _run(['python', repair, '--target-dir', target, '--check', 'all'],
                 project_dir, desc='ass')
@@ -701,15 +705,15 @@ def _append_to_glossary(project_dir, accepted_candidates, lang):
           file=sys.stderr)
 
 
-def step_clean(project_dir):
+def step_clean(project_dir, target_dir=None):
     """Clean up empty cues."""
-    target = os.path.join(project_dir, 'AI审查后')
+    target = target_dir or os.path.join(project_dir, 'AI审查后')
     cleaner = os.path.join(_SCRIPT_DIR, 'utils', 'clean_empty_cues.py')
     return _run(['python', cleaner, '--target-dir', target],
                 project_dir, desc='clean')
 
 
-def step_ai_review(project_dir, lang):
+def step_ai_review(project_dir, lang, target_dir=None):
     """Report AI-review fragments generated by fix_by_whisper().
 
     fix_by_whisper() now calls _write_ai_fragments_json() directly,
@@ -755,8 +759,64 @@ def step_ai_review(project_dir, lang):
     return True
 
 
+def _write_degraded_report(project_dir, garbled_cues, findings_path, review_dir, scan_dir):
+    """Generate a human-review report from Phase 1 scan findings.
+
+    Used when Whisper is unavailable (degraded mode) — garbled cues from
+    the scan are written directly to 问题解决报告.md for manual/AI review.
+    """
+    report_path = os.path.join(project_dir, 'reports', '问题解决报告.md')
+    os.makedirs(os.path.dirname(report_path), exist_ok=True)
+
+    from datetime import datetime
+    lines = []
+    lines.append('# 问题解决报告')
+    lines.append('')
+    lines.append(f'> 生成时间: {datetime.now().strftime("%Y-%m-%d %H:%M")}')
+    lines.append(f'> 模式: 残血运行（无 Whisper）— 以下问题需手动/AI 处理')
+    lines.append(f'> 乱码总数: {len(garbled_cues)}')
+    lines.append('')
+    lines.append('---')
+    lines.append('')
+    lines.append('## ⬜ 未修复乱码（扫描发现，待手动处理）')
+    lines.append('')
+    lines.append('| # | 文件 | 行号 | 时间码 | 原文 | 问题类型 |')
+    lines.append('|---|------|------|--------|------|---------|')
+    for i, g in enumerate(garbled_cues, 1):
+        text = g.get('text', '')[:60].replace('|', '\\|')
+        fname = g.get('file', '?')
+        line_no = g.get('line', '?')
+        tc = g.get('timecode', '?')
+        # Classify issue type
+        if any('Ѐ' <= c <= 'ӿ' for c in text):
+            itype = '俄语残留'
+        elif any('぀' <= c <= 'ヿ' for c in text):
+            itype = '日语残留'
+        elif any(c.isascii() and c.isalpha() for c in text) and any('一' <= c <= '鿿' for c in text):
+            itype = '双语混合'
+        else:
+            itype = '纯外语'
+        lines.append(f'| {i} | {fname} | {line_no} | {tc} | {text} | {itype} |')
+    lines.append('')
+    lines.append('---')
+    lines.append('')
+    lines.append('## 处理指南')
+    lines.append('')
+    lines.append('1. 对照参考字幕（如有）逐条确认正确文本')
+    lines.append('2. 俄语/日语残留 → 删除源语言字符或翻译为中文')
+    lines.append('3. 双语混合 → 删除外语部分，保留中文')
+    lines.append('4. 纯外语 → 参考上下文判断是否保留（如歌曲、咒语）')
+    lines.append('5. 修复后删除对应行的 ⬜ 标记')
+    lines.append('')
+
+    with open(report_path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines))
+
+    print(f'[deliver] Degraded report → {report_path}', file=sys.stderr)
+
+
 def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True,
-                 video_dir=None):
+                 video_dir=None, target_dir=None):
     """Generate human review checklists + video clips.
 
     Reads *_pending_human.json temp files (written by fix_by_reference()
@@ -781,6 +841,29 @@ def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True,
             pass
 
     if not all_items:
+        # Check for unresolved garbled cues from Phase 1 scan (degraded mode)
+        findings_path = os.path.join(scan_dir, 'findings.json')
+        garbled = []
+        if os.path.exists(findings_path):
+            fdata = load_json(findings_path)
+            if fdata:
+                garbled = fdata.get('garbled_cues', [])
+                # Filter to only those still in the current target
+                if garbled and target_dir:
+                    target_files = set()
+                    if os.path.isdir(target_dir):
+                        target_files = {f for f in os.listdir(target_dir)
+                                        if f.endswith(('.ass', '.srt'))}
+                    garbled = [g for g in garbled if g.get('file', '') in target_files]
+
+        if garbled and not (os.environ.get('WHISPER_CLI') or os.environ.get('WHISPER_MODEL')):
+            # Degraded mode: generate human-review report from scan findings
+            _write_degraded_report(project_dir, garbled, findings_path, review_dir, scan_dir)
+            print(f'[deliver] Degraded mode: {len(garbled)} unresolved garbled cues '
+                  f'→ reports/问题解决报告.md (manual/AI review needed)',
+                  file=sys.stderr)
+            return True
+
         # Check if there are ai_review.md files pending
         ai_pending = False
         if os.path.isdir(review_dir):
@@ -793,8 +876,12 @@ def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True,
                   file=sys.stderr)
             print('[deliver]   Run --apply-ai-review first.', file=sys.stderr)
         else:
-            print('[deliver] No pending human review items — all clean.',
-                  file=sys.stderr)
+            if garbled:
+                print(f'[deliver] {len(garbled)} garbled cues remain — '
+                      f'run with Whisper or manually review.', file=sys.stderr)
+            else:
+                print('[deliver] No pending human review items — all clean.',
+                      file=sys.stderr)
         return True
 
     # Group by episode
@@ -811,7 +898,7 @@ def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True,
         print(f'\n[deliver] {ep}: {len(by_ep[ep])} pending → {ep_dir}',
               file=sys.stderr)
 
-        fixer = Fixer(ep, project_dir, video_dir=video_dir)
+        fixer = Fixer(ep, project_dir, video_dir=video_dir, srt_dir=target_dir)
         checklist_path = fixer.review_from_items(by_ep[ep], output_dir=ep_dir)
 
         if checklist_path:
@@ -856,7 +943,7 @@ def _apply_ai_checklists(project_dir, lang):
 
     total_applied = 0
     for ep, json_path in json_files:
-        fixer = Fixer(ep, project_dir)
+        fixer = Fixer(ep, project_dir, srt_dir=target_dir)
         applied = fixer.apply_ai_fragments(json_path)
         total_applied += applied
         print(f'[apply-ai-review] {ep}: {applied} corrections applied',
@@ -868,7 +955,7 @@ def _apply_ai_checklists(project_dir, lang):
     return total_applied > 0
 
 
-def step_apply_checklist(project_dir, lang, video_dir=None):
+def step_apply_checklist(project_dir, lang, video_dir=None, target_dir=None):
     """Apply filled per-episode review checklists → SRT + report.
 
     Scans reports/manual-review/{EP}/checklist.md for each episode folder,
@@ -897,7 +984,7 @@ def step_apply_checklist(project_dir, lang, video_dir=None):
 
     total_applied = 0
     for ep, checklist_path in ep_dirs:
-        fixer = Fixer(ep, project_dir, video_dir=video_dir)
+        fixer = Fixer(ep, project_dir, video_dir=video_dir, srt_dir=target_dir)
         applied = fixer.apply(checklist_path)
         total_applied += applied
         print(f'[apply-checklist] {ep}: {applied} corrections applied', file=sys.stderr)
@@ -1041,10 +1128,22 @@ Examples:
                         help='Process all episodes even if SRT has no garbled cues')
     parser.add_argument('--force-rescan', action='store_true',
                         help='Force re-scan even if findings.json is fresh')
+    parser.add_argument('--input-dir', default='AI审查后',
+                        help='Subtitle input directory name (default: AI审查后). '
+                             'Use "." to point --target-dir directly at the subtitle files.')
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
 
     project_dir = args.target_dir or os.getcwd()
+    input_dir = args.input_dir
+    if input_dir == '.':
+        target_dir = project_dir
+    else:
+        target_dir = os.path.join(project_dir, input_dir)
+
+    # Propagate to subprocess scripts via env var (used by get_target_dir())
+    if input_dir != 'AI审查后':
+        os.environ['INPUT_DIR'] = input_dir
 
     # Ensure subprocess-called scripts can find lib/ via import lib._path
     if _SCRIPT_DIR not in os.environ.get('PYTHONPATH', ''):
@@ -1101,7 +1200,7 @@ Examples:
 
     if args.dry_run:
         print('\n[DRY RUN] — scan only, no files will be modified\n', file=sys.stderr)
-        step_scan(project_dir, resolved_lang, force_rescan=args.force_rescan)
+        step_scan(project_dir, resolved_lang, force_rescan=args.force_rescan, target_dir=target_dir)
         _print_progress(project_dir, 'Status: dry-run scan')
         return
 
@@ -1111,12 +1210,12 @@ Examples:
         print('  Apply AI review fixes (fast)', file=sys.stderr)
         print(f'{"─"*40}', file=sys.stderr)
         # Apply JSON-based AI fixes (proper nouns, oped)
-        step_apply_all(project_dir, resolved_lang)
+        step_apply_all(project_dir, resolved_lang, target_dir=target_dir)
         # Apply per-episode AI review checklists (L2.5 fragments)
         _apply_ai_checklists(project_dir, resolved_lang)
         # Regenerate human checklists with escalated L2.5 items
-        step_deliver(project_dir, resolved_lang, is_full_run=False, video_dir=video_dir)
-        step_clean(project_dir)
+        step_deliver(project_dir, resolved_lang, is_full_run=False, video_dir=video_dir, target_dir=target_dir)
+        step_clean(project_dir, target_dir=target_dir)
         return
 
     # ── Fast path: checklist apply only ──
@@ -1124,7 +1223,7 @@ Examples:
         print(f'\n{"─"*40}', file=sys.stderr)
         print('  Apply human review checklist (fast)', file=sys.stderr)
         print(f'{"─"*40}', file=sys.stderr)
-        step_apply_checklist(project_dir, resolved_lang, video_dir=video_dir)
+        step_apply_checklist(project_dir, resolved_lang, video_dir=video_dir, target_dir=target_dir)
         return
 
     # ═══════════════════════════════════════════════════════════════
@@ -1134,7 +1233,7 @@ Examples:
         print(f'\n{"─"*40}', file=sys.stderr)
         print('  Phase 1/3: Character scan', file=sys.stderr)
         print(f'{"─"*40}', file=sys.stderr)
-        step_scan(project_dir, resolved_lang, force_rescan=args.force_rescan)
+        step_scan(project_dir, resolved_lang, force_rescan=args.force_rescan, target_dir=target_dir)
 
     _print_progress(project_dir, 'Status: after scan')
 
@@ -1147,13 +1246,13 @@ Examples:
         print(f'\n{"─"*40}', file=sys.stderr)
         print('  Phase 2/3: Error fix + AI fragment completion', file=sys.stderr)
         print(f'{"─"*40}', file=sys.stderr)
-        processed = step_fix_episodes(project_dir, resolved_lang, resources,
+        processed = step_fix_episodes(project_dir, resolved_lang, resources, target_dir=target_dir,
                                       skip_whisper=args.skip_whisper,
                                       episodes=episodes, limit=args.limit,
                                       start_from=args.start_from,
                                       skip_if_clean=not args.no_skip_if_clean)
 
-        step_ai_review(project_dir, resolved_lang)
+        step_ai_review(project_dir, resolved_lang, target_dir=target_dir)
     else:
         print(f'\n{"─"*40}', file=sys.stderr)
         print('  Phase 2/3: SKIPPED (--resume: AI review done, re-running Phase 3 only)',
@@ -1171,19 +1270,19 @@ Examples:
     print(f'\n{"─"*40}', file=sys.stderr)
     print('  Phase 3/3: Noun unification + Deliver', file=sys.stderr)
     print(f'{"─"*40}', file=sys.stderr)
-    noun_results = step_nouns(project_dir, resolved_lang)
+    noun_results = step_nouns(project_dir, resolved_lang, target_dir=target_dir)
     print_ai_review_notice(noun_results, project_dir, resolved_lang)
 
     step_apply_all(project_dir, resolved_lang)
 
     # ASS repair: only for ASS-format projects
     if fmt['primary'] == 'ass':
-        step_ass_repair(project_dir)
+        step_ass_repair(project_dir, target_dir=target_dir)
 
     step_deliver(project_dir, resolved_lang, processed_episodes=processed,
-                 is_full_run=is_full_run, video_dir=video_dir)
+                 is_full_run=is_full_run, video_dir=video_dir, target_dir=target_dir)
 
-    step_clean(project_dir)
+    step_clean(project_dir, target_dir=target_dir)
 
     _print_progress(project_dir, 'Status: final')
 

@@ -38,7 +38,105 @@ from lib.ass_utils import (
     strip_ass_tags, iter_ass_files, iter_dialogue_lines,
     read_ass_file, contains_cjk,
 )
-from lib.whisper_utils import classify_garbled_text, to_seconds, extract_ep_number, setup_windows_utf8, OP_BOUNDARY_SEC, ED_BOUNDARY_SEC
+from lib.whisper_utils import classify_garbled_text, to_seconds, extract_ep_number, extract_file_id, setup_windows_utf8, OP_BOUNDARY_SEC, ED_BOUNDARY_SEC
+
+
+# ── jieba initialization (lazy, once) ──
+_jieba_initialized = False
+_jieba_available = False
+
+
+def _ensure_jieba():
+    """Lazy-init jieba for Chinese word segmentation."""
+    global _jieba_initialized, _jieba_available
+    if _jieba_initialized:
+        return _jieba_available
+    _jieba_initialized = True
+    try:
+        import jieba
+        jieba.initialize()
+        _jieba_available = True
+    except (ImportError, Exception) as e:
+        print(f'[unified_scanner] jieba unavailable ({e}) — '
+              f'falling back to n-gram extraction', file=__import__('sys').stderr)
+        _jieba_available = False
+    return _jieba_available
+
+
+def _segment_text_zh(text, term_freq):
+    """Segment Chinese text with jieba, count word frequencies.
+
+    Falls back to n-gram sliding window if jieba is unavailable.
+    """
+    if _ensure_jieba():
+        import jieba
+        words = jieba.lcut(text)
+        for w in words:
+            w = w.strip()
+            # Keep only words with ≥2 CJK chars (filter punctuation, single chars, Latin)
+            if len(w) >= 2 and __import__('re').search(r'[一-鿿]', w):
+                term_freq[w] += 1
+    else:
+        # Fallback: 2-4 char n-gram sliding window
+        for m in __import__('re').finditer(r'[一-鿿]{2,4}', text):
+            term_freq[m.group()] += 1
+
+
+# ── Janome initialization (lazy, once) ──
+_janome_initialized = False
+_janome_available = False
+
+
+def _ensure_janome():
+    """Lazy-init Janome for Japanese morphological analysis."""
+    global _janome_initialized, _janome_available
+    if _janome_initialized:
+        return _janome_available
+    _janome_initialized = True
+    try:
+        from janome.tokenizer import Tokenizer
+        # no-op test tokenization to verify the dictionary loaded
+        Tokenizer().tokenize('テスト')
+        _janome_available = True
+    except (ImportError, Exception) as e:
+        print(f'[unified_scanner] Janome unavailable ({e}) — '
+              f'falling back to n-gram extraction', file=__import__('sys').stderr)
+        _janome_available = False
+    return _janome_available
+
+
+def _segment_text_ja(text, term_freq):
+    """Segment Japanese text with Janome, count word frequencies.
+
+    Uses POS-filtered morphological analysis — keeps only nouns
+    (固有名詞 and 一般) with katakana or kanji, ≥2 characters.
+    Falls back to n-gram sliding window if Janome is unavailable.
+    """
+    if _ensure_janome():
+        import re as _re
+        from janome.tokenizer import Tokenizer
+        _tokenizer = Tokenizer()
+        for token in _tokenizer.tokenize(text):
+            surface = token.surface
+            if len(surface) < 2:
+                continue
+            # Keep only katakana or kanji-bearing words (skip hiragana-only)
+            is_kata = bool(_re.search(r'[゠-ヿ]', surface))
+            is_kanji = bool(_re.search(r'[一-鿿]', surface))
+            if not (is_kata or is_kanji):
+                continue
+            # POS filter: nouns only, exclude pronouns/suffixes/numerals
+            parts = token.part_of_speech.split(',')
+            pos = parts[0]
+            pos2 = parts[1] if len(parts) > 1 else ''
+            if pos == '名詞' and pos2 not in ('非自立', '代名词', '数', '接尾'):
+                term_freq[surface] += 1
+    else:
+        # Fallback: n-gram (current behavior)
+        for m in __import__('re').finditer(r'[゠-ヿ]{2,6}', text):
+            term_freq[m.group()] += 1
+        for m in __import__('re').finditer(r'[一-鿿]{2,4}', text):
+            term_freq[m.group()] += 1
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -198,16 +296,13 @@ def scan_file(filepath, skip_oped=True, target_lang='ja'):
         # ── 术语收集（所有 cue，按语言提取） ──
         text = c['text']
         if target_lang == 'ja':
-            # Katakana words: 2-6 chars
-            for m in re.finditer(r'[゠-ヿ]{2,6}', text):
-                term_freq[m.group()] += 1
-            # Kanji compounds: 2-4 consecutive characters
-            for m in re.finditer(r'[一-鿿]{2,4}', text):
-                term_freq[m.group()] += 1
+            # Janome morphological analysis (replaces n-gram sliding window)
+            # Produces actual Japanese words instead of ~40% character fragments.
+            _segment_text_ja(text, term_freq)
         elif target_lang == 'zh':
-            # Hanzi compounds: 2-4 characters (Chinese transliterated names)
-            for m in re.finditer(r'[一-鿿]{2,4}', text):
-                term_freq[m.group()] += 1
+            # jieba word segmentation (replaces n-gram sliding window)
+            # Produces actual Chinese words instead of character fragments.
+            _segment_text_zh(text, term_freq)
         elif target_lang == 'en':
             # Capitalized words: potential proper nouns in English subtitles
             for m in re.finditer(r'\b[A-Z][a-z]{2,}\b', text):
@@ -236,8 +331,8 @@ def scan_file(filepath, skip_oped=True, target_lang='ja'):
         if skip_oped and (c['start_s'] < op_boundary or c['start_s'] > ed_boundary):
             continue
 
-        # 提取集号
-        ep = extract_ep_number(fname)
+        # 提取文件 ID（EP### 或 slug fallback）
+        ep = extract_file_id(fname)
 
         # 构建 finding
         finding = {
@@ -340,9 +435,9 @@ def write_issues(output, issues_dir):
     """将 per-episode issues 写入独立 JSON 文件。"""
     os.makedirs(issues_dir, exist_ok=True)
     for ep, issues in output['per_episode_issues'].items():
-        # 跳过无法识别集号的条目
-        if ep == '???' or not ep.startswith('EP'):
-            print(f'  跳过无效集号: {ep} ({len(issues)} issues)', file=sys.stderr)
+        # 跳过无法识别的条目（空或占位符）
+        if not ep or ep == '???':
+            print(f'  跳过无效ID: {ep} ({len(issues)} issues)', file=sys.stderr)
             continue
         path = os.path.join(issues_dir, f'issues_{ep}.json')
         data = {

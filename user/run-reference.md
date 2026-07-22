@@ -100,12 +100,40 @@ export WHISPER_RETRY_MODEL='deepdml/faster-whisper-large-v3-turbo-ct2'
 
 回退机制：主模型失败 → `RETRY_MODEL` 重试 → 仍失败则跳过该片段，不阻塞 pipeline。
 
+## Python 依赖
+
+```bash
+# 日语项目 — 形态素解析 + 词典
+pip install janome jamdict
+# 中文项目 — 分词 + 词典
+pip install jieba
+```
+
+| 依赖 | 语言 | 用途 | 阶段 | Fallback |
+|------|:---:|------|:---:|------|
+| `janome` | ja | 形态素解析 → 词汇提取 | Phase 1 | n-gram (~40% 碎片) |
+| `jamdict` | ja | JMdict 词典 → 专名分类 | Phase 3 | 规则分类 |
+| `jieba` | zh | 分词 + 词典 → 词汇提取+过滤 | Phase 1+3 | n-gram + 规则 |
+
+## 运行
+
+```bash
+cd "<project>"
+python "<scripts>/run_all.py" \
+  --lang ja \                    # ja | zh | auto
+  --input-dir "<SUBTITLE_DIR>" \ # 字幕子目录（默认 AI审查后，用 . 表示直接路径）
+  [--video-dir "<VIDEO_DIR>"] \  # 可选；无视频加 --skip-whisper
+  [--skip-whisper]               # 残血运行：跳过音频修复
+```
+
 ## Phase 1：扫描
 
 ```bash
 cd "<project>" && python "<scripts>/scan/unified_scanner.py" \
-  --target-dir AI审查后/ --output-findings temp/scans/findings.json --project-lang ja
+  --target-dir "<SUBTITLE_DIR>" --output-findings temp/scans/findings.json --project-lang ja
 ```
+
+ja: Janome 形态素解析（名词提取）| zh: jieba 分词 | en: n-gram
 
 扫描是只读的。不写入报告。
 

@@ -191,6 +191,23 @@ def extract_ep_number(filepath):
     return '???'
 
 
+def extract_file_id(filepath):
+    """Extract a stable file identifier from a subtitle/video filename.
+
+    Returns the episode number (EP###) when available, otherwise returns
+    the filename stem (basename minus extension) for non-episodic content
+    (movies, specials, PVs).
+
+    This ensures every file gets a usable ID instead of "???".
+    """
+    ep = extract_ep_number(filepath)
+    if ep != '???':
+        return ep
+
+    basename = os.path.basename(filepath)
+    return os.path.splitext(basename)[0]
+
+
 # ═══════════════════════════════════════════════════════════════
 # 2. 时间码
 # ═══════════════════════════════════════════════════════════════

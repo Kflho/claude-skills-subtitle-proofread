@@ -189,6 +189,10 @@ COMMON_KANJI = frozenset({
     '何気',  # time/number fragment
     # ── auto_clean_glossary (1 kanji words) ──
     '力持',  # verb stem: ends with "持"
+    # ── auto_clean_glossary (3 kanji words) ──
+    '好了',  # stop word
+    '对吧',  # stop word
+    '等等',  # stop word
 })
 
 # Non-word patterns: dashes, repeated chars, breathing/filler sounds.

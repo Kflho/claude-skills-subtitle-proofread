@@ -47,26 +47,42 @@ test -d "<VIDEO_DIR>" && echo "[OK] video" || echo "[MISSING] video"
 
 ```bash
 python --version           # 需要 Python 3.12+
+# 日语项目 — jamdict（JMdict 词典，专名分类）+ Janome（形态素解析，词汇提取）
 python -c "from jamdict import Jamdict; Jamdict(); print('[OK] jamdict')" 2>/dev/null \
   || { echo "[INSTALL] jamdict..."; pip install jamdict; }
+python -c "from janome.tokenizer import Tokenizer; Tokenizer().tokenize('テスト'); print('[OK] janome')" 2>/dev/null \
+  || { echo "[INSTALL] janome..."; pip install janome; }
+# 中文项目 — jieba（分词 + 词典过滤，对标 jamdict）
+python -c "import jieba; jieba.initialize(); print('[OK] jieba', len(jieba.dt.FREQ), 'words')" 2>/dev/null \
+  || { echo "[INSTALL] jieba..."; pip install jieba; }
 ```
 
-`[OK]` → 继续。`[INSTALL]` → 自动安装后继续。安装失败 → 残血运行（Phase 3 专名分类精度略降）。
+`[OK]` → 继续。`[INSTALL]` → 自动安装后继续。安装失败 → 残血运行（退回规则分类）。
+
+- **jamdict** 不可用 → Phase 3 退回规则分类
+- **Janome** 不可用 → Phase 1 退回 n-gram 切分（~40% 碎片率）
+- **jieba** 不可用 → Phase 1 退回 n-gram 切分，Phase 3 退回规则分类
 
 ### 3. 运行
 
 ```bash
 cd "<project-root>"
-python "<scripts-dir>/run_all.py" --video-dir "<VIDEO_DIR>" [--limit N | -e EP001-EP010]
+python "<scripts-dir>/run_all.py" \
+  --input-dir "<SUBTITLE_DIR>" \
+  [--video-dir "<VIDEO_DIR>"] \
+  [--skip-whisper] [--limit N | -e EP001-EP010]
 ```
 
-> `--video-dir` 必须传。`--lang` 自动检测。`--limit` 只限 Phase 2 修复集数，扫描覆盖全部文件。
+> `--input-dir` 指定字幕子目录（默认 `AI审查后`）。无视频时加 `--skip-whisper` 残血运行。
+> `--lang` 自动检测。`--limit` 只限 Phase 2 修复集数，扫描覆盖全部文件。
 
 ### 4. 验证
 
 **必须**执行，不靠 "Pipeline complete" 判断成功：
 
 1. 读 `reports/问题解决报告.md`
+   - **文件存在** → 搜索 `⬜`
+   - **文件不存在**（单文件/残血模式常见）→ 读 `temp/scans/findings.json`，检查 `garbled_cues` 和 `per_episode_issues`
 2. 搜索 `⬜` → 逐个分析每条 ⬜：
    - 同一 (EP, 时间) 在「Whisper自动修复」section 已有 ✅ → **false alarm**，忽略
    - 同一 (EP, 时间) 在 AI fragment section 有 correction 非空但仍是 ⬜ → SRT 已修，报告未同步，忽略
@@ -75,13 +91,28 @@ python "<scripts-dir>/run_all.py" --video-dir "<VIDEO_DIR>" [--limit N | -e EP00
 4. 0 条**真正待处理**的 ⬜ → 完成
 
 > 脚本 exit 0 ≠ 成功。同一个 cue 可能出现在报告多个 section，一边 ✅ 就算干净。
+>
+> **残血模式**（无视频/Whisper）：Phase 2 跳过，garbled cues 流入 `问题解决报告.md` 的「未修复乱码」section。需手动/AI 逐条处理，对照参考字幕修复后删除 ⬜。
+
+## 语言限制
+
+| 功能 | ja（日语） | zh（中文） | 其他 |
+|------|:---:|:---:|:---:|
+| 乱码扫描 | ✅ | ✅ | ✅ |
+| Whisper 修复 | ✅ (kotoba) | ⚠️ 需中文模型 | ⚠️ 需对应模型 |
+| 词典过滤 | ✅ (jamdict/JMdict) | ✅ (jieba/498K 词) | ❌ |
+| 专名分类 | ✅ (jamdict) | ✅ (jieba + 规则) | ❌ |
+| Glossary 清洗 | ✅ (JMdict + 规则) | ✅ (jieba 词典 + 规则) | ❌ |
+
+> `--lang zh` 时使用 jieba 分词 + 词典查询对标 jamdict。jieba 不可用时退回 n-gram + 启发式规则。
 
 ## Pipeline
 
 ```
 Phase 1: Scan
   → unified_scanner: garbled chars, repeat patterns, term frequency
-  → build_glossary: corpus frequency → proper-nouns.md
+      ja: Janome 形态素解析（名词提取），zh: jieba 分词，en: n-gram
+  → build_glossary: jamdict/jieba 词典过滤 + frozenset → proper-nouns.md
   → auto_clean: prune common words, rebuild clean glossary (automatic)
   → glossary AI review: borderline entries printed inline (🤖, ≤20 entries)
   → Output: findings.json + proper-nouns.md (cleaned)
@@ -128,7 +159,7 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 
 1. 读 `temp/scans/ai_review_candidates.json`（小文件，≤20条）
 2. 判断每条是专名还是普通词
-3. 专名 → 写 `ai_review_fixes.json`；普通词 → 加入 `japanese_utils.py` COMMON_KANJI/KATAKANA
+3. 专名 → 写 `ai_review_fixes.json`；普通词 → 加入对应语言 utils 的 COMMON_KANJI（ja: `japanese_utils.py`，zh: `chinese_utils.py`）
 4. 运行：`python run_all.py --resume`
 5. **迭代**直到 `Needs AI: 0`（12→6→3→0 是正常收敛）
 6. **收敛后**：向用户展示最终专有名词表（`reports/proper-nouns.md`），询问是否采用当前词表。用户确认后再进入 Phase 3 交付步骤
@@ -173,9 +204,11 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 | Flag | When |
 |------|------|
 | `--dry-run` | Preview, no file changes |
+| `--input-dir <DIR>` | Subtitle subdirectory (default: `AI审查后`). Use `.` for direct path |
+| `--target-dir <DIR>` | Project root (default: CWD) |
 | `-e EP005-EP010` | Specific episode range |
 | `--limit 5` | First N episodes only |
-| `--skip-whisper` | Skip audio processing |
+| `--skip-whisper` | Skip audio processing (残血模式) |
 | `--resume` | Resume after AI noun review (Phase 3 only) |
 | `--force-rescan` | Re-scan even if cache fresh |
 
