@@ -191,6 +191,34 @@ if not ok:
 
 ---
 
+## Step 3.5：Python 依赖安装
+
+### 3.5.1 核心依赖：jamdict（日语词典）
+
+日语项目依赖 `jamdict`（JMdict + JMnedict 词典），用于 Phase 3 专名自动分类 — 区分"普通日语词"和"专有名词"。包体很小（~500KB），pip 一键安装。
+
+```bash
+pip install jamdict
+```
+
+`jamdict` 首次运行时自动下载 JMdict 词典数据库（SQLite，~50MB），仅一次。
+
+**验证**：
+
+```bash
+python -c "from jamdict import Jamdict; j = Jamdict(); print('OK:', len(j.lookup('日本').entries), 'entries')"
+```
+
+期望输出 `OK: N entries` → 安装成功。
+
+> ⚠️ 安装失败时警告用户但不阻止继续。`jamdict` 不可用时 Phase 3 退回规则分类（精度略降），仍可运行。
+
+### 3.5.2 开源许可说明
+
+jamdict 使用的 JMdict/JMnedict 词典数据遵循 [CC-BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) 许可。此 skill 仅通过 jamdict 库查询词典数据，不捆绑或分发词典文件。
+
+---
+
 ## Step 4：项目特征自动检测
 
 扫描目标字幕目录，自动检测：

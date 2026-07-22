@@ -43,6 +43,15 @@ test -d "<VIDEO_DIR>" && echo "[OK] video" || echo "[MISSING] video"
 
 有 `[MISSING]` → 告知用户。Whisper 缺失可残血运行（跳过音频修复）。
 
+### 2.5. 验证 Python 依赖
+
+```bash
+python -c "from jamdict import Jamdict; Jamdict(); print('[OK] jamdict')" 2>/dev/null \
+  || { echo "[INSTALL] jamdict..."; pip install jamdict; }
+```
+
+`[OK]` → 继续。`[INSTALL]` → 自动安装后继续。安装失败 → 残血运行（Phase 3 专名分类精度略降）。
+
 ### 3. 运行
 
 ```bash
