@@ -212,8 +212,12 @@ def read_ass_file(path: str) -> list[str]:
     """
     if _is_srt_path(path):
         return srt_utils.read_srt_file(path)
-    with open(path, 'r', encoding='utf-8') as f:
-        return f.readlines()
+    # ASS files: use same encoding detection as SRT
+    from lib.srt_utils import _detect_encoding
+    with open(path, 'rb') as f:
+        raw = f.read()
+    encoding = _detect_encoding(raw)
+    return raw.decode(encoding).splitlines(True)
 
 
 def write_ass_file(path: str, lines: list[str]):

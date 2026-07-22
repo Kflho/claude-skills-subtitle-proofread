@@ -216,10 +216,30 @@ def build_srt_cue_lines(d: dict) -> list[str]:
 
 # ── 文件 I/O ──────────────────────────────────────────────────
 
+# Encoding detection chain for subtitle files.
+# ASS/SRT files may be saved in non-UTF-8 encodings (CP1251 for Cyrillic,
+# Shift-JIS for Japanese, GBK for Chinese).  Try common encodings in order;
+# the first that decodes without error wins.
+_ENCODING_CHAIN = ['utf-8-sig', 'utf-8', 'cp1251', 'koi8-r', 'shift-jis', 'gbk']
+
+
+def _detect_encoding(raw_bytes: bytes) -> str:
+    """Return the first encoding in the chain that decodes without error."""
+    for enc in _ENCODING_CHAIN:
+        try:
+            raw_bytes.decode(enc)
+            return enc
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+    return 'utf-8'  # fallback
+
+
 def read_srt_file(path: str) -> list[str]:
-    """读取 SRT 文件，返回行列表（含换行符）。"""
-    with open(path, 'r', encoding='utf-8-sig') as f:  # utf-8-sig 处理 BOM
-        return f.readlines()
+    """读取 SRT/ASS 文件，返回行列表（含换行符）。自动检测编码。"""
+    with open(path, 'rb') as f:
+        raw = f.read()
+    encoding = _detect_encoding(raw)
+    return raw.decode(encoding).splitlines(True)
 
 
 def write_srt_file(path: str, lines: list[str]):

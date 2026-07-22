@@ -273,6 +273,197 @@ python -c "import jieba; jieba.initialize(); print('OK:', len(jieba.dt.FREQ), 'w
 
 ---
 
+## Step 3.6：Baidu 翻译（可选 — 中文项目推荐）
+
+> ⚠️ 仅当项目语言为 `zh`（中文）且用户有视频+Whisper 时才需要。
+> 日语项目（`--lang ja`）的校对目标就是日语，Whisper 输出直接可用，跳过此步骤。
+
+### 3.6.1 说明原理
+
+向用户说明：
+
+> Whisper 转录的是日语原文，但你的校对目标是**中文**。如果每次让 AI 把 Whisper 输出的日语翻译成中文，token 开销很大。
+>
+> **Baidu 翻译 API** 在 Whisper 和修复之间插入一个自动翻译层：
+> ```
+> 日语音频 → Whisper 转录（日语）→ Baidu 翻译（日语→中文）→ 填入中文字幕
+> ```
+>
+> 这是**可选的**。不配也能用——没有 Baidu 时，日语原文保留在 AI fragments 里，AI 自己翻译（结果更准但 token 开销大）。
+
+### 3.6.2 询问是否配置
+
+> 是否配置 Baidu 翻译 API？（输入 y/n）
+>
+> - **y** → 引导注册 + 配置
+> - **n** → 跳过。管线自动降级。
+
+**如果选 n**：
+
+> 好的，跳过。Whisper 输出的日语原文将保留在 AI 审查文件中，AI 自行翻译（每次校对约多消耗 5-10K token）。
+
+跳到 Step 4。
+
+### 3.6.3 引导注册
+
+**如果选 y**，先介绍注册：
+
+> **第一步：注册 Baidu 翻译 API**
+>
+> 1. 打开 https://fanyi-api.baidu.com/
+> 2. 注册/登录百度账号
+> 3. 选择「通用翻译 API」
+> 4. 完成实名认证：
+>    - **个人认证（高级版）**：100 万字符/月免费，10 QPS，推荐
+>    - 标准版（未认证）：5 万字符/月，1 QPS
+>    - 企业认证（尊享版）：200 万字符/月，100 QPS
+> 5. 在「管理控制台」→「开发者信息」获取：
+>    - **APP ID**（一串数字）
+>    - **密钥**（Secret Key）
+>
+> 拿到 APP ID 和密钥后告诉我。
+
+等待用户提供 APP ID 和 Secret。
+
+### 3.6.4 配置凭证
+
+收到凭证后：
+
+> 凭证可以两种方式存储：
+> - **配置文件**（推荐，不污染命令行历史）：写入 `~/.baidu_translate`
+> - **环境变量**：`export BAIDU_APPID=...` `export BAIDU_SECRET=...`
+
+推荐写入配置文件：
+
+```bash
+# 创建 ~/.baidu_translate（如果还不存在）
+cat > ~/.baidu_translate << 'EOF'
+BAIDU_APPID=<用户提供的APPID>
+BAIDU_SECRET=<用户提供的密钥>
+EOF
+```
+
+> ⚠️ **绝不把 APPID/Secret 明文写入 CLAUDE.md 或任何会被提交到 git 的文件。**
+> CLAUDE.md 只写 `export BAIDU_APPID=''` 和 `export BAIDU_SECRET=''` 作为占位符。
+
+### 3.6.5 解释 Endpoint 并询问网络环境
+
+> **第二步：API 端点配置**
+>
+> Baidu 翻译 API 的默认地址是 `https://fanyi-api.baidu.com/api/trans/vip/translate`。
+>
+> 如果你的运行环境**有固定公网 IP**（如云服务器、专线），可以直接用默认地址。
+>
+> 如果你的运行环境**没有固定 IP**（家庭宽带、移动热点），百度 API 可能拒绝连接，需要用一台有固定 IP 的服务器做**反向代理**（nginx）。
+
+询问用户：
+
+> 你的运行环境有固定公网 IP 吗？
+>
+> - **有固定 IP / 不确定** → 先用默认地址测试，不通再说
+> - **需要代理** → 引导配置 nginx
+
+### 3.6.6 情况 A：使用默认地址
+
+> 好的，使用百度官方 API 地址。后续如果连接超时，再切代理。
+
+写入 CLAUDE.md 时不写 `BAIDU_API_ENDPOINT`（走默认值）。跳到 3.6.9 验证。
+
+### 3.6.7 情况 B：需要 nginx 代理
+
+**先收集信息，再生成配置。**
+
+询问用户：
+
+> 请提供以下信息：
+>
+> 1. **代理服务器 IP**（有固定公网 IP 的服务器地址）
+> 2. **端口号**（想用哪个端口？建议 8890，只要不冲突就行）
+
+收到后，根据用户提供的 IP 和端口生成 nginx 配置文件内容：
+
+> 在代理服务器（`<IP>`）上，创建 `/etc/nginx/conf.d/baidu-translate.conf`：
+>
+> ```nginx
+> server {
+>     listen       <用户指定的端口>;
+>
+>     location / {
+>         proxy_pass https://fanyi-api.baidu.com;  # 百度官方 API
+>         proxy_ssl_server_name on;                # 必须：SNI 握手
+>         proxy_set_header Host fanyi-api.baidu.com;
+>     }
+> }
+> ```
+>
+> 然后启动：
+> ```bash
+> sudo nginx -t                    # 检查配置语法
+> sudo systemctl reload nginx      # 重载生效
+> ```
+>
+> 在本地机器上验证代理是否通：
+> ```bash
+> curl http://<IP>:<端口>/api/trans/vip/translate
+> # 应返回 {"error_code":"52003","error_msg":"UNAUTHORIZED USER"}
+> # 52003 = 鉴权失败（正常，因为没带参数），说明代理通了
+> ```
+
+如果用户自己不确定端口是否被占用，帮用户检查：
+
+```bash
+# SSH 到服务器后执行
+ss -tlnp | grep <端口>   # 空 = 可用
+```
+
+### 3.6.8 写入凭证和端点
+
+凭证写入 `~/.baidu_translate`：
+
+```
+BAIDU_APPID=<APPID>
+BAIDU_SECRET=<密钥>
+BAIDU_ENDPOINT=http://<IP>:<端口>/api/trans/vip/translate
+```
+
+CLAUDE.md 写入（**不写明文凭证，只写占位符 + endpoint**）：
+
+```bash
+# ── Baidu 翻译（可选 — Whisper 输出 ja→zh）──
+# 凭证在 ~/.baidu_translate，注册: https://fanyi-api.baidu.com/
+export BAIDU_APPID=''
+export BAIDU_SECRET=''
+export BAIDU_API_ENDPOINT='http://<IP>:<端口>/api/trans/vip/translate'
+# 如果用自建代理，取消注释下一行：
+# export BAIDU_API_ENDPOINT='http://<IP>:<端口>/api/trans/vip/translate'
+```
+
+### 3.6.9 验证
+
+```bash
+python -c "
+from fix.translate_srt import baidu_translate, load_credentials
+appid, secret, endpoint = load_credentials()
+if appid and secret:
+    result = baidu_translate('こんにちは', appid, secret, source='ja', target='zh', endpoint=endpoint)
+    if result:
+        print(f'✅ Baidu 翻译配置成功: こんにちは → {result}')
+    else:
+        print('❌ 翻译失败，请检查 APPID/Secret/endpoint')
+else:
+    print('⚠️ 未找到凭证，请检查 ~/.baidu_translate')
+"
+```
+
+期望输出 `✅ Baidu 翻译配置成功: こんにちは → 你好`。
+
+**验证失败时**：
+- 超时（10060）→ 网络不通，建议切代理
+- 52003 UNAUTHORIZED USER → APPID/Secret 错误
+- 54003 → 频率限制，等一秒重试
+
+---
+
 ## Step 4：项目特征自动检测
 
 扫描目标字幕目录，自动检测：

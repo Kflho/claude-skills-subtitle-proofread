@@ -47,7 +47,7 @@ setup_windows_utf8()
 # Step: translate — 百度翻译参考字幕→日语 (text mode only)
 # ═══════════════════════════════════════════════════════════════
 
-def step_translate(project_dir, episode, scan_result, dry_run=False):
+def step_translate(project_dir, episode, scan_result, dry_run=False, target_lang='ja'):
     """Translate reference subtitles to Japanese for comparison (text mode)."""
     if not scan_result or not scan_result.get('issues'):
         print('[translate] No issues — skipping translation.')
@@ -79,7 +79,7 @@ def step_translate(project_dir, episode, scan_result, dry_run=False):
         'python', os.path.join(_SCRIPT_DIR, 'translate_srt.py'),
         ref_path,
         '--output', out_path,
-        '--to', 'ja',
+        '--to', target_lang,
     ]
 
     if dry_run:
@@ -109,7 +109,7 @@ def step_translate(project_dir, episode, scan_result, dry_run=False):
 # Step: compare — 对照 Whisper 输出与翻译后参考字幕 (text mode only)
 # ═══════════════════════════════════════════════════════════════
 
-def step_compare(project_dir, episode, scan_result, translated_path, dry_run=False):
+def step_compare(project_dir, episode, scan_result, translated_path, dry_run=False, target_lang='ja'):
     """Compare current SRT with translated reference, apply fixes for mismatches.
 
     Delegates to Fixer.fix_by_reference() which handles comparison +
@@ -125,7 +125,7 @@ def step_compare(project_dir, episode, scan_result, translated_path, dry_run=Fal
 
     from fix.fix_orchestrator import Fixer
 
-    fixer = Fixer(episode, project_dir)
+    fixer = Fixer(episode, project_dir, target_lang=target_lang)
     report = fixer.fix_by_reference(translated_path)
     print(f'[compare] {report.applied} fixed, {report.failed} suspicious')
 
@@ -140,7 +140,7 @@ def step_compare(project_dir, episode, scan_result, translated_path, dry_run=Fal
 # Step: audio — VAD + Whisper for audio-only mode (no reference subs)
 # ═══════════════════════════════════════════════════════════════
 
-def step_audio(project_dir, episode, scan_result, dry_run=False, video_dir=None):
+def step_audio(project_dir, episode, scan_result, dry_run=False, video_dir=None, target_lang='ja'):
     """Audio mode: dispatch garbled cues to VAD + Whisper.
 
     Delegates to Fixer.fix_by_whisper() which handles the full pipeline:
@@ -159,7 +159,7 @@ def step_audio(project_dir, episode, scan_result, dry_run=False, video_dir=None)
 
     from fix.fix_orchestrator import Fixer
 
-    fixer = Fixer(episode, project_dir, video_dir=video_dir)
+    fixer = Fixer(episode, project_dir, target_lang=target_lang, video_dir=video_dir)
     if fixer.is_clean():
         print('[audio] Already clean — nothing to fix.')
         return []
@@ -413,10 +413,13 @@ def _run_pipeline(project_dir, episode, resources, args):
     with what's available.
     """
     # ── Dynamic step list based on available resources ──
+    target_lang = getattr(args, 'target_lang', 'ja')
     if args.step is None:
         steps = []
         if can_use_whisper(resources, skip_whisper=getattr(args, 'skip_whisper', False)):
             steps.append('audio')
+            if target_lang != 'ja':
+                steps.append('translate')
         steps.extend(['apply', 'diff'])
     else:
         steps = [args.step]
@@ -437,7 +440,18 @@ def _run_pipeline(project_dir, episode, resources, args):
     for step in steps:
         if step == 'audio':
             fixes = step_audio(project_dir, episode, scan_result,
-                               dry_run=args.dry_run, video_dir=args.video_dir)
+                               dry_run=args.dry_run, video_dir=args.video_dir,
+                               target_lang=target_lang)
+
+        elif step == 'translate':
+            translated_path = step_translate(project_dir, episode, scan_result,
+                                             dry_run=args.dry_run,
+                                             target_lang=target_lang)
+
+        elif step == 'compare':
+            applied = step_compare(project_dir, episode, scan_result,
+                                   translated_path, dry_run=args.dry_run,
+                                   target_lang=target_lang)
 
         elif step == 'apply':
             if args.dry_run:

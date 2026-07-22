@@ -38,6 +38,25 @@ export WHISPER_RETRY_MODEL='<backup_model_path>'
 # ── openai-whisper 后端（WHISPER_BACKEND=openai-whisper 时填写）──
 # export WHISPER_MODEL='large-v3'
 # export WHISPER_RETRY_MODEL='medium'
+
+# ── Baidu 翻译（可选 — 仅 --lang zh 项目需要）──
+# Whisper 转录日语→日语。中文校对时，Baidu 将 Whisper 输出翻译成中文，
+# 避免 AI 自行翻译浪费 token。无凭证时自动降级（日语原文→AI翻译）。
+#
+# 注册: https://fanyi-api.baidu.com/ → 通用翻译API
+#   个人认证（高级版）: 100万字符/月免费, 10 QPS, 推荐
+#   标准版（未认证）:   5万字符/月免费,  1 QPS
+#
+# 凭证存放: ~/.baidu_translate（推荐，不污染命令行历史）或环境变量
+#   BAIDU_APPID=你的APPID
+#   BAIDU_SECRET=你的密钥
+#
+# Endpoint: 默认直连百度官方 API。如果没有固定公网 IP，需自建 nginx 代理：
+#   export BAIDU_API_ENDPOINT='http://<服务器IP>:<端口>/api/trans/vip/translate'
+#   nginx 配置: proxy_pass https://fanyi-api.baidu.com; + proxy_ssl_server_name on;
+export BAIDU_APPID=''
+export BAIDU_SECRET=''
+# export BAIDU_API_ENDPOINT='http://<IP>:<端口>/api/trans/vip/translate'
 ```
 
 ## 运行

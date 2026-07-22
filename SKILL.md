@@ -100,11 +100,13 @@ python "<scripts-dir>/run_all.py" \
 |------|:---:|:---:|:---:|
 | 乱码扫描 | ✅ | ✅ | ✅ |
 | Whisper 修复 | ✅ (kotoba) | ⚠️ 需中文模型 | ⚠️ 需对应模型 |
+| Baidu 翻译层 | ❌ (日语目标无需) | ✅ (Whisper 输出 ja→zh) | ❌ |
 | 词典过滤 | ✅ (jamdict/JMdict) | ✅ (jieba/498K 词) | ❌ |
 | 专名分类 | ✅ (jamdict) | ✅ (jieba + 规则) | ❌ |
 | Glossary 清洗 | ✅ (JMdict + 规则) | ✅ (jieba 词典 + 规则) | ❌ |
 
 > `--lang zh` 时使用 jieba 分词 + 词典查询对标 jamdict。jieba 不可用时退回 n-gram + 启发式规则。
+> Baidu 翻译为**可选**：未配置时自动降级，日语原文保留在 AI fragments 中由 AI 自行翻译。
 
 ## Pipeline
 
@@ -120,7 +122,7 @@ Phase 1: Scan
 
 Phase 2: Triage
   → 若有参考字幕 → 注入 reference_text 到 AI fragments（原文，不翻译）
-  → VAD → Whisper → classify each garbled cue:
+  → VAD → Whisper → Baidu 翻译 (zh only) → classify each garbled cue:
       ├─ noise (mj < 2)        → auto-cut 🗑️
       ├─ readable JP + 原文无语义 → auto-keep ✅
       ├─ readable JP + 长度正常 → auto-keep ✅
@@ -128,6 +130,8 @@ Phase 2: Triage
       └─ JP + Latin corruption → ai_fragments_{EP}.json (🤖 AI补全)
           ├─ AI fills correction → --apply-ai-review
           └─ AI can't fix → VAD check → auto-cut or 人工审查
+  → Baidu 翻译 (--lang zh 项目): Whisper 输出 ja→zh 翻译后进入分类
+      无凭证时降级: 日语原文 → AI fragments (AI 自行翻译)
 
 Phase 3: Unify
   ├─ OP/ED fixer: cross-episode clustering → instrumental auto-clean / vocal AI review
@@ -189,6 +193,8 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 | `SyntaxError` / `UnicodeEncodeError` | emoji→ASCII、括号补全，修完重跑 |
 | `Done: 0 fixed` + 无 `[whisper]` 输出 | `--video-dir` 缺失或路径错 — 验证 CLAUDE.md 路径 |
 | 某步骤失败但已写中间文件 | 清空 `temp/` + `reports/`，加 `--force-rescan` 重跑 |
+| 参考字幕乱码（西里尔/中文变 `?`） | v2 已自动检测编码（UTF-8/CP1251/KOI8-R/Shift-JIS/GBK） |
+| `[translate] Baidu credentials not found` | 正常降级。配置 `BAIDU_APPID` + `BAIDU_SECRET` 或接受 AI 自行翻译 |
 
 ## AI 介入点
 

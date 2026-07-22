@@ -72,6 +72,74 @@ class FixReport:
 
 
 # ═══════════════════════════════════════════════════════════════
+# Baidu Translate helper — translates Whisper output (ja → target_lang)
+# ═══════════════════════════════════════════════════════════════
+
+def _translate_whisper_replacements(all_items: list, target_lang: str):
+    """Translate Whisper replacement text from Japanese to target language.
+
+    Only activates when target_lang ≠ 'ja'.  Uses Baidu Translate API if
+    credentials are available; degrades gracefully otherwise (keeps original
+    Japanese → AI fragments, where Claude translates directly).
+
+    Each item's 'replacement' field is translated in-place.  The original
+    Japanese text is preserved in 'whisper_original_ja' for AI context.
+    """
+    if target_lang == 'ja':
+        return  # nothing to translate
+
+    # Collect items with Whisper replacements
+    to_translate = [f for f in all_items
+                    if f.get('replacement', '').strip()]
+
+    if not to_translate:
+        return
+
+    # Try to load Baidu credentials
+    appid = None
+    secret = None
+    endpoint = None
+    try:
+        from fix.translate_srt import baidu_translate, load_credentials
+        appid, secret, endpoint = load_credentials()
+    except Exception:
+        pass
+
+    if not appid or not secret:
+        print(f'[translate] Baidu credentials not found — '
+              f'keeping Japanese originals (AI will translate {len(to_translate)} items)',
+              file=sys.stderr)
+        print(f'[translate] Set BAIDU_APPID + BAIDU_SECRET or ~/.baidu_translate '
+              f'to enable auto-translation.',
+              file=sys.stderr)
+        return
+
+    print(f'[translate] Baidu: translating {len(to_translate)} Whisper outputs '
+          f'ja → {target_lang} ...', file=sys.stderr)
+
+    translated_count = 0
+    failed_count = 0
+    for f in to_translate:
+        jp_text = f['replacement'].strip()
+        try:
+            translated = baidu_translate(
+                jp_text, appid, secret, source='ja', target=target_lang,
+                endpoint=endpoint)
+            if translated and translated != jp_text:
+                f['whisper_original_ja'] = jp_text   # preserve for AI context
+                f['replacement'] = translated
+                translated_count += 1
+            else:
+                failed_count += 1
+        except Exception:
+            failed_count += 1
+
+    print(f'[translate] Done: {translated_count} translated, '
+          f'{failed_count} failed (kept original)',
+          file=sys.stderr)
+
+
+# ═══════════════════════════════════════════════════════════════
 # Fixer
 # ═══════════════════════════════════════════════════════════════
 
@@ -491,6 +559,12 @@ class Fixer:
                         'original': g['text'], 'replacement': None,
                         'confidence': 'none', 'model': 'tier1',
                     })
+
+            # ── Baidu Translate: Whisper output (Japanese) → target language ──
+            # Only activated when target_lang ≠ 'ja' (e.g., --lang zh).
+            # Graceful degradation: if Baidu credentials are missing or API fails,
+            # keep original Japanese text → AI fragments (AI translates directly).
+            _translate_whisper_replacements(all_items, self.target_lang)
 
             for f in all_items:
                 # eval_text: prefer Whisper output, fall back to original
@@ -979,6 +1053,7 @@ class Fixer:
                 'end': end_ts,
                 'original': original[:200],
                 'whisper_attempt': corrected,
+                'whisper_original_ja': f.get('whisper_original_ja', ''),
                 'context_before': context_before,
                 'context_after': context_after,
                 'whisper_context': whisper_ctx,

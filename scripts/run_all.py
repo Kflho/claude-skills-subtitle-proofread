@@ -274,7 +274,7 @@ def step_fix_episodes(project_dir, lang, resources,
         clean_eps = []
         for ep in selected:
             try:
-                if Fixer(ep, project_dir, srt_dir=target_dir).is_clean():
+                if Fixer(ep, project_dir, target_lang=lang, srt_dir=target_dir).is_clean():
                     clean_eps.append(ep)
             except Exception:
                 pass
@@ -314,6 +314,7 @@ def step_fix_episodes(project_dir, lang, resources,
         args = _Args()
         args.video_dir = resources.get('video_dir')
         args.no_backup = False
+        args.target_lang = lang
         print(f'[fix] {ep} ({i+1}/{len(selected)})', file=sys.stderr)
         try:
             _run_pipeline(project_dir, ep, resources, args)
@@ -898,7 +899,7 @@ def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True,
         print(f'\n[deliver] {ep}: {len(by_ep[ep])} pending → {ep_dir}',
               file=sys.stderr)
 
-        fixer = Fixer(ep, project_dir, video_dir=video_dir, srt_dir=target_dir)
+        fixer = Fixer(ep, project_dir, target_lang=lang, video_dir=video_dir, srt_dir=target_dir)
         checklist_path = fixer.review_from_items(by_ep[ep], output_dir=ep_dir)
 
         if checklist_path:
@@ -943,7 +944,7 @@ def _apply_ai_checklists(project_dir, lang):
 
     total_applied = 0
     for ep, json_path in json_files:
-        fixer = Fixer(ep, project_dir, srt_dir=target_dir)
+        fixer = Fixer(ep, project_dir, target_lang=lang, srt_dir=target_dir)
         applied = fixer.apply_ai_fragments(json_path)
         total_applied += applied
         print(f'[apply-ai-review] {ep}: {applied} corrections applied',
@@ -984,7 +985,7 @@ def step_apply_checklist(project_dir, lang, video_dir=None, target_dir=None):
 
     total_applied = 0
     for ep, checklist_path in ep_dirs:
-        fixer = Fixer(ep, project_dir, video_dir=video_dir, srt_dir=target_dir)
+        fixer = Fixer(ep, project_dir, target_lang=lang, video_dir=video_dir, srt_dir=target_dir)
         applied = fixer.apply(checklist_path)
         total_applied += applied
         print(f'[apply-checklist] {ep}: {applied} corrections applied', file=sys.stderr)
