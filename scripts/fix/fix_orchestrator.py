@@ -1021,6 +1021,20 @@ class Fixer:
             for entry in unfilled:
                 ts = entry['time']
                 start_s = to_seconds(ts) if ts else 0
+                # Re-check original text: Latin-only noise that Whisper
+                # hallucinated onto should be auto-cut, not escalated.
+                original = entry.get('original', '')
+                if meaningful_jp_count(original) < 2:
+                    cues = [c for c in cues
+                            if c.get('start', '') != ts]
+                    auto_cut += 1
+                    try:
+                        update_entry_status(self._report_path, step='2.5',
+                                            ep=self.episode, time=ts,
+                                            corrected='(原文无语义)', status='🗑️')
+                    except Exception:
+                        pass
+                    continue
                 has_speech = any(
                     es >= start_s and ss <= start_s + 5.0
                     for ss, es in speech_segs
