@@ -534,7 +534,7 @@ def print_report(result):
     kept = result['kept']
     total = result['total_scanned']
 
-    jamdict_status = '✅ available' if result['jamdict_available'] else '⚠️  NOT available'
+    jamdict_status = '[OK] available' if result['jamdict_available'] else '[WARN] NOT available'
     print(f'Scanned {total} entries across all sections  (Jamdict: {jamdict_status})')
     print()
 
@@ -545,7 +545,7 @@ def print_report(result):
             by_section[section].append((word, freq, reason))
 
         for section, items in by_section.items():
-            print(f'⟳  [{section}] Suggested REJECT ({len(items)}):')
+            print(f'[*] [{section}] Suggested REJECT ({len(items)}):')
             print(f'   {"Word":<20s} {"Freq":>5s}  Reason')
             print(f'   {"-"*20} {"-"*5}  {"-"*40}')
             for word, freq, reason in items:
@@ -557,7 +557,7 @@ def print_report(result):
     for word, freq, section in kept:
         kept_by_section[section].append((word, freq))
     for section, items in kept_by_section.items():
-        print(f'✅ [{section}] Would KEEP: {len(items)}')
+        print(f'[OK] [{section}] Would KEEP: {len(items)}')
         for word, freq in items[:10]:
             print(f'   {word} ({freq})')
         if len(items) > 10:
@@ -615,7 +615,7 @@ Examples:
 
     suggestions = result['suggestions']
     if not suggestions:
-        print('\n✨ Glossary is clean — no common words found.')
+        print('\n[OK] Glossary is clean — no common words found.')
         return
 
     if not args.apply:
@@ -636,7 +636,7 @@ Examples:
 
     n_added = apply_suggestions(suggestions)
     if n_added:
-        print(f'✅ Added {n_added} words to COMMON_KANJI.')
+        print(f'[OK] Added {n_added} words to COMMON_KANJI.')
         print(f'\nRe-run build_glossary.py to regenerate the clean glossary:')
         print(f'  python nouns/build_glossary.py --findings temp/scans/findings.json \\')
         print(f'    --output reports/proper-nouns.md --lang ja')

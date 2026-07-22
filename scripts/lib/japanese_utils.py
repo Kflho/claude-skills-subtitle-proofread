@@ -75,6 +75,8 @@ COMMON_KATAKANA = frozenset({
     # ── Common words / exclamations (2026-07-22 audit) ──
     'バーイ',  # bye-bye variant, not a proper noun
     'イヤッハー',  # exclamation, not a proper noun
+    # ── auto_clean_glossary (1 katakana words) ──
+    'カタカタカタ',  # sound effect / onomatopoeia
 })
 
 # Common kanji compounds — expanded from build_glossary.py's _COMMON_KANJI.
@@ -155,7 +157,6 @@ COMMON_KANJI = frozenset({
     '念動力','予知感覚','神隠','号機','物質伝送',
     '伝送機','人口人間','火星探検','念頭力','化学賞',
     '百万馬力','反重力装','地下水路',
-)
     '後私','人一緒','本文上','大儲','一音','今夜中','一番近',
     '全然違','冗談言','人騒','一度言','絶対大丈','分待',
     '何百年','何十年','一番強','全部揃','全部俺','家行',
@@ -177,6 +178,13 @@ COMMON_KANJI = frozenset({
     '女王様','慶応生','耳飾','出迎',
     # ── auto_clean_glossary (1 kanji words) ──
     '計画通',  # verb stem: ends with "通"
+    # ── AI专名审查拒绝: 非专名碎片 (2026-07-22) ──
+    '分か','ちょっと待','僕だ','上が','俺だ','向か',
+    '捕ま','を持','を待','な長さがあ','みんな帰','変わ',
+    # ── AI专名审查拒绝 round 2 (2026-07-22) ──
+    'どこへ行','僕に捕ま','当た','起こ','が起こ','私だ',
+    # ── AI专名审查拒绝 round 3 (2026-07-22) ──
+    'そんなこと言','集ま','やっぱりが掘',
 })
 
 # Non-word patterns: dashes, repeated chars, breathing/filler sounds.
