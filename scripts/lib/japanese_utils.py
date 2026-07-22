@@ -72,6 +72,9 @@ COMMON_KATAKANA = frozenset({
     'グランプリレ',  # fragment of グランプリレース
     'プリンセスラ',  # fragment
     'ブラックルッ',  # fragment of ブラックルックス
+    # ── Common words / exclamations (2026-07-22 audit) ──
+    'バーイ',  # bye-bye variant, not a proper noun
+    'イヤッハー',  # exclamation, not a proper noun
 })
 
 # Common kanji compounds — expanded from build_glossary.py's _COMMON_KANJI.
@@ -146,6 +149,12 @@ COMMON_KANJI = frozenset({
     '児童相談','小型電子','電子図','電子計算','物質縮小',
     '誘爆装置','美術品泥','地球大統','博士様買','省長官',
     '番街','日本科学','地球防衛','宇宙博覧','人工太陽',
+    # ── Batch: more non-PN entries (2026-07-22 逐条审计) ──
+    '万馬力','科学賞','機械人形','反重力','王女様',
+    '君出','宇宙艇','国際宇宙','戦闘開始','地球攻撃',
+    '念動力','予知感覚','神隠','号機','物質伝送',
+    '伝送機','人口人間','火星探検','念頭力','化学賞',
+    '百万馬力','反重力装','地下水路',
 )
     '後私','人一緒','本文上','大儲','一音','今夜中','一番近',
     '全然違','冗談言','人騒','一度言','絶対大丈','分待',
