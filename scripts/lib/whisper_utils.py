@@ -777,3 +777,25 @@ def meaningful_jp_count(text):
     all_jp = sum(1 for c in text if 'ぁ' <= c <= 'ヿ' or '一' <= c <= '鿿')
     exclamation_jp = sum(1 for c in text if c in EXCLAMATION_KANA)
     return all_jp - exclamation_jp
+
+
+def is_length_anomaly(original, whisper_text, ratio=3.0):
+    """Detect suspicious Whisper output significantly longer than original.
+
+    Hallucinations often produce verbose but semantically wrong output
+    from short garbled input.  A ratio > 3.0 strongly suggests hallucination
+    rather than genuine correction.
+
+    Args:
+        original: original garbled text
+        whisper_text: Whisper's attempted correction
+        ratio: length ratio threshold (default 3.0)
+
+    Returns:
+        True if whisper_text is suspiciously long compared to original
+    """
+    orig_len = max(len(original.strip()), 3)
+    whisper_len = len(whisper_text.strip())
+    if whisper_len == 0:
+        return False
+    return whisper_len / orig_len > ratio

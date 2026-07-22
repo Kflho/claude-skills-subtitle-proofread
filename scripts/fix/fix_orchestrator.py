@@ -42,7 +42,7 @@ from lib.whisper_utils import (
     setup_windows_utf8, extract_ep_number, to_seconds, format_tc,
     parse_srt, write_srt, apply_fixes_to_srt, run_whisper,
     extract_audio_wav, classify_garbled_text,
-    get_audio_duration, meaningful_jp_count,
+    get_audio_duration, meaningful_jp_count, is_length_anomaly,
 )
 setup_windows_utf8()
 
@@ -473,9 +473,14 @@ class Fixer:
                     auto_cut.append(f)
                     continue
 
-                # ② Readable Japanese → auto-keep
+                # ② Readable Japanese → auto-keep (unless hallucination-suspect)
                 if looks_like_plausible_japanese(eval_text, self.target_lang):
-                    auto_keep.append(f)
+                    # Check for hallucination: much longer than original → route to AI
+                    original = f.get('original', '')
+                    if f.get('replacement') and is_length_anomaly(original, eval_text):
+                        ai_fragments.append(f)
+                    else:
+                        auto_keep.append(f)
                     continue
 
                 # ③ Has Japanese content but with Latin corruption → AI completion
@@ -757,6 +762,66 @@ class Fixer:
             return None
 
         return self.review_from_items(pending, output_dir)
+    def _build_paired_cues(self, cues, target_fragment):
+        """Build paired-cue list for hallucination-suspect fragments.
+
+        Finds the best neighbor cue to pair with the target, allowing AI
+        to edit either (or both) to make the combined passage coherent.
+        """
+        target_start = target_fragment.get('start', '')
+        target_start_s = to_seconds(target_start) if target_start else 0
+        target_end = target_fragment.get('end', '')
+        target_end_s = to_seconds(target_end) if target_end else target_start_s + 3.0
+        target_text = target_fragment.get('replacement', target_fragment.get('original', ''))
+
+        candidates_before = []
+        candidates_after = []
+        for cue in cues:
+            cs = cue.get('start_s', 0)
+            ct = cue.get('text', '').strip()
+            if not ct:
+                continue
+            if abs(cs - target_start_s) < 0.1:
+                continue
+            if abs(cs - target_start_s) > 5.0:
+                continue
+            is_garbled = cue.get('is_garbled', False)
+            entry = {
+                'start': cue.get('start', ''),
+                'end': cue.get('end', ''),
+                'text': ct,
+                'is_garbled': is_garbled,
+                'correction': '',
+            }
+            if cs < target_start_s:
+                candidates_before.append(entry)
+            else:
+                candidates_after.append(entry)
+
+        def _neighbor_score(c):
+            return (0 if not c.get('is_garbled') else 1, len(c['text']))
+
+        best_neighbor = None
+        all_candidates = candidates_before + candidates_after
+        if all_candidates:
+            all_candidates.sort(key=_neighbor_score)
+            best_neighbor = all_candidates[0]
+            best_neighbor['role'] = 'neighbor'
+
+        paired = []
+        if best_neighbor:
+            paired.append(best_neighbor)
+        paired.append({
+            'start': target_start,
+            'end': target_end,
+            'text': target_text,
+            'role': 'target',
+            'is_garbled': True,
+            'correction': '',
+        })
+        return paired
+
+
 
     # ═══════════════════════════════════════════════════════════
     # Source 3b: AI short fragment completion (Layer 2.5)
@@ -805,7 +870,7 @@ class Fixer:
                     elif cs > end_s + 1 and len(context_after) < 2:
                         context_after.append(ct)
 
-            entries.append({
+            entry = {
                 'start': start_ts,
                 'end': end_ts,
                 'original': original[:200],
@@ -813,7 +878,12 @@ class Fixer:
                 'context_before': context_before,
                 'context_after': context_after,
                 'correction': '',  # AI fills this
-            })
+            }
+            # Paired mode: hallucination-suspect fragments get neighbor cue edit ability
+            if corrected and is_length_anomaly(original, corrected):
+                entry['mode'] = 'paired'
+                entry['paired_cues'] = self._build_paired_cues(cues, f)
+            entries.append(entry)
 
         json_path = os.path.join(self._temp_dir, f'ai_fragments_{self.episode}.json')
         data = {
@@ -911,6 +981,25 @@ class Fixer:
             print(f'[apply-ai] {tag} {timecode} → "{correction[:60]}"',
                   file=sys.stderr)
             applied += 1
+
+            # Paired mode: apply corrections to neighbor cues too
+            if frag.get('mode') == 'paired':
+                for pc in frag.get('paired_cues', []):
+                    if pc.get('role') == 'target':
+                        continue
+                    pc_corr = pc.get('correction', '').strip()
+                    if not pc_corr:
+                        continue
+                    pc_start = pc.get('start', '')
+                    pc_idx = self._find_cue_index(cues, pc_start)
+                    if pc_idx is None:
+                        continue
+                    if pc_corr == '__DELETE__':
+                        cues.pop(pc_idx)
+                        applied += 1
+                    else:
+                        cues[pc_idx]['text'] = pc_corr
+                        applied += 1
 
             # Update report: mark Layer 2.5 entry as fixed
             try:
