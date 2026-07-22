@@ -373,71 +373,43 @@ def run_whisper(audio_path, whisper_cli, model_path, language='ja',
                 threads=8, processors=2, beam_size=5, best_of=8,
                 nth=0.6, max_context=0, no_fallback=False,
                 suppress_nst=False):
-    """调用 whisper.cpp CLI 转录音频。
+    """调用 Whisper 后端转录音频（多后端兼容）。
 
-    返回 [{start_s, end_s, text, no_speech_prob, avg_logprob, compression_ratio}, ...]
+    向后兼容封装 — 内部委托给 lib.whisper_backends.transcribe()。
+    现有调用方无需修改。
 
     参数:
+        audio_path: 16kHz mono WAV 路径
+        whisper_cli: whisper.cpp CLI 路径（whisper-cpp 后端使用）
+        model_path: 模型路径（GGML .bin / CT2 目录 / .pt 文件 / HuggingFace ID）
+        language: 语言代码（默认 'ja'）
+        threads: CPU 线程数
+        processors: GPU 处理器数
+        beam_size: beam search 宽度
+        best_of: best-of 候选项数
         nth: 无声阈值 (0.0-1.0)，越低越敏感。Tier 1/2 用 0.6，Tier 3 用 0.3。
         max_context: 跨段上下文 token 数，0=禁用。
         no_fallback: True=禁用 temperature fallback（不推荐，幻觉后处理已兜底）。
         suppress_nst: 启用 -sns（非语音 token 抑制）。
                       ⚠️ 默认 False。研究证实 -sns 会在非语音段制造幻觉；
                       仅当外部 VAD 完全移除音乐/静音后才考虑启用。
+
+    返回:
+        [{start_s, end_s, text, no_speech_prob, avg_logprob, compression_ratio}, ...]
+        失败时返回空列表。
     """
-    # 不默认启用 -sns：研究证实 suppress_non_speech_tokens 在音乐/静音段
-    # 导致模型编造文字 (Calm-Whisper IS2025; whisper.cpp #1258, #2137)
-    cmd = [
-        whisper_cli, '-m', model_path, '-f', audio_path, '-l', language,
-        '-t', str(threads), '-p', str(processors),
-        '-bs', str(beam_size), '-bo', str(best_of),
-        '-oj', '-of', audio_path + '.whisper', '--print-progress',
-        '-nth', str(nth),
-        '-mc', str(max_context),
-    ]
-    if suppress_nst:
-        cmd.append('-sns')
-    if no_fallback:
-        cmd.append('-nf')
+    from lib.whisper_backends import transcribe as _backend_transcribe
 
-    proc = subprocess.run(cmd, capture_output=True, text=True,
-                          encoding='utf-8', errors='replace', timeout=1800)
-    for line in (proc.stderr or '').strip().split('\n'):
-        if line.strip():
-            print(f'  [whisper] {line.strip()}', file=sys.stderr)
-
-    json_path = audio_path + '.whisper.json'
-    if not os.path.exists(json_path):
-        print('⚠ whisper-cli 未生成 JSON', file=sys.stderr)
-        return []
-
-    try:
-        with open(json_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        print('⚠ whisper JSON 解码失败', file=sys.stderr)
-        if os.path.exists(json_path):
-            os.remove(json_path)
-        return []
-    os.remove(json_path)
-
-    segs = []
-    for seg in data.get('transcription', []):
-        ts_from = seg.get('timestamps', {}).get('from', '00:00:00,000').replace(',', '.')
-        ts_to = seg.get('timestamps', {}).get('to', '00:00:08,000').replace(',', '.')
-        text = seg.get('text', '').strip()
-        if not text:
-            continue
-        segs.append({
-            'start_s': to_seconds(ts_from),
-            'end_s': to_seconds(ts_to),
-            'text': text,
-            # 置信度指标（whisper.cpp JSON 输出字段）
-            'no_speech_prob': seg.get('no_speech_prob', -1.0),
-            'avg_logprob': seg.get('avg_logprob', None),
-            'compression_ratio': seg.get('compression_ratio', None),
-        })
-    return segs
+    # Pass whisper_cli as a kwarg so the backend layer can use it
+    return _backend_transcribe(
+        audio_path, model_path, language,
+        backend=None,  # auto-detect
+        whisper_cli=whisper_cli,
+        threads=threads, processors=processors,
+        beam_size=beam_size, best_of=best_of,
+        nth=nth, max_context=max_context,
+        no_fallback=no_fallback, suppress_nst=suppress_nst,
+    )
 
 
 def filter_low_confidence(segs, no_speech_threshold=0.6, min_avg_logprob=-1.5,

@@ -6,22 +6,53 @@
 
 首次使用或更换机器后，确认以下检查通过：
 
+### Whisper 后端检测（自动）
+
+```bash
+cd "<project>" && python -c "
+from lib.whisper_backends import backend_detection_report
+import json
+print(json.dumps(backend_detection_report(), ensure_ascii=False, indent=2))
+"
+```
+
+### whisper.cpp 后端
+
 ```bash
 # 1. whisper-cli 可执行
-<whisper-cli> --help
+<whisper-cli> --version
 
 # 2. 模型文件存在
 ls <model-dir>/ggml-kotoba-whisper-v2.0-q5_0.bin
 
 # 3. ffmpeg 可用
 ffmpeg -version
+```
 
-# 4. Python 3.12+
-python --version
+### faster-whisper 后端
 
-# 5. （可选）人声分离 — 减少 BGM 幻觉
+```bash
+# 1. faster-whisper 已安装
+python -c "import faster_whisper; print('OK')"
+
+# 2. 模型可用（自动下载或本地路径）
+ls <model_dir>/  # CTranslate2 格式：model.bin + config.json + tokenizer.json + ...
+
+# 3. ffmpeg 可用
+ffmpeg -version
+```
+
+### openai-whisper 后端
+
+```bash
+# 1. openai-whisper 已安装
+python -c "import whisper; print('OK')"
+
+# 2. PyTorch 可用
 python -c "import torch; print(torch.cuda.is_available())"
-python -c "import demucs; print('OK')"
+
+# 3. ffmpeg 可用
+ffmpeg -version
 ```
 
 > 路径从 CLAUDE.md 获取，不在此硬编码。
@@ -43,10 +74,31 @@ ffmpeg -y -ss 00:08:30 -t 30 -i "<视频>.mkv" -vn -ac 1 -ar 16000 _test_origina
 # 分离人声
 python -m demucs --two-stems=vocals -o _test_sep _test_original.wav
 
-# 对比 Whisper 转录效果
+# 对比 Whisper 转录效果（whisper.cpp 示例）
 whisper-cli -m <model> -l ja -f _test_original.wav --no-timestamps
 whisper-cli -m <model> -l ja -f _test_sep/htdemucs/_test_original/vocals.wav --no-timestamps
 ```
+
+## Whisper 后端切换
+
+skill 支持三种 Whisper 实现，初始化时自动检测。如需切换：
+
+```bash
+# 设置后端类型
+export WHISPER_BACKEND='faster-whisper'  # 或 whisper-cpp / openai-whisper
+
+# 后端特定配置（以 faster-whisper 为例）
+export WHISPER_MODEL='kotoba-tech/kotoba-whisper-v2.0'
+export WHISPER_RETRY_MODEL='deepdml/faster-whisper-large-v3-turbo-ct2'
+```
+
+| 后端 | 模型格式 | 速度 | GPU | 安装难度 |
+|------|---------|:---:|:---:|:---:|
+| whisper.cpp | GGML `.bin` | ★★★★ | CUDA/Metal/Vulkan | 中（下载exe+模型） |
+| faster-whisper | CTranslate2 目录 | ★★★★★ | CUDA (CTranslate2) | 低（pip install） |
+| openai-whisper | PyTorch `.pt` | ★★★ | CUDA (PyTorch) | 低（pip install） |
+
+回退机制：主模型失败 → `RETRY_MODEL` 重试 → 仍失败则跳过该片段，不阻塞 pipeline。
 
 ## Phase 1：扫描
 

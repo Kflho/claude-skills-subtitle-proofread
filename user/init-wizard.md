@@ -42,23 +42,152 @@
 
 ---
 
-## Step 3：Whisper 安装检查
+## Step 3：Whisper 后端检测与选择
 
-向用户提问：
+### 3.1 自动检测
 
-> 你是否已安装 whisper.cpp？
+运行后端检测脚本，查看系统上已安装的 Whisper 实现：
+
+```bash
+cd "<project>" && python -c "
+from lib.whisper_backends import backend_detection_report
+import json
+report = backend_detection_report()
+print(json.dumps(report, ensure_ascii=False, indent=2))
+"
+```
+
+输出示例：
+
+```json
+{
+  "available": ["whisper-cpp", "faster-whisper"],
+  "not_available": ["openai-whisper"],
+  "recommendations": "可用后端: whisper-cpp, faster-whisper",
+  "details": {
+    "whisper-cpp": {
+      "backend_id": "whisper-cpp",
+      "installed": true,
+      "version": "v1.7.2",
+      "path": "D:/software/video/whisper-cublas-12.4.0-bin-x64/whisper-cli.exe"
+    },
+    "faster-whisper": {
+      "backend_id": "faster-whisper",
+      "installed": true,
+      "path": "(Python package)"
+    }
+  }
+}
+```
+
+### 3.2 处理检测结果
+
+根据检测结果分情况处理：
+
+**情况 A：检测到多个后端** → 问用户选哪个：
+
+> 检测到以下 Whisper 后端可用：
 >
-> - 如果**已安装** → 请提供以下路径：
->   - whisper.cpp 可执行文件
->   - 主模型文件（推荐 kotoba-whisper-v2.0 q5_0 量化版）
->   - 备用模型文件（主模型失败时切换，可与主模型相同）
-> - 如果**未安装** → 需要先安装 whisper.cpp 和模型才能继续。以下是安装参考：
->   - whisper.cpp: https://github.com/ggerganov/whisper.cpp/releases
->   - 日语推荐模型: https://huggingface.co/kotoba-tech/kotoba-whisper-v2.0-ggml
+> | # | 后端 | 版本 | 特点 |
+> |---|------|------|------|
+> | 1 | whisper.cpp | v1.7.2 | GGML 量化模型，GPU加速，内存低 |
+> | 2 | faster-whisper | — | CTranslate2引擎，比原版快4x |
 >
-> ⚠️ 未安装 Whisper 强行运行发生的任何问题概不负责。
+> 请选择要使用的后端（输入数字）：
+>
+> - **选择 1** → 需要提供 whisper-cli 路径 + GGML 模型路径
+> - **选择 2** → 需要提供 CTranslate2 模型目录路径
 
-如果用户已安装，验证路径存在（用 `test -f` 或 `ls`）。记录路径。
+记录用户选择：`WHISPER_BACKEND=whisper-cpp`（或 `faster-whisper`）。
+
+**情况 B：只检测到一个后端** → 直接使用，告知用户：
+
+> 检测到 Whisper 后端：whisper.cpp (v1.7.2)，将使用此后端。
+
+**情况 C：未检测到任何后端** → 引导安装：
+
+> ⚠️ 未检测到任何 Whisper 后端。请先安装以下任一方案：
+>
+> **方案 1：whisper.cpp（推荐 — 无需 Python 依赖）**
+> 1. 下载 whisper-cli：https://github.com/ggerganov/whisper.cpp/releases
+> 2. 下载日语模型：https://huggingface.co/kotoba-tech/kotoba-whisper-v2.0-ggml
+>    （推荐 `ggml-kotoba-whisper-v2.0-q5_0.bin`）
+> 3. 备用模型：`ggml-large-v3-q5_0.bin`（主模型失败时切换）
+>
+> **方案 2：faster-whisper（Python — pip 安装）**
+> ```bash
+> pip install faster-whisper
+> # 模型自动从 HuggingFace 下载，首次运行需联网
+> ```
+>
+> **方案 3：openai-whisper（Python — pip 安装）**
+> ```bash
+> pip install openai-whisper
+> # 模型自动下载到 ~/.cache/whisper/
+> ```
+>
+> 安装完成后重新运行初始化。
+
+### 3.3 收集模型路径
+
+根据用户选择的后端，要求提供对应路径：
+
+**whisper.cpp 用户**：
+> 请提供以下路径：
+> - whisper.cpp 可执行文件（如 `D:/.../whisper-cli.exe`）
+> - 主模型文件（推荐 kotoba-whisper-v2.0 q5_0 量化版，`.bin` 格式）
+> - 备用模型文件（主模型失败时切换，可与主模型相同）
+
+验证路径存在（用 `test -f` 或 `ls`），写入 CLAUDE.md：
+
+```bash
+export WHISPER_BACKEND='whisper-cpp'
+export WHISPER_CLI='D:/software/video/whisper-cublas-12.4.0-bin-x64/whisper-cli.exe'
+export WHISPER_MODEL='D:/software/video/whisper-cublas-12.4.0-bin-x64/models/ggml-kotoba-whisper-v2.0-q5_0.bin'
+export WHISPER_RETRY_MODEL='D:/software/video/whisper-cublas-12.4.0-bin-x64/models/ggml-large-v3-q5_0.bin'
+```
+
+**faster-whisper 用户**：
+> 请提供模型路径（CTranslate2 格式目录，或 HuggingFace 模型 ID）：
+> - 本地路径如 `D:/models/faster-whisper-kotoba-v2.0`
+> - 或 HuggingFace ID 如 `kotoba-tech/kotoba-whisper-v2.0`
+
+写入 CLAUDE.md：
+
+```bash
+export WHISPER_BACKEND='faster-whisper'
+export WHISPER_MODEL='kotoba-tech/kotoba-whisper-v2.0'
+export WHISPER_RETRY_MODEL='deepdml/faster-whisper-large-v3-turbo-ct2'
+```
+
+**openai-whisper 用户**：
+> 请提供模型名称（`tiny` / `base` / `small` / `medium` / `large-v3`）或本地 `.pt` 文件路径。
+
+写入 CLAUDE.md：
+
+```bash
+export WHISPER_BACKEND='openai-whisper'
+export WHISPER_MODEL='large-v3'
+export WHISPER_RETRY_MODEL='medium'
+```
+
+### 3.4 验证后端可用性
+
+```bash
+cd "<project>" && python -c "
+from lib.whisper_backends import validate_backend, BACKEND_INFO
+# 对选定的后端跑冒烟测试（1秒静音片段）
+import os
+backend = os.environ.get('WHISPER_BACKEND', 'whisper-cpp')
+model = os.environ.get('WHISPER_MODEL', '')
+ok, msg = validate_backend(backend, model)
+print(f'{backend}: {msg}')
+if not ok:
+    print('WARNING: backend validation failed — Whisper may not work at runtime.')
+"
+```
+
+> ⚠️ 验证失败时警告用户但不阻止继续。残血运行模式跳过音频修复，仍可扫描乱码+统一专名。
 
 ---
 

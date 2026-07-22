@@ -228,11 +228,25 @@ def detect_resources(project_dir, video_dir=None):
             resources['has_video'] = True
             resources['video_dir'] = vdir
 
-    # ── Whisper CLI + models ──
+    # ── Whisper backend detection (multi-backend) ──
+    # Priority: 1. WHISPER_BACKEND env var  2. auto-detect from available tools
+    try:
+        from lib.whisper_backends import detect_available_backends as _detect_backends
+        available_backends = _detect_backends()
+        resources['whisper_backends'] = available_backends
+        resources['whisper_backend'] = os.environ.get('WHISPER_BACKEND', '').strip() or (
+            available_backends[0] if available_backends else '')
+    except ImportError:
+        available_backends = []
+        resources['whisper_backends'] = []
+        resources['whisper_backend'] = ''
+
+    # Legacy check: WHISPER_CLI + WHISPER_MODEL (for backward compat)
     whisper_cli = os.environ.get('WHISPER_CLI', '')
     whisper_model = os.environ.get('WHISPER_MODEL', '')
-    if whisper_cli and os.path.isfile(whisper_cli) and whisper_model:
-        resources['has_whisper'] = True
+    has_legacy_whisper = bool(whisper_cli and os.path.isfile(whisper_cli) and whisper_model)
+
+    resources['has_whisper'] = bool(available_backends) or has_legacy_whisper
 
     # ── Reference subtitles ──
     ref_dir = os.path.join(project_dir, '参考字幕')
@@ -250,10 +264,12 @@ def resources_summary(resources):
     """One-line resource status string for startup banner."""
     def _ok(b):
         return '[+]' if b else '[-]'
+    backend = resources.get('whisper_backend', '')
+    whisper_label = f'Whisper({backend})' if backend else 'Whisper'
     parts = [
         f"字幕{_ok(resources['has_target_subs'])}",
         f"视频{_ok(resources['has_video'])}",
-        f"Whisper{_ok(resources['has_whisper'])}",
+        f"{whisper_label}{_ok(resources['has_whisper'])}",
         f"参考{_ok(resources['has_reference'])}",
     ]
     return 'Resources: ' + ' '.join(parts)

@@ -184,7 +184,17 @@ Whisper 输出 replacement
 
 ### 核心调用
 
-`whisper_utils.py:run_whisper()` 封装 whisper.cpp CLI：
+`whisper_utils.py:run_whisper()` → 内部委托给 `whisper_backends.py:transcribe()` 统一接口。
+
+支持三种后端：
+
+| 后端 | 调用方式 | 关键参数 |
+|------|---------|---------|
+| whisper.cpp | CLI: `whisper-cli -m ... -f ...` | `-nth 0.6`, `-mc 0`, `-bs 5`, `-bo 8` |
+| faster-whisper | Python API: `WhisperModel.transcribe()` | `beam_size=5`, `best_of=8`, `vad_filter=True` |
+| openai-whisper | Python API: `whisper.transcribe()` | `beam_size=5`, `best_of=8` |
+
+whisper.cpp CLI 示例：
 
 ```bash
 whisper-cli.exe -m <model> -f <audio.wav> -l ja \

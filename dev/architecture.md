@@ -29,9 +29,11 @@ scripts/
     ├── srt_utils.py               ← SRT 解析/写回（行列表模型）
     ├── ass_utils.py               ← ASS 解析/写回（兼容 SRT）
     ├── whisper_utils.py           ← Whisper CLI + ffmpeg + VAD + 分类 + 置信度（cue 字典模型）
-    ├── project_utils.py           ← 模式检测 + 文件查找 + git 备份
+    ├── whisper_backends.py        ← 多后端抽象层 (whisper.cpp / faster-whisper / openai-whisper)
+    ├── project_utils.py           ← 模式检测 + 文件查找 + git 备份 + 后端检测
     ├── japanese_utils.py          ← 日语常量：常见词、敬称、非对话标记
-    └── chinese_utils.py           ← 繁→简映射表 + 拼音声调
+    ├── chinese_utils.py           ← 繁→简映射表 + 拼音声调
+    └── _path.py                   ← PYTHONPATH 自动注入
 ```
 
 ## 两套 SRT 数据模型

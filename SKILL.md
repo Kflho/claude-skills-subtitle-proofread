@@ -25,18 +25,43 @@ description: >
 
 ## 运行
 
-```bash
-# 路径和环境变量从 CLAUDE.md 获取
-export PYTHONPATH="<scripts-dir>"           # skill 的 scripts/ 目录
-export WHISPER_CLI='<path>'                  # whisper.cpp 可执行文件
-export WHISPER_MODEL='<path>'                # 主模型
-export WHISPER_RETRY_MODEL='<path>'          # 备用模型
+### 1. 导出环境变量
 
+从项目 CLAUDE.md「密钥与路径」段逐条 `export`。**不要跳过** — 缺 env var 会导致 Whisper 静默跳过。
+
+```bash
+export PYTHONIOENCODING=utf-8   # 防 Windows GBK 乱码
+```
+
+### 2. 验证关键路径
+
+```bash
+test -f "$WHISPER_CLI" && echo "[OK] whisper-cli" || echo "[MISSING] whisper-cli"
+test -f "$WHISPER_MODEL" && echo "[OK] model" || echo "[MISSING] model"
+test -d "<VIDEO_DIR>" && echo "[OK] video" || echo "[MISSING] video"
+```
+
+有 `[MISSING]` → 告知用户。Whisper 缺失可残血运行（跳过音频修复）。
+
+### 3. 运行
+
+```bash
 cd "<project-root>"
 python "<scripts-dir>/run_all.py" --video-dir "<VIDEO_DIR>" [--limit N | -e EP001-EP010]
 ```
 
-> ⚠️ `--video-dir` 必须传，否则 Whisper 静默失败。`--lang` 自动检测，无需手动传。
+> `--video-dir` 必须传。`--lang` 自动检测。`--limit` 只限 Phase 2 修复集数，扫描覆盖全部文件。
+
+### 4. 验证
+
+**必须**执行，不靠 "Pipeline complete" 判断成功：
+
+1. 读 `reports/问题解决报告.md`
+2. 搜索 `⬜` — 有则回到对应[暂停点](#暂停点--action)
+3. 确认 Phase 3「专名自动应用」非空（非"暂无记录"）
+4. 全部 ✅ + 0 ⬜ → 完成
+
+> 脚本 exit 0 ≠ 成功。报告中有 ⬜ 就是未完。
 
 ## Pipeline
 
@@ -71,17 +96,54 @@ Report: reports/问题解决报告.md（自动生成，按 Phase 分组）
 > **mj** = meaningful Japanese character count。mj < 2 = noise。
 > AI 审查只读小 JSON 文件（ai_fragments_{EP}.json, ai_review_candidates.json），不读词表全文。
 
-## Output → Action
+## 暂停点 → Action
 
-| Pipeline prints | What to do | Done when |
-|-----------------|------------|-----------|
-| `SyntaxError` / `UnicodeEncodeError` | 修代码（emoji→ASCII, 括号补全），重跑 | 该步骤成功 |
-| `[ai-review] N pending` | 编辑 `temp/scans/ai_fragments_EP*.json`，填 `correction`。配对模式需同时填 `fragment.correction` 和 `paired_cues[*].correction` → `--apply-ai-review --video-dir "..."` | 所有 fragment 已填 |
-| `AI REVIEW NEEDED: N` | 读 `ai_review_candidates.json`，判断专名。拒绝的加入 `lib/japanese_utils.py` COMMON_KANJI。接受的写 `ai_review_fixes.json` → `--resume`。**可能多轮**（12→6→3→0） | `Needs AI: 0` |
-| `[oped] AI review candidates` | 读 `oped_ai_review.json`，填 `canonical`（`__INSTRUMENTAL__` = 器乐）→ `--apply-ai-review` | 所有候选已判断 |
-| `Pipeline complete` + all phases passed | 检查 `问题解决报告.md`：专名自动应用有条目，AI审查无残留⬜ | 报告无异常 |
-| `Pipeline complete` + checklists exist | 读 `reports/manual-review/{EP}/checklist.md`，填 `修正:` → `--apply-checklist` | applied count > 0 |
-| `Done: 0 fixed` + no `[whisper]` | `--video-dir` 缺失或错误 — 验证 CLAUDE.md 中的路径 | Whisper 有输出 |
+Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处理再继续**。
+
+### AI 碎片补全
+
+**触发**: `[ai-review] N pending`（N > 0）
+
+1. 读 `temp/scans/ai_fragments_EP*.json`
+2. 填每个 fragment 的 `correction` 字段（判断规则 → [AI-INTERVENTIONS.md](AI-INTERVENTIONS.md)）
+3. 运行：`python run_all.py --apply-ai-review --video-dir "<VIDEO_DIR>"`
+4. 重跑后检查报告，确认该 EP 无 ⬜
+
+### 专有名词审查
+
+**触发**: `AI REVIEW NEEDED: N`（N > 0）
+
+1. 读 `temp/scans/ai_review_candidates.json`（小文件，≤20条）
+2. 判断每条是专名还是普通词
+3. 专名 → 写 `ai_review_fixes.json`；普通词 → 加入 `japanese_utils.py` COMMON_KANJI/KATAKANA
+4. 运行：`python run_all.py --resume`
+5. **迭代**直到 `Needs AI: 0`（12→6→3→0 是正常收敛）
+
+> 详细规则 → [AI-INTERVENTIONS.md § Phase 3](AI-INTERVENTIONS.md)
+
+### OP/ED 审查
+
+**触发**: `[oped] AI review candidates` + `vocal_clusters > 0`
+
+1. 读 `temp/scans/oped_ai_review.json`
+2. 填每个 candidate 的 `canonical`（`__INSTRUMENTAL__` = 器乐）
+3. 运行：`python run_all.py --apply-ai-review --video-dir "<VIDEO_DIR>"`
+
+### 人工审查
+
+**触发**: `Human review pending: N`（N > 0）或 checklist 文件存在
+
+1. 读 `reports/manual-review/{EP}/checklist.md`
+2. 每项填 `修正:` 字段
+3. 运行：`python run_all.py --apply-checklist`
+
+## 错误恢复
+
+| 输出 | 操作 |
+|------|------|
+| `SyntaxError` / `UnicodeEncodeError` | emoji→ASCII、括号补全，修完重跑 |
+| `Done: 0 fixed` + 无 `[whisper]` 输出 | `--video-dir` 缺失或路径错 — 验证 CLAUDE.md 路径 |
+| 某步骤失败但已写中间文件 | 清空 `temp/` + `reports/`，加 `--force-rescan` 重跑 |
 
 ## AI 介入点
 

@@ -1,8 +1,12 @@
 # Whisper 音频修复管线
 
-> 加载条件：视频文件 + whisper.cpp CLI + GGML 模型。
+> 加载条件：视频文件 + Whisper 后端（whisper.cpp / faster-whisper / openai-whisper 任一）。
 > 入口脚本：`unified_scanner.py` 生成 per-episode issues → Whisper 三层递进修复。
 > **推荐**：搭配 `--separate-vocals`（需 Python 3.12 + PyTorch CUDA + demucs）减少 BGM 幻觉。
+>
+> **多后端支持**：skill 自动检测可用后端，`WHISPER_BACKEND` 可显式指定。
+> 后端差异对管线透明 — Tier 1/2、VAD、分诊逻辑均不感知底层实现。
+> 详见 `user/run-reference.md` 后端切换部分。
 
 ## 批量处理策略
 
@@ -107,8 +111,20 @@ print(f'总计: {len(eps)} 集, {sum(e[1] for e in eps)} issues')
 ## 前置检查
 
 ```bash
+# 自动检测可用后端
+python -c "from lib.whisper_backends import backend_detection_report; import json; print(json.dumps(backend_detection_report(), ensure_ascii=False, indent=2))"
+
+# whisper.cpp 后端
 ls <whisper-install-dir>/whisper-cli.exe
 ls <whisper-install-dir>/models/ggml-kotoba-whisper-v2.0-q5_0.bin
+
+# faster-whisper 后端
+python -c "import faster_whisper; print('OK')"
+ls <ct2-model-dir>/  # 含 model.bin + config.json + tokenizer.json
+
+# openai-whisper 后端
+python -c "import whisper; print('OK')"
+python -c "import torch; print(torch.cuda.is_available())"
 
 # 人声分离（可选但推荐）
 python --version                          # Python 3.12.x
@@ -130,29 +146,33 @@ python unified_scanner.py --target-dir ./AI审查后/ \
 
 ### 步骤 2：逐集运行 Whisper
 
+> 以下示例为 whisper.cpp 命令行。faster-whisper / openai-whisper 用户无需传 `--whisper-cli`，
+> 管线内部自动调用 Python API。`--model` 接受 HuggingFace ID 或本地路径。
+
 ```bash
 # ⚠️ 修改 SRT 前必须先备份！
 git add -A && git commit -m "备份：Whisper处理 {集号}"
 
-# Tier 1: 集群切片重转录（默认首选）
-python whisper_transcribe.py <video> <srt> \
+# 通过 run_all.py 运行（推荐 — 自动选择后端）
+python run_all.py --lang ja --limit 5
+
+# 或单集独立命令（whisper.cpp 示例）
+python whisper_pipeline.py <video> <srt> \
   --whisper-cli .../whisper-cli.exe --model .../kotoba-q5_0.bin \
   --retry-model .../large-v3-q5_0.bin \
-  --update-report reports/ --json \
+  --output fixes.json \
   --separate-vocals
 
-# Tier 2: 整集重转录（碎片≥15条的集）
-python whisper_full_episode.py <video> <srt> \
-  --whisper-cli ... --model .../kotoba-q5_0.bin \
-  --update-report reports/ --json \
+# faster-whisper 示例（无需 --whisper-cli，使用 WHISPER_MODEL 环境变量）
+python whisper_pipeline.py <video> <srt> \
+  --model kotoba-tech/kotoba-whisper-v2.0 \
+  --output fixes.json \
   --separate-vocals
 
-# Tier 3: silencedetect 拆分修复（Tier 1+2 后仍有残留）
-python whisper_deep_fix.py \
-  --report reports/问题解决报告.md --srt-dir AI审查后/ \
-  --video-dir reports/manual-review/ \
-  --whisper-cli ... --model .../large-v3-q5_0.bin \
-  --separate-vocals
+# Tier 2: 整集重转录（碎片≥15条时自动升级，也可手动触发）
+python whisper_pipeline.py <video> <srt> \
+  --model .../kotoba-q5_0.bin \
+  --force-tier2 --separate-vocals
 ```
 
 > **`--separate-vocals`**：转录前先用 demucs 分离人声，去除 BGM/音效。
