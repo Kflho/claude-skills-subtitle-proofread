@@ -38,6 +38,31 @@ UnicodeEncodeError: 'gbk' codec can't encode character '✅'
 
 **Data**: `temp/scans/ai_fragments_{EP}.json`
 
+**Context fields** (v2 — multi-layer context for better AI inference):
+
+```json
+{
+  "episode": "EP031",
+  "episode_title": "黒い宇宙線",
+  "fragments": [{
+    "original": "ip で起こったものであります",
+    "whisper_attempt": "今度も東日本街で...",
+    "context_before": ["6 cues, including garbled neighbors"],
+    "context_after":  ["6 cues, including garbled neighbors"],
+    "whisper_context": [
+      {"start_s": 605.1, "text": "Whisper transcript ±30s window"}
+    ],
+    "correction": ""
+  }]
+}
+```
+
+| 字段 | 来源 | 用途 |
+|------|------|------|
+| `context_before/after` (6 cues) | SRT 相邻 cue | 对话流上下文，即使邻居也有乱码仍提供部分信息 |
+| `whisper_context` (±30s) | Whisper Tier 2 全转录 | **即使 `whisper_attempt` 为 null**，周围 Whisper 段仍提供声学参考 |
+| `episode_title` | 视频文件名 | 故事场景线索（e.g. "黒い宇宙線" → 宇宙/科学相关台词） |
+
 **Flow**:
 1. Read each EP's fragment JSON
 2. For each fragment, read surrounding context and Whisper attempt
@@ -73,6 +98,8 @@ AI **可以修改任意一句**（或两者）以使整体通顺：
 - Original is correct but contains Latin letters (e.g. "OK") → keep as-is
 - **原文纯拉丁/单音节（mj < 2）且 Whisper 输出可读** → 直接填 Whisper 输出（噪声→改善）
 - **邻居是明显碎片**（如 `の手紙なんだ` 是前句的尾巴）→ `__DELETE__`
+- **`whisper_attempt` 为 null 但 `whisper_context` 有内容** → 用 `whisper_context` 的周围段推断：看 Whisper 在该时段说了什么，结合 `episode_title` 的场景线索，综合判断正确台词
+- **`episode_title` 线索** → 帮助缩小语义范围（e.g. 标题含"宇宙"时，"星"更可能是"宇宙"而非"明星"）
 - Uncertain → leave blank
 
 **Apply**:

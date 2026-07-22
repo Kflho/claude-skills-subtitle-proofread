@@ -647,10 +647,29 @@ def _concat_wavs(seg_paths, output_path, silence_s=2.0, sample_rate=16000):
 # Tier 2: full-episode fix
 # ═══════════════════════════════════════════════════════════════
 
-def align_and_fix(cues, whisper_segs):
-    """Align whisper segments to SRT cues by time overlap."""
+def align_and_fix(cues, whisper_segs, save_transcript_to: str = None):
+    """Align whisper segments to SRT cues by time overlap.
+
+    Args:
+        cues: parsed SRT cues
+        whisper_segs: Whisper transcription segments [{start_s, end_s, text, ...}]
+        save_transcript_to: if set, write whisper_segs as JSON for AI context
+    """
     fixes = []
     stats = {'fixed': 0, 'unmatched': 0, 'kept': 0}
+
+    # ── Save full Whisper transcript for AI fragment context (Level 2) ──
+    if save_transcript_to:
+        try:
+            slim_segs = [{'start_s': round(s.get('start_s', 0), 1),
+                          'text': s.get('text', '')}
+                         for s in whisper_segs if s.get('text', '').strip()]
+            os.makedirs(os.path.dirname(save_transcript_to), exist_ok=True)
+            with open(save_transcript_to, 'w', encoding='utf-8') as fh:
+                json.dump(slim_segs, fh, ensure_ascii=False)
+        except Exception as e:
+            print(f'  [align] Failed to save whisper transcript: {e}',
+                  file=sys.stderr)
 
     for c in cues:
         if not c.get('is_garbled'):
@@ -701,8 +720,12 @@ def align_and_fix(cues, whisper_segs):
 
 
 def run_tier2(video_path, cues, whisper_cli, model, language, tmpdir,
-              separate_vocals_flag=False):
-    """Tier 2: full episode transcription + alignment."""
+              separate_vocals_flag=False, save_transcript_to: str = None):
+    """Tier 2: full episode transcription + alignment.
+
+    Args:
+        save_transcript_to: if set, save slim whisper_segs JSON for AI context
+    """
     print('  [Tier 2] Full episode transcription ...', file=sys.stderr)
 
     full_audio = os.path.join(tmpdir, 'full.wav')
@@ -722,7 +745,7 @@ def run_tier2(video_path, cues, whisper_cli, model, language, tmpdir,
         return [], {'fixed': 0, 'unmatched': len([c for c in cues if c.get('is_garbled')]), 'kept': 0}
 
     print(f'  {len(whisper_segs)} segments', file=sys.stderr)
-    return align_and_fix(cues, whisper_segs)
+    return align_and_fix(cues, whisper_segs, save_transcript_to=save_transcript_to)
 
 
 # ═══════════════════════════════════════════════════════════════
