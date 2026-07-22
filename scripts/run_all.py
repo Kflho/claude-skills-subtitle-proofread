@@ -916,16 +916,6 @@ def step_apply_checklist(project_dir, lang, video_dir=None):
     return total_applied > 0
 
 
-def _detect_video_dir(project_dir, explicit=None):
-    """Resolve video directory: explicit arg > project-local > None."""
-    if explicit and os.path.isdir(explicit):
-        return explicit
-    for d in [os.path.join(project_dir, 'video'), os.path.join(project_dir, 'videos')]:
-        if os.path.isdir(d):
-            return d
-    return None
-
-
 # ── AI Review flagging ──
 
 def print_ai_review_notice(noun_results, project_dir, lang):
@@ -1070,14 +1060,10 @@ Examples:
     # Parse episode selection
     episodes = _parse_episodes(args.episodes) if args.episodes else None
 
-    # Resolve video directory (explicit arg > auto-detect)
-    video_dir = _detect_video_dir(project_dir, explicit=args.video_dir)
-
-    # Detect available resources (read from CLAUDE.md env vars + verify on disk)
-    resources = detect_resources(project_dir, video_dir=video_dir)
-    if not resources['has_video'] and video_dir:
-        # User explicitly set --video-dir but no files found — still record the dir
-        resources['video_dir'] = video_dir
+    # Resolve video directory (explicit arg > auto-detect in detect_resources)
+    # Pass explicit --video-dir flag to detect_resources; it handles fallback.
+    resources = detect_resources(project_dir, video_dir=args.video_dir)
+    video_dir = resources.get('video_dir')  # use detected dir everywhere below
 
     # is_full_run: initial full pipeline (no filters, no resume, no fast-paths).
     # During full run, L2.5 items stay in L2.5 for AI review before escalation.
@@ -1099,7 +1085,7 @@ Examples:
     if not resources['has_whisper']:
         missing.append('Whisper')
     if missing:
-        print(f'  ⚠ 缺少 {"+".join(missing)} — 残血运行（跳过音频修复，仍可扫描+专名统一）',
+        print(f'  [WARN] 缺少 {"+".join(missing)} — 残血运行（跳过音频修复，仍可扫描+专名统一）',
               file=sys.stderr)
     if episodes:
         ep_range = f'{episodes[0]}~{episodes[-1]}' if len(episodes) > 1 else episodes[0]

@@ -183,14 +183,6 @@ def detect_project_lang(project_dir: str, sample_size: int = 100,
     return lang
 
 
-def detect_mode(project_dir):
-    """Deprecated: use detect_resources() instead.
-
-    Returns 'audio' for backward compatibility. Kept so old callers don't break.
-    """
-    return 'audio'
-
-
 def detect_resources(project_dir, video_dir=None):
     """Detect available resources for the proofread pipeline.
 
@@ -267,12 +259,15 @@ def detect_resources(project_dir, video_dir=None):
 
 def resources_summary(resources):
     """One-line resource status string for startup banner."""
-    parts = []
-    parts.append(f"字幕{'✅' if resources['has_target_subs'] else '❌'}")
-    parts.append(f"视频{'✅' if resources['has_video'] else '❌'}")
-    parts.append(f"Whisper{'✅' if resources['has_whisper'] else '❌'}")
-    parts.append(f"参考{'✅' if resources['has_reference'] else '❌'}")
-    parts.append(f"demucs{'✅' if resources['has_demucs'] else '❌'}")
+    def _ok(b):
+        return '[+]' if b else '[-]'
+    parts = [
+        f"字幕{_ok(resources['has_target_subs'])}",
+        f"视频{_ok(resources['has_video'])}",
+        f"Whisper{_ok(resources['has_whisper'])}",
+        f"参考{_ok(resources['has_reference'])}",
+        f"demucs{_ok(resources['has_demucs'])}",
+    ]
     return 'Resources: ' + ' '.join(parts)
 
 
