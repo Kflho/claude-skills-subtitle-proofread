@@ -31,7 +31,7 @@ if _ROOT_DIR not in sys.path:
 from utils.update_report import upsert_entries as _upsert_report
 from utils.update_report import replace_layer as _replace_layer
 
-from lib.project_utils import load_json, detect_mode, detect_format, detect_project_lang
+from lib.project_utils import load_json, detect_resources, resources_summary, detect_format, detect_project_lang
 
 
 # ── Helpers ──
@@ -222,18 +222,19 @@ def _filter_by_start(episodes, start_from):
     return [ep for ep in episodes if ep >= start_ep]
 
 
-def step_fix_episodes(project_dir, lang, mode, video_dir=None,
+def step_fix_episodes(project_dir, lang, resources, video_dir=None,
                       skip_whisper=False, episodes=None, limit=0, start_from=None,
                       skip_if_clean=True):
-    """Layer 2: Unified error-fix via Fixer (reference → Whisper → human).
+    """Phase 2: Unified error-fix via Fixer (reference → Whisper → human).
 
     Each episode goes through the cascading priority:
-    1. Reference translation comparison (if 参考字幕/ exists)
-    2. Whisper audio transcription
+    1. Reference text injection (if 参考字幕/ exists — injected as context into AI fragments)
+    2. Whisper audio transcription (if video + Whisper available)
     3. Human review checklist generation (for unfixable items)
 
-    With --skip-if-clean (default), episodes with no garbled cues are skipped
-    without invoking Whisper or ffmpeg.
+    Graceful degradation: if video or Whisper is missing, skip that step and
+    continue with what's available. Phase 2 can run with reference only, Whisper
+    only, both, or neither (skip entirely).
     """
     findings = load_json(os.path.join(project_dir, 'temp', 'scans', 'findings.json'))
 
@@ -288,9 +289,24 @@ def step_fix_episodes(project_dir, lang, mode, video_dir=None,
         step = None
         dry_run = False
 
+    can_whisper = (not skip_whisper and resources['has_video'] and resources['has_whisper'])
+    if skip_whisper:
+        print('[fix] --skip-whisper: Whisper disabled by user', file=sys.stderr)
+    elif not resources['has_video']:
+        print('[fix] No video files — skipping Whisper audio fix', file=sys.stderr)
+    elif not resources['has_whisper']:
+        print('[fix] Whisper not installed — skipping audio fix', file=sys.stderr)
+    if resources['has_reference']:
+        print(f'[fix] Reference subtitles: {resources["reference_dir"]} — will inject into AI fragments',
+              file=sys.stderr)
+
     for i, ep in enumerate(selected):
-        if skip_whisper and mode == 'audio':
-            continue  # audio mode with --skip-whisper: nothing to do
+        if not can_whisper and not resources['has_reference']:
+            # Nothing to do in Phase 2 — skip this episode
+            print(f'[fix] {ep} ({i+1}/{len(selected)}): '
+                  f'no Whisper + no reference — skipping Phase 2',
+                  file=sys.stderr)
+            continue
         args = _Args()
         if video_dir:
             args.video_dir = video_dir
@@ -299,7 +315,7 @@ def step_fix_episodes(project_dir, lang, mode, video_dir=None,
         args.no_backup = False
         print(f'[fix] {ep} ({i+1}/{len(selected)})', file=sys.stderr)
         try:
-            _run_pipeline(project_dir, ep, mode, args)
+            _run_pipeline(project_dir, ep, resources, args)
         except Exception as e:
             print(f'[fix] {ep} FAILED: {e}', file=sys.stderr)
 
@@ -1042,9 +1058,6 @@ Examples:
         existing = os.environ.get('PYTHONPATH', '')
         os.environ['PYTHONPATH'] = _SCRIPT_DIR + (os.pathsep + existing if existing else '')
 
-    mode = detect_mode(project_dir)
-    fmt = detect_format(project_dir)
-
     # ── Resolve language: auto-detect or use explicit --lang ──
     if args.lang == 'auto':
         resolved_lang = detect_project_lang(project_dir)
@@ -1060,16 +1073,34 @@ Examples:
     # Resolve video directory (explicit arg > auto-detect)
     video_dir = _detect_video_dir(project_dir, explicit=args.video_dir)
 
+    # Detect available resources (read from CLAUDE.md env vars + verify on disk)
+    resources = detect_resources(project_dir, video_dir=video_dir)
+    if not resources['has_video'] and video_dir:
+        # User explicitly set --video-dir but no files found — still record the dir
+        resources['video_dir'] = video_dir
+
     # is_full_run: initial full pipeline (no filters, no resume, no fast-paths).
     # During full run, L2.5 items stay in L2.5 for AI review before escalation.
     is_full_run = (args.limit == 0 and not args.episodes and not args.start_from
                    and not args.resume
                    and not args.apply_ai_review and not args.apply_checklist)
 
+    fmt = detect_format(project_dir)
     print(f'{"="*55}', file=sys.stderr)
-    print(f'  Subtitle Proofread — {mode.upper()} mode, {(fmt["primary"] or "NONE").upper()} format, '
+    print(f'  Subtitle Proofread — {(fmt["primary"] or "NONE").upper()} format, '
           f'--lang {resolved_lang}', file=sys.stderr)
     print(f'  Project: {project_dir}', file=sys.stderr)
+    print(f'  {resources_summary(resources)}', file=sys.stderr)
+
+    # ── Warn if missing critical resources ──
+    missing = []
+    if not resources['has_video']:
+        missing.append('视频')
+    if not resources['has_whisper']:
+        missing.append('Whisper')
+    if missing:
+        print(f'  ⚠ 缺少 {"+".join(missing)} — 残血运行（跳过音频修复，仍可扫描+专名统一）',
+              file=sys.stderr)
     if episodes:
         ep_range = f'{episodes[0]}~{episodes[-1]}' if len(episodes) > 1 else episodes[0]
         print(f'  Episodes: {len(episodes)} selected ({ep_range})', file=sys.stderr)
@@ -1127,7 +1158,7 @@ Examples:
         print(f'\n{"─"*40}', file=sys.stderr)
         print('  Phase 2/3: Error fix + AI fragment completion', file=sys.stderr)
         print(f'{"─"*40}', file=sys.stderr)
-        processed = step_fix_episodes(project_dir, resolved_lang, mode, video_dir=video_dir,
+        processed = step_fix_episodes(project_dir, resolved_lang, resources, video_dir=video_dir,
                                       skip_whisper=args.skip_whisper,
                                       episodes=episodes, limit=args.limit,
                                       start_from=args.start_from,

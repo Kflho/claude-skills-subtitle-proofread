@@ -184,19 +184,96 @@ def detect_project_lang(project_dir: str, sample_size: int = 100,
 
 
 def detect_mode(project_dir):
-    """Auto-detect workflow mode based on project resources.
+    """Deprecated: use detect_resources() instead.
+
+    Returns 'audio' for backward compatibility. Kept so old callers don't break.
+    """
+    return 'audio'
+
+
+def detect_resources(project_dir, video_dir=None):
+    """Detect available resources for the proofread pipeline.
+
+    Reads paths from environment variables (set in CLAUDE.md) and verifies
+    they actually exist on disk. Returns a dict of what's available.
+
+    Args:
+        project_dir: project root directory
+        video_dir: explicit video directory (from --video-dir flag)
 
     Returns:
-        'text'  — 参考字幕/ directory has files (use reference subs for comparison)
-        'audio' — no reference subs, rely on VAD + Whisper only
-
-    Note: 原始字幕/ is a backup directory, not reference subtitles.
-    Reference subtitles (official translations, human-proofread, etc.) go in 参考字幕/.
+        dict with keys: has_target_subs, has_video, video_dir, has_whisper,
+                        has_reference, reference_dir, has_demucs
     """
+    resources = {
+        'has_target_subs': False,
+        'has_video': False,
+        'video_dir': None,
+        'has_whisper': False,
+        'has_reference': False,
+        'reference_dir': None,
+        'has_demucs': False,
+    }
+
+    # ── Target subtitles (required) ──
+    target_dir = os.path.join(project_dir, 'AI审查后')
+    if os.path.isdir(target_dir):
+        srt_files = [f for f in os.listdir(target_dir)
+                     if f.endswith(('.srt', '.ass'))]
+        resources['has_target_subs'] = len(srt_files) > 0
+
+    # ── Video files ──
+    vdir = video_dir
+    if not vdir or not os.path.isdir(vdir):
+        for d in [os.path.join(project_dir, 'video'),
+                  os.path.join(project_dir, 'videos')]:
+            if os.path.isdir(d):
+                vdir = d
+                break
+    if vdir and os.path.isdir(vdir):
+        video_files = [f for f in os.listdir(vdir)
+                       if f.lower().endswith(('.mkv', '.mp4', '.avi', '.mov'))]
+        if video_files:
+            resources['has_video'] = True
+            resources['video_dir'] = vdir
+
+    # ── Whisper CLI + models ──
+    whisper_cli = os.environ.get('WHISPER_CLI', '')
+    whisper_model = os.environ.get('WHISPER_MODEL', '')
+    if whisper_cli and os.path.isfile(whisper_cli) and whisper_model:
+        resources['has_whisper'] = True
+
+    # ── Reference subtitles ──
     ref_dir = os.path.join(project_dir, '参考字幕')
-    if os.path.isdir(ref_dir) and os.listdir(ref_dir):
-        return 'text'
-    return 'audio'
+    if os.path.isdir(ref_dir):
+        ref_files = [f for f in os.listdir(ref_dir)
+                     if f.endswith(('.srt', '.ass'))]
+        if ref_files:
+            resources['has_reference'] = True
+            resources['reference_dir'] = ref_dir
+
+    # ── demucs (optional vocal separation) ──
+    try:
+        result = subprocess.run(
+            ['python', '-c', 'import demucs'],
+            capture_output=True, timeout=10
+        )
+        resources['has_demucs'] = result.returncode == 0
+    except Exception:
+        pass
+
+    return resources
+
+
+def resources_summary(resources):
+    """One-line resource status string for startup banner."""
+    parts = []
+    parts.append(f"字幕{'✅' if resources['has_target_subs'] else '❌'}")
+    parts.append(f"视频{'✅' if resources['has_video'] else '❌'}")
+    parts.append(f"Whisper{'✅' if resources['has_whisper'] else '❌'}")
+    parts.append(f"参考{'✅' if resources['has_reference'] else '❌'}")
+    parts.append(f"demucs{'✅' if resources['has_demucs'] else '❌'}")
+    return 'Resources: ' + ' '.join(parts)
 
 
 def detect_format(project_dir):

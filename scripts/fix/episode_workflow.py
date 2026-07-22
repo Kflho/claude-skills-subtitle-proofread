@@ -36,7 +36,7 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _SCRIPTS_DIR = os.path.dirname(_SCRIPT_DIR)  # scripts/ — needed for subprocess PYTHONPATH
 
 from lib.whisper_utils import to_seconds, setup_windows_utf8, parse_srt
-from lib.project_utils import load_json, detect_mode, norm_ep, find_srt
+from lib.project_utils import load_json, norm_ep, find_srt
 setup_windows_utf8()
 
 
@@ -391,32 +391,33 @@ def main():
     episode = norm_ep(args.episode)
     project_dir = args.project_dir or os.getcwd()
 
-    # Detect mode
-    if args.mode == 'auto':
-        mode = detect_mode(project_dir)
-    else:
-        mode = args.mode
+    # Detect available resources
+    from lib.project_utils import detect_resources, resources_summary
+    resources = detect_resources(project_dir, video_dir=args.video_dir)
 
     # Single episode mode
     print('=' * 55)
-    print(f'  {episode} — Proofread Workflow [{mode.upper()} mode]')
+    print(f'  {episode} — Proofread Workflow')
+    print(f'  {resources_summary(resources)}')
     print('=' * 55)
-    _run_pipeline(project_dir, episode, mode, args)
+    _run_pipeline(project_dir, episode, resources, args)
 
 
-def _run_pipeline(project_dir, episode, mode, args):
+def _run_pipeline(project_dir, episode, resources, args):
     """Execute the proofread pipeline for one episode.
 
-    Both audio and text modes now use the same flow:
-    Whisper → triage → AI fragments (with reference text if available).
+    Resource-driven: uses Whisper if video+Whisper available, injects
+    reference text if reference subtitles available.
 
-    Reference subtitles (text mode) are injected as context into
-    ai_fragments_{EP}.json — no separate translate/compare step.
-    Claude reads the reference in its original language and produces
-    the target-language correction directly.
+    Graceful degradation: missing resources → skip that step, continue
+    with what's available.
     """
+    # ── Dynamic step list based on available resources ──
     if args.step is None:
-        steps = ['audio', 'apply', 'diff']
+        steps = []
+        if resources['has_video'] and resources['has_whisper'] and not getattr(args, 'skip_whisper', False):
+            steps.append('audio')
+        steps.extend(['apply', 'diff'])
     else:
         steps = [args.step]
 
