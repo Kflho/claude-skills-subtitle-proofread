@@ -48,10 +48,12 @@ UnicodeEncodeError: 'gbk' codec can't encode character '✅'
 Fragment 带有 `paired_cues` 数组，包含目标 cue 和相邻 cue。
 AI **可以修改任意一句**（或两者）以使整体通顺：
 
-- 填 `correction` → 修复目标 cue
-- 填 `paired_cues[*].correction` → 修改邻居 cue
+- 填 `fragment.correction` → **必须与 target cue 的 `paired_cues[*].correction` 一致**
+- 填 `paired_cues[*].correction`（target cue）→ **必须填，且与 `fragment.correction` 相同**
+- 填 `paired_cues[*].correction`（neighbor cue）→ 修改邻居 cue
 - 填 `"__DELETE__"` → 删除该 cue
 - 留空 → 保持不变
+- **规则**：target cue 的 correction 必须同时出现在 `fragment.correction` 和 `paired_cues[target].correction` 两处
 
 **示例**（EP022）：
 ```json

@@ -528,7 +528,7 @@ class Fixer:
                     upsert_entries(self._report_path, step='2', entries=[
                         {'ep': self.episode, 'time': f.get('start', ''),
                          'original': f.get('original', '')[:120],
-                         'corrected': f.get('replacement', '')[:120],
+                         'corrected': (f.get('replacement') or '')[:120],
                          'status': '✅'}
                         for f in auto_keep
                     ])
@@ -543,7 +543,7 @@ class Fixer:
                     upsert_entries(self._report_path, step='2.5', entries=[
                         {'ep': self.episode, 'time': f.get('start', ''),
                          'original': f.get('original', '')[:120],
-                         'corrected': f.get('replacement', '')[:120],
+                         'corrected': (f.get('replacement') or '')[:120],
                          'status': '⬜'}
                         for f in ai_fragments
                     ])

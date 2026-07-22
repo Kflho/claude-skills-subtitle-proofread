@@ -185,6 +185,8 @@ COMMON_KANJI = frozenset({
     'どこへ行','僕に捕ま','当た','起こ','が起こ','私だ',
     # ── AI专名审查拒绝 round 3 (2026-07-22) ──
     'そんなこと言','集ま','やっぱりが掘',
+    # ── auto_clean_glossary (1 kanji words) ──
+    '何気',  # time/number fragment
 })
 
 # Non-word patterns: dashes, repeated chars, breathing/filler sounds.
