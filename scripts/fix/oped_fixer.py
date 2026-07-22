@@ -170,9 +170,15 @@ class TimeCluster:
 class OpedFixer:
     """Detect and fix OP/ED regions across episodes.
 
-    Two modes:
+    Three-tier resource priority (matching overall subtitle logic):
+      1. Reference subtitles (source language) → canonical, no AI needed
+      2. Audio (Whisper) → cross-episode comparison + AI review
+      3. Nothing → cross-episode comparison + AI review (current behavior)
+
+    Modes:
       - auto: classify instrumental vs vocal, clean up instrumental noise
       - ai_review: generate candidates for vocal OP/ED → AI fills canonical form
+      - reference: use reference subtitles as canonical (--reference <dir>)
     """
 
     def __init__(self, target_dir: str, *,
@@ -180,13 +186,15 @@ class OpedFixer:
                  op_boundary: float = OP_BOUNDARY_SEC,
                  ed_boundary: float = ED_BOUNDARY_SEC,
                  min_episodes: int = MIN_EPISODES_FOR_CLUSTER,
-                 time_tolerance: float = TIME_TOLERANCE_SEC):
+                 time_tolerance: float = TIME_TOLERANCE_SEC,
+                 reference_dir: str = None):
         self.target_dir = target_dir
         self.lang = lang
         self.op_boundary = op_boundary
         self.ed_boundary = ed_boundary
         self.min_episodes = min_episodes
         self.time_tolerance = time_tolerance
+        self.reference_dir = reference_dir
 
         # Collected data
         self.episodes: dict = {}  # {fname: {op_cues, ed_cues, max_end}}
@@ -194,6 +202,9 @@ class OpedFixer:
         self.instrumental_clusters: list[TimeCluster] = []
         self.vocal_clusters: list[TimeCluster] = []
         self.dialogue_clusters: list[TimeCluster] = []
+
+        # Reference data: {(region, bucket_start_s): canonical_text}
+        self.reference_texts: dict[tuple, str] = {}
 
     # ── Step 1: Collect ──────────────────────────────────────────
 
@@ -237,6 +248,115 @@ class OpedFixer:
 
         print(f'[oped] Collected OP/ED cues from {len(self.episodes)} episodes',
               file=sys.stderr)
+
+    def collect_reference(self):
+        """Extract OP/ED cues from reference subtitle files (SRT or ASS).
+
+        Reference files provide canonical text for OP/ED time positions.
+        Supports both SRT (via parse_srt) and ASS (simple Dialogue parser).
+        Cues are bucketed by (region, start_s) with ±time_tolerance matching.
+        """
+        if not self.reference_dir or not os.path.isdir(self.reference_dir):
+            return
+
+        ref_cues = []  # [(start_s, region, text), ...]
+
+        for fname in sorted(os.listdir(self.reference_dir)):
+            fpath = os.path.join(self.reference_dir, fname)
+            lower = fname.lower()
+
+            if lower.endswith('.srt'):
+                cues = list(parse_srt(fpath, mark_garbled=False))
+                if not cues:
+                    continue
+                max_end = max(c['end_s'] for c in cues)
+                ed_start = max(0, max_end - self.ed_boundary)
+
+                for c in cues:
+                    region = None
+                    if c['start_s'] < self.op_boundary:
+                        region = 'OP'
+                    elif c['start_s'] > ed_start:
+                        region = 'ED'
+                    if region:
+                        ref_cues.append((c['start_s'], region, c['text'].strip()))
+
+            elif lower.endswith('.ass'):
+                # Simple ASS parser: extract Dialogue lines
+                with open(fpath, 'r', encoding='utf-8') as f:
+                    content = f.read()
+
+                # Get max end time from all Dialogue lines to compute ED boundary
+                max_end = 0.0
+                parsed = []
+                for line in content.split('\n'):
+                    if not line.startswith('Dialogue:'):
+                        continue
+                    parts = line.split(',', 9)
+                    if len(parts) < 10:
+                        continue
+                    start_str, end_str = parts[1].strip(), parts[2].strip()
+                    text = parts[9].strip()
+                    # Strip {...} override tags
+                    text = re.sub(r'\{[^}]*\}', '', text)
+                    # ASS \N → space
+                    text = text.replace('\\N', ' ').strip()
+                    if not text:
+                        continue
+
+                    start_s = self._ass_time_to_sec(start_str)
+                    end_s = self._ass_time_to_sec(end_str)
+                    parsed.append((start_s, end_s, text))
+
+                if not parsed:
+                    continue
+                max_end = max(p[1] for p in parsed)
+                ed_start = max(0, max_end - self.ed_boundary)
+
+                for start_s, end_s, text in parsed:
+                    region = None
+                    if start_s < self.op_boundary:
+                        region = 'OP'
+                    elif start_s > ed_start:
+                        region = 'ED'
+                    if region:
+                        ref_cues.append((start_s, region, text))
+
+        if not ref_cues:
+            return
+
+        # Bucket reference cues by time position (same logic as main clustering)
+        for start_s, region, text in ref_cues:
+            bucket_key = self._find_ref_bucket(start_s, region)
+            if bucket_key is None:
+                bucket_key = (region, start_s)
+            # First occurrence wins (reference is authoritative)
+            if bucket_key not in self.reference_texts:
+                self.reference_texts[bucket_key] = text
+
+        print(f'[oped] Reference: {len(ref_cues)} cues → '
+              f'{len(self.reference_texts)} unique time positions '
+              f'from {self.reference_dir}',
+              file=sys.stderr)
+
+    def _find_ref_bucket(self, start_s: float, region: str) -> tuple | None:
+        """Find existing reference bucket within time tolerance."""
+        for (r, bucket_start) in self.reference_texts:
+            if r == region and abs(start_s - bucket_start) <= self.time_tolerance:
+                return (r, bucket_start)
+        return None
+
+    @staticmethod
+    def _ass_time_to_sec(tc: str) -> float:
+        """Convert ASS timecode (H:MM:SS.cc) to seconds."""
+        tc = tc.strip()
+        parts = tc.split(':')
+        h = int(parts[0])
+        m = int(parts[1])
+        s_parts = parts[2].split('.')
+        sec = int(s_parts[0])
+        cs = int(s_parts[1]) if len(s_parts) > 1 else 0  # centiseconds
+        return h * 3600 + m * 60 + sec + cs / 100.0
 
     # ── Step 2: Cluster ──────────────────────────────────────────
 
@@ -408,7 +528,13 @@ class OpedFixer:
         Returns a dict suitable for writing to oped_ai_review.json.
         AI fills 'canonical' for each group; leave empty to skip.
         Set 'canonical': '__INSTRUMENTAL__' to treat as instrumental.
+
+        When reference subtitles are available, 'reference_text' is populated
+        and 'canonical' is auto-filled from reference (AI can override).
         """
+        has_reference = len(self.reference_texts) > 0
+        auto_canonical_count = 0
+
         candidates = []
         for cluster in self.vocal_clusters:
             # Filter to meaningful variants only
@@ -429,34 +555,58 @@ class OpedFixer:
             all_var = {**variants, **noise_variants}
             suggested = max(variants.items(), key=lambda x: x[1]) if variants else ('', 0)
 
+            # Look up reference text by time position
+            ref_text = ''
+            for (region, bucket_start), text in self.reference_texts.items():
+                if (region == cluster.region and
+                        abs(bucket_start - cluster.bucket_start) <= self.time_tolerance):
+                    ref_text = text
+                    break
+
+            # Auto-fill canonical from reference if available
+            canonical = ''
+            if ref_text and not canonical:
+                canonical = ref_text
+                auto_canonical_count += 1
+
             candidates.append({
                 'region': cluster.region,
                 'time_position_s': cluster.bucket_start,
                 'episode_count': len(set(e['ep'] for e in cluster.entries)),
-                'variants': variants,  # meaningful JP variants only
-                'noise_variants': noise_variants,  # for context
+                'variants': variants,
+                'noise_variants': noise_variants,
                 'suggested_canonical': suggested[0],
                 'suggested_confidence': (
                     suggested[1] / sum(all_var.values())
                     if sum(all_var.values()) > 0 else 0
                 ),
-                'canonical': '',  # AI fills this
+                'reference_text': ref_text,  # from --reference subtitles (empty if none)
+                'canonical': canonical,  # auto-filled from reference; AI can override
                 'sample_times': [
                     {'ep': e['ep'], 'start': e['start'], 'text': e['text']}
                     for e in cluster.entries[:5]
                 ],
             })
 
+        desc = (
+            'OP/ED AI Review Candidates — vocal OP/ED lyric variants across episodes.\n'
+            'For each candidate group:\n'
+            '  - Fill "canonical" with the correct lyrics.\n'
+            '  - Set "canonical": "__INSTRUMENTAL__" if this is actually instrumental.\n'
+            '  - Leave "canonical": "" to skip (no fix applied).\n'
+            '  - "suggested_canonical" is the majority-vote text; override if wrong.'
+        )
+        if has_reference:
+            desc += (
+                '\n  - "reference_text" is from --reference subtitles (auto-filled as canonical).\n'
+                '  - AI should validate reference_text: correct → leave canonical as-is;\n'
+                '    wrong → override canonical with the correct form.'
+            )
+
         return {
-            'description': (
-                'OP/ED AI Review Candidates — vocal OP/ED lyric variants across episodes.\n'
-                'For each candidate group:\n'
-                '  - Fill "canonical" with the correct Japanese lyrics.\n'
-                '  - Set "canonical": "__INSTRUMENTAL__" if this is actually instrumental '
-                '(Whisper hallucination on music, not real vocals).\n'
-                '  - Leave "canonical": "" to skip (no fix applied).\n'
-                '  - "suggested_canonical" is the majority-vote text; override if wrong.'
-            ),
+            'description': desc,
+            'has_reference': has_reference,
+            'auto_canonical_from_reference': auto_canonical_count,
             'total_groups': len(candidates),
             'op_groups': sum(1 for c in candidates if c['region'] == 'OP'),
             'ed_groups': sum(1 for c in candidates if c['region'] == 'ED'),
@@ -546,6 +696,9 @@ class OpedFixer:
         Returns:
             {fixes: [...], summary: {...}}
         """
+        # Collect reference first (if available) — tier 1: source language subtitles
+        self.collect_reference()
+
         self.collect()
         if len(self.episodes) < 2:
             return {'fixes': [], 'summary': {'error': 'Need ≥2 episodes'}}
@@ -640,6 +793,11 @@ Examples:
                         help=f'ED boundary in seconds (default: {ED_BOUNDARY_SEC})')
     parser.add_argument('--min-episodes', type=int, default=MIN_EPISODES_FOR_CLUSTER,
                         help=f'Min episodes for cluster (default: {MIN_EPISODES_FOR_CLUSTER})')
+    parser.add_argument('--reference',
+                        help='Directory of reference subtitles (SRT/ASS) with correct OP/ED '
+                             'lyrics. Source language subtitles → canonical text. '
+                             'When provided, reference_text is auto-filled as canonical '
+                             'in AI review (AI validates, not translates).')
     args = parser.parse_args()
 
     if not os.path.isdir(args.target_dir):
@@ -652,6 +810,7 @@ Examples:
         op_boundary=args.op_boundary,
         ed_boundary=args.ed_boundary,
         min_episodes=args.min_episodes,
+        reference_dir=args.reference,
     )
 
     result = fixer.run(
