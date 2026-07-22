@@ -784,15 +784,18 @@ def _apply_ai_checklists(project_dir, lang):
                 start_s = to_seconds(ts) if ts else 0
 
                 # VAD check: any speech overlapping this cue?
+                # If VAD data is missing (e.g. skip_vad_clean, VAD failed),
+                # escalate to L6 as safe default rather than silently deleting.
                 has_speech = False
-                if speech_segs:
+                vad_available = bool(speech_segs)
+                if vad_available:
                     for ss, es in speech_segs:
                         if es >= start_s and ss <= start_s + 5.0:
                             has_speech = True
                             break
 
-                if has_speech:
-                    # Real speech → escalate to L6 human review
+                if has_speech or not vad_available:
+                    # Speech detected (or VAD unavailable → safe default) → L6
                     upsert_entries(report_path, step='6', entries=[{
                         'ep': ep, 'time': ts,
                         'original': entry.get('original', ''),
@@ -801,7 +804,7 @@ def _apply_ai_checklists(project_dir, lang):
                     }])
                     escalated += 1
                 else:
-                    # No speech → auto-cut: delete cue from SRT
+                    # VAD confirmed no speech → auto-cut
                     srt_cues = [c for c in srt_cues
                                 if c.get('start', '') != ts]
                     auto_cut += 1

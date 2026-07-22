@@ -40,8 +40,8 @@ _SCRIPTS_DIR = os.path.dirname(_SCRIPT_DIR)  # scripts/ — needed for subproces
 from lib.whisper_utils import (
     setup_windows_utf8, extract_ep_number, to_seconds, format_tc,
     parse_srt, write_srt, apply_fixes_to_srt, run_whisper,
-    extract_audio_wav, is_valid_japanese, classify_garbled_text,
-    get_audio_duration, meaningful_jp_count, EXCLAMATION_KANA,
+    extract_audio_wav, classify_garbled_text,
+    get_audio_duration, meaningful_jp_count,
 )
 setup_windows_utf8()
 

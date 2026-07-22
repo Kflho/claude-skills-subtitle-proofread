@@ -691,19 +691,12 @@ def looks_like_plausible_japanese(text, target_lang='ja'):
         return False
     else:
         # 日语：有假名或汉字 + 无拉丁 + 无西里尔
-        if (has_kana or has_kanji) and not has_latin and not has_cyrillic:
-            return True
-        # 纯假名也算（语气词如「ああ」「えっ」）
-        if has_kana and not has_latin and not has_cyrillic:
-            return True
-        return False
+        return (has_kana or has_kanji) and not has_latin and not has_cyrillic
 
 
 def is_short_garbled_fragment(text, target_lang='ja'):
-    """判断是否为短碎片（AI 可根据上下文补全）。
-
-    日语：必须有假名/汉字才有语义可推断，纯拉丁噪音（me/re/go）不算。
-    """
+    """[DEPRECATED — triage now uses meaningful_jp_count + looks_like_plausible_japanese]
+    判断是否为短碎片（AI 可根据上下文补全）。"""
     text = text.strip()
     if not text:
         return False
@@ -718,19 +711,8 @@ def is_short_garbled_fragment(text, target_lang='ja'):
 
 
 def is_ai_fixable(text, target_lang='ja'):
-    """判断文本是否可由 AI 根据上下文推断修复。
-
-    比 is_short_garbled_fragment 更宽松 — 捕获有日语语义但含少量
-    拉丁乱码的中长碎片（如「doしまった是非とこないだん」）。
-
-    条件：
-    - 含假名或汉字（有日语语义可推断）
-    - 含拉丁字母（有乱码需要修复）
-    - 长度 ≤ 80（一句话以内）
-    - 非纯噪音（至少有一些日语内容）
-
-    Returns True if AI can likely fix this from surrounding context.
-    """
+    """[DEPRECATED — triage now uses meaningful_jp_count + looks_like_plausible_japanese]
+    判断文本是否可由 AI 根据上下文推断修复。"""
     text = text.strip()
     if not text:
         return False
