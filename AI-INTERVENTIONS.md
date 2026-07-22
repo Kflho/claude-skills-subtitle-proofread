@@ -223,11 +223,31 @@ already handles it automatically.
 
 ## Phase 3: OP/ED Lyric Unification (🤖 triggered, vocal OP/ED only)
 
+**Resource priority**（匹配整体字幕逻辑）：
+
+```
+Tier 1: 有源语言字幕 → --reference <dir> → 自动填入 canonical，AI 验证
+Tier 2: 有音频(Whisper) → 跨集对比 → AI 审查变体
+Tier 3: 什么都没有 → 跨集对比 → AI 审查（当前默认）
+底限:   人工审查
+```
+
+> OP/ED **不需要百度翻译**。任务是文本统一（找规范形式），不是翻译。
+> AI 对比跨集变体 + 引用字幕即可判断规范形式。
+
 **Trigger**: Pipeline prints `[oped] AI review candidates → temp/scans/oped_ai_review.json`
 with `vocal_clusters > 0`.
 
 **Not triggered when**: Project has instrumental-only OP/ED (like 鉄腕アトム 1963).
 The auto-clean path handles that silently — no AI intervention needed.
+
+**With reference subtitles** (`--reference <dir>`):
+```
+[oped] Reference: 183 cues → 51 unique time positions from <dir>
+```
+- `canonical` 自动从引用填入（`auto_canonical_from_reference: N`）
+- AI 只需验证：引用文本是否正确？不对则覆盖 canonical
+- 支持 ASS/SRT 格式，任何语言（俄语/日语/中文均可）
 
 **Data**: `temp/scans/oped_ai_review.json`
 

@@ -74,6 +74,11 @@ Requires env vars: `WHISPER_CLI`, `WHISPER_MODEL`, `WHISPER_RETRY_MODEL`.
 cd "$PROJ" && python "$SCRIPTS/fix/oped_fixer.py" AI审查后/ --lang ja \
   --auto-only -o temp/scans/oped_fixes.json
 
+# With reference subtitles (Tier 1: source language → auto-canonical)
+cd "$PROJ" && python "$SCRIPTS/fix/oped_fixer.py" AI审查后/ --lang ja \
+  -o temp/scans/oped_fixes.json --ai-review temp/scans/oped_ai_review.json \
+  --reference 中文字幕范例/原语言字幕/
+
 # Full: auto-clean + generate AI review for vocal OP/ED lyrics
 cd "$PROJ" && python "$SCRIPTS/fix/oped_fixer.py" AI审查后/ --lang ja \
   -o temp/scans/oped_fixes.json --ai-review temp/scans/oped_ai_review.json
@@ -83,14 +88,28 @@ cd "$PROJ" && python "$SCRIPTS/fix/oped_fixer.py" AI审查后/ --lang ja \
   -o temp/scans/oped_fixes.json --apply-ai-review temp/scans/oped_ai_review.json
 ```
 
+Resource priority (three-tier):
+```
+Tier 1: --reference <dir> → source language subtitles → canonical auto-filled
+Tier 2: cross-episode comparison + AI review → variants → AI fills canonical
+Tier 3: nothing available → cross-episode comparison + AI review (default)
+底限:   human review
+```
+
+> OP/ED does NOT need Baidu Translate. The task is text unification (finding the
+> canonical form), not translation. AI comparison across episodes + reference
+> subtitles covers all scenarios.
+
 How it works:
 1. Collects cues in OP (0-95s) and ED (last 120s) regions from all episodes
-2. Clusters by time position (±2s tolerance) across episodes
-3. Classifies each cluster:
+2. If `--reference <dir>`: extracts OP/ED text from reference subtitles (ASS/SRT)
+3. Clusters by time position (±2s tolerance) across episodes
+4. Classifies each cluster:
    - **Instrumental**: ≥80% noise text → auto-clean (replace with [音楽])
-   - **Vocal**: meaningful JP with variants → AI review candidates
+   - **Vocal**: meaningful text with variants → AI review candidates
    - **Dialogue**: unique text per episode → skip (false-positive prevention)
-4. For vocal OP/ED: generates `oped_ai_review.json` → AI fills canonical → apply
+5. For vocal OP/ED: generates `oped_ai_review.json` → AI fills/validates canonical → apply
+6. Reference text auto-fills canonical (AI validates, doesn't translate)
 
 ### Glossary Maintenance Cycle
 
