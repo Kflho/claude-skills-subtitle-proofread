@@ -475,9 +475,13 @@ class Fixer:
 
                 # ② Readable Japanese → auto-keep (unless hallucination-suspect)
                 if looks_like_plausible_japanese(eval_text, self.target_lang):
-                    # Check for hallucination: much longer than original → route to AI
                     original = f.get('original', '')
-                    if f.get('replacement') and is_length_anomaly(original, eval_text):
+                    # Only check length anomaly if the ORIGINAL had meaningful
+                    # Japanese content.  Pure noise (Latin, single kana) has
+                    # nothing to preserve — Whisper output is always an improvement.
+                    if (f.get('replacement')
+                            and meaningful_jp_count(original) >= 2
+                            and is_length_anomaly(original, eval_text)):
                         ai_fragments.append(f)
                     else:
                         auto_keep.append(f)
