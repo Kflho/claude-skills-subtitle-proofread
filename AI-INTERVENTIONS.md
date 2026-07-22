@@ -226,6 +226,7 @@ candidates into:
 6. Re-run: `python run_all.py --resume`
 7. **检查输出**：如果仍有 `AI REVIEW NEEDED: N`（N > 0）→ 回到 Step 1
 8. 循环直到 `Needs AI: 0` 或 `auto_classify handled all`
+9. **收敛后 → 用户确认**：向用户展示最终词表（`reports/proper-nouns.md`），列出将被应用的专名条目。询问用户是否采用当前词表。用户确认后再进入交付步骤
 
 **为什么必须加 COMMON_KANJI**：
 `--resume` 重跑 Phase 3 时 noun_checker 重新扫描全部 SRT。
@@ -242,6 +243,7 @@ Round 3: AI REVIEW NEEDED: 3
   → 判断 3 个都是动词词干 → 加入 COMMON_KANJI → --resume
 Round 4: [AI review] 6607 candidates → auto_classify handled all. Nothing needs AI review.
   → ✅ 收敛完成
+  → 📋 向用户展示最终 proper-nouns.md，询问是否采用。用户确认 → 继续交付
 ```
 
 **If auto_classify handled everything (Needs AI: 0) → skip this step.**

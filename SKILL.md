@@ -131,6 +131,7 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 3. 专名 → 写 `ai_review_fixes.json`；普通词 → 加入 `japanese_utils.py` COMMON_KANJI/KATAKANA
 4. 运行：`python run_all.py --resume`
 5. **迭代**直到 `Needs AI: 0`（12→6→3→0 是正常收敛）
+6. **收敛后**：向用户展示最终专有名词表（`reports/proper-nouns.md`），询问是否采用当前词表。用户确认后再进入 Phase 3 交付步骤
 
 > 详细规则 → [AI-INTERVENTIONS.md § Phase 3](AI-INTERVENTIONS.md)
 
