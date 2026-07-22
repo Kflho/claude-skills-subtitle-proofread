@@ -149,6 +149,80 @@ def _is_music_marker(text: str) -> bool:
     return bool(re.match(r'^\[[^\]]+\]$', t))
 
 
+# ═══════════════════════════════════════════════════════════════
+# Language detection
+# ═══════════════════════════════════════════════════════════════
+
+def _detect_script(text: str) -> str:
+    """Detect the dominant script of a text.
+
+    Returns: 'cjk' (Chinese/Japanese kanji), 'kana' (hiragana/katakana),
+             'cyrillic', 'latin', or 'unknown'.
+    """
+    t = text.strip()
+    if not t:
+        return 'unknown'
+    cjk = len(re.findall(r'[一-鿿]', t))
+    kana = len(re.findall(r'[ぁ-ヿ]', t))
+    cyrillic = len(re.findall(r'[Ѐ-ӿ]', t))
+    latin = len(re.findall(r'[a-zA-Z]', t))
+
+    # Prioritize: CJK > Kana > Cyrillic > Latin
+    if cjk > max(kana, cyrillic, latin):
+        return 'cjk'
+    if kana > max(cjk, cyrillic, latin):
+        return 'kana'
+    if cyrillic > max(cjk, kana, latin):
+        return 'cyrillic'
+    if latin > 0:
+        return 'latin'
+    return 'unknown'
+
+
+def _script_to_lang(script: str) -> str:
+    """Map script to language code for display purposes."""
+    return {'cjk': 'zh/ja', 'kana': 'ja', 'cyrillic': 'ru',
+            'latin': 'en/romaji', 'unknown': '??'}.get(script, script)
+
+
+def _detect_corpus_lang(cues: list, sample_size: int = 50) -> str:
+    """Detect the dominant language of a set of cues.
+
+    Samples non-noise cues to determine the primary script.
+    Returns language code: 'zh', 'ja', 'ru', 'en', or '??'.
+    """
+    scripts = Counter()
+    for cue in cues[:sample_size * 2]:
+        text = cue.get('text', '') if isinstance(cue, dict) else str(cue)
+        if _is_noise(text) or _is_music_marker(text):
+            continue
+        script = _detect_script(text)
+        scripts[script] += 1
+        if sum(scripts.values()) >= sample_size:
+            break
+
+    if not scripts:
+        return '??'
+    dominant = scripts.most_common(1)[0][0]
+    # cjk without kana → likely Chinese; cjk with kana → Japanese
+    if dominant == 'cjk':
+        return 'zh'
+    if dominant == 'kana':
+        return 'ja'
+    return _script_to_lang(dominant).split('/')[0]
+
+
+def _scripts_match(ref_script: str, target_lang: str) -> bool:
+    """Check if reference script matches the target language."""
+    if target_lang == 'zh':
+        return ref_script == 'cjk'
+    if target_lang == 'ja':
+        return ref_script in ('cjk', 'kana')
+    if target_lang == 'ru':
+        return ref_script == 'cyrillic'
+    return False
+
+
 @dataclass
 class TimeCluster:
     """A group of cues at the same time position across episodes."""
@@ -563,9 +637,14 @@ class OpedFixer:
                     ref_text = text
                     break
 
-            # Auto-fill canonical from reference if available
+            # Detect reference language and check if it matches target
+            ref_script = _detect_script(ref_text) if ref_text else ''
+            ref_lang = _script_to_lang(ref_script) if ref_script else ''
+            needs_translation = bool(ref_text) and not _scripts_match(ref_script, self.lang)
+
+            # Auto-fill canonical from reference ONLY if same language
             canonical = ''
-            if ref_text and not canonical:
+            if ref_text and not needs_translation:
                 canonical = ref_text
                 auto_canonical_count += 1
 
@@ -580,33 +659,56 @@ class OpedFixer:
                     suggested[1] / sum(all_var.values())
                     if sum(all_var.values()) > 0 else 0
                 ),
-                'reference_text': ref_text,  # from --reference subtitles (empty if none)
-                'canonical': canonical,  # auto-filled from reference; AI can override
+                'reference_text': ref_text,
+                'reference_lang': ref_lang,
+                'needs_translation': needs_translation,
+                'canonical': canonical,
                 'sample_times': [
                     {'ep': e['ep'], 'start': e['start'], 'text': e['text']}
                     for e in cluster.entries[:5]
                 ],
             })
 
+        # Detect actual corpus language from variants
+        all_cues_for_lang = []
+        for cluster in self.vocal_clusters:
+            for entry in cluster.entries:
+                all_cues_for_lang.append(entry)
+        detected_lang = _detect_corpus_lang(all_cues_for_lang) if all_cues_for_lang else self.lang
+
+        translation_needed_count = sum(1 for c in candidates if c.get('needs_translation'))
+
         desc = (
             'OP/ED AI Review Candidates — vocal OP/ED lyric variants across episodes.\n'
             'For each candidate group:\n'
-            '  - Fill "canonical" with the correct lyrics.\n'
+            '  - Fill "canonical" with the correct lyrics IN THE TARGET LANGUAGE.\n'
             '  - Set "canonical": "__INSTRUMENTAL__" if this is actually instrumental.\n'
             '  - Leave "canonical": "" to skip (no fix applied).\n'
             '  - "suggested_canonical" is the majority-vote text; override if wrong.'
         )
         if has_reference:
-            desc += (
-                '\n  - "reference_text" is from --reference subtitles (auto-filled as canonical).\n'
-                '  - AI should validate reference_text: correct → leave canonical as-is;\n'
-                '    wrong → override canonical with the correct form.'
-            )
+            if translation_needed_count > 0:
+                desc += (
+                    f'\n  - ⚠️ {translation_needed_count} candidates need TRANSLATION:\n'
+                    f'    reference_lang ({ref_lang}) ≠ target_lang ({self.lang}/{detected_lang}).\n'
+                    '  - AI must TRANSLATE reference_text to the target language,\n'
+                    '    then fill canonical with the translation.\n'
+                    '  - Use Baidu Translate or AI translation for reference_text.'
+                )
+            else:
+                desc += (
+                    '\n  - "reference_text" is from --reference subtitles '
+                    '(same language, auto-filled as canonical).\n'
+                    '  - AI should validate: correct → leave as-is; wrong → override.'
+                )
 
         return {
             'description': desc,
             'has_reference': has_reference,
+            'target_lang': self.lang,
+            'detected_lang': detected_lang,
             'auto_canonical_from_reference': auto_canonical_count,
+            'needs_translation': translation_needed_count,
             'total_groups': len(candidates),
             'op_groups': sum(1 for c in candidates if c['region'] == 'OP'),
             'ed_groups': sum(1 for c in candidates if c['region'] == 'ED'),
