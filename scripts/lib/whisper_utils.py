@@ -39,11 +39,14 @@ def setup_windows_utf8():
         return
     _utf8_setup_done = True
     if sys.platform == 'win32':
-        # Only wrap if not already a TextIOWrapper (avoid double-wrapping)
-        if not isinstance(sys.stdout, io.TextIOWrapper):
-            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-        if not isinstance(sys.stderr, io.TextIOWrapper):
-            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+        # Use reconfigure() (Python 3.7+) to change encoding in-place.
+        # Checking isinstance(TextIOWrapper) doesn't work — on Windows
+        # sys.stdout is already a TextIOWrapper but with GBK encoding.
+        for stream in (sys.stdout, sys.stderr):
+            try:
+                stream.reconfigure(encoding='utf-8', errors='replace')
+            except Exception:
+                pass
 
 
 # ═══════════════════════════════════════════════════════════════

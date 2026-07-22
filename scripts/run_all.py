@@ -31,7 +31,7 @@ if _ROOT_DIR not in sys.path:
 from utils.update_report import upsert_entries as _upsert_report
 from utils.update_report import replace_layer as _replace_layer
 
-from lib.project_utils import load_json, detect_mode, detect_format
+from lib.project_utils import load_json, detect_mode, detect_format, detect_project_lang
 
 
 # ── Helpers ──
@@ -1010,7 +1010,8 @@ Examples:
   python run_all.py --lang ja --skip-whisper           # No audio processing
         """
     )
-    parser.add_argument('--lang', default='ja', choices=['ja', 'zh'])
+    parser.add_argument('--lang', default='auto',
+                        help='Target language: auto (detect), ja, zh. Default: auto-detect from SRT files.')
     parser.add_argument('--target-dir', default=None, help='Project root (default: CWD)')
     parser.add_argument('--episodes', '-e', default=None,
                         help='Episodes to process: EP001-EP010, EP001,EP005, 1-10, 1,5')
@@ -1044,6 +1045,15 @@ Examples:
     mode = detect_mode(project_dir)
     fmt = detect_format(project_dir)
 
+    # ── Resolve language: auto-detect or use explicit --lang ──
+    if args.lang == 'auto':
+        resolved_lang = detect_project_lang(project_dir)
+        print(f'[lang] Auto-detected: {resolved_lang} '
+              f'(use --lang ja/zh to override)', file=sys.stderr)
+    else:
+        resolved_lang = args.lang
+        print(f'[lang] Manual override: {resolved_lang}', file=sys.stderr)
+
     # Parse episode selection
     episodes = _parse_episodes(args.episodes) if args.episodes else None
 
@@ -1058,7 +1068,7 @@ Examples:
 
     print(f'{"="*55}', file=sys.stderr)
     print(f'  Subtitle Proofread — {mode.upper()} mode, {(fmt["primary"] or "NONE").upper()} format, '
-          f'--lang {args.lang}', file=sys.stderr)
+          f'--lang {resolved_lang}', file=sys.stderr)
     print(f'  Project: {project_dir}', file=sys.stderr)
     if episodes:
         ep_range = f'{episodes[0]}~{episodes[-1]}' if len(episodes) > 1 else episodes[0]
@@ -1071,7 +1081,7 @@ Examples:
 
     if args.dry_run:
         print('\n[DRY RUN] — scan only, no files will be modified\n', file=sys.stderr)
-        step_scan(project_dir, args.lang, force_rescan=args.force_rescan)
+        step_scan(project_dir, resolved_lang, force_rescan=args.force_rescan)
         _print_progress(project_dir, 'Status: dry-run scan')
         return
 
@@ -1081,11 +1091,11 @@ Examples:
         print('  Apply AI review fixes (fast)', file=sys.stderr)
         print(f'{"─"*40}', file=sys.stderr)
         # Apply JSON-based AI fixes (proper nouns, oped)
-        step_apply_all(project_dir, args.lang)
+        step_apply_all(project_dir, resolved_lang)
         # Apply per-episode AI review checklists (L2.5 fragments)
-        _apply_ai_checklists(project_dir, args.lang)
+        _apply_ai_checklists(project_dir, resolved_lang)
         # Regenerate human checklists with escalated L2.5 items
-        step_deliver(project_dir, args.lang, is_full_run=False, video_dir=video_dir)
+        step_deliver(project_dir, resolved_lang, is_full_run=False, video_dir=video_dir)
         step_clean(project_dir)
         return
 
@@ -1094,7 +1104,7 @@ Examples:
         print(f'\n{"─"*40}', file=sys.stderr)
         print('  Apply human review checklist (fast)', file=sys.stderr)
         print(f'{"─"*40}', file=sys.stderr)
-        step_apply_checklist(project_dir, args.lang, video_dir=video_dir)
+        step_apply_checklist(project_dir, resolved_lang, video_dir=video_dir)
         return
 
     # ═══════════════════════════════════════════════════════════════
@@ -1104,7 +1114,7 @@ Examples:
         print(f'\n{"─"*40}', file=sys.stderr)
         print('  Phase 1/3: Character scan', file=sys.stderr)
         print(f'{"─"*40}', file=sys.stderr)
-        step_scan(project_dir, args.lang, force_rescan=args.force_rescan)
+        step_scan(project_dir, resolved_lang, force_rescan=args.force_rescan)
 
     _print_progress(project_dir, 'Status: after scan')
 
@@ -1117,13 +1127,13 @@ Examples:
         print(f'\n{"─"*40}', file=sys.stderr)
         print('  Phase 2/3: Error fix + AI fragment completion', file=sys.stderr)
         print(f'{"─"*40}', file=sys.stderr)
-        processed = step_fix_episodes(project_dir, args.lang, mode, video_dir=video_dir,
+        processed = step_fix_episodes(project_dir, resolved_lang, mode, video_dir=video_dir,
                                       skip_whisper=args.skip_whisper,
                                       episodes=episodes, limit=args.limit,
                                       start_from=args.start_from,
                                       skip_if_clean=not args.no_skip_if_clean)
 
-        step_ai_review(project_dir, args.lang)
+        step_ai_review(project_dir, resolved_lang)
     else:
         print(f'\n{"─"*40}', file=sys.stderr)
         print('  Phase 2/3: SKIPPED (--resume: AI review done, re-running Phase 3 only)',
@@ -1141,16 +1151,16 @@ Examples:
     print(f'\n{"─"*40}', file=sys.stderr)
     print('  Phase 3/3: Noun unification + Deliver', file=sys.stderr)
     print(f'{"─"*40}', file=sys.stderr)
-    noun_results = step_nouns(project_dir, args.lang)
-    print_ai_review_notice(noun_results, project_dir, args.lang)
+    noun_results = step_nouns(project_dir, resolved_lang)
+    print_ai_review_notice(noun_results, project_dir, resolved_lang)
 
-    step_apply_all(project_dir, args.lang)
+    step_apply_all(project_dir, resolved_lang)
 
     # ASS repair: only for ASS-format projects
     if fmt['primary'] == 'ass':
         step_ass_repair(project_dir)
 
-    step_deliver(project_dir, args.lang, processed_episodes=processed,
+    step_deliver(project_dir, resolved_lang, processed_episodes=processed,
                  is_full_run=is_full_run, video_dir=video_dir)
 
     step_clean(project_dir)

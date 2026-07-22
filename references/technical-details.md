@@ -1,7 +1,7 @@
 # 字幕校对 Skill — 技术实现文档
 
 > 本文档描述各脚本的实现细节、算法原理和参数含义。
-> 用户向概览见 [SKILL.md](./SKILL.md)。
+> 用户向概览见 [SKILL.md](../SKILL.md)。开发者速览见 [dev/architecture.md](../dev/architecture.md)。
 
 ---
 

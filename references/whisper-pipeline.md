@@ -156,7 +156,7 @@ python whisper_deep_fix.py \
 ```
 
 > **`--separate-vocals`**：转录前先用 demucs 分离人声，去除 BGM/音效。
-> 实测可显著减少 Whisper 幻觉（BGM 是幻觉主要触发源）。需 Python 3.12 + PyTorch CUDA + demucs（见 `setup-guide.md` 第四步）。
+> 实测可显著减少 Whisper 幻觉（BGM 是幻觉主要触发源）。需 Python 3.12 + PyTorch CUDA + demucs（见 `user/run-reference.md` 人声分离部分）。
 > 每 30 秒音频约需 2 秒分离（RTX 3080 Ti），不含分离的纯转录耗时不变。
 
 ### 步骤 3：审查 Whisper 输出

@@ -15,7 +15,7 @@ Organized by the 3-Phase pipeline.
 SyntaxError: closing parenthesis ')' does not match opening parenthesis '{'
 ```
 
-**立即修**。通常是 frozenset/list/dict 括号不匹配。修完 `git commit`，重跑。
+**立即修**。通常是 frozenset/list/dict 括号不匹配。修完重跑。
 
 ### UnicodeEncodeError（GBK 编码）
 
@@ -52,6 +52,7 @@ UnicodeEncodeError: 'gbk' codec can't encode character '✅'
     "whisper_context": [
       {"start_s": 605.1, "text": "Whisper transcript ±30s window"}
     ],
+    "reference_text": "これはIPで起こった…",
     "correction": ""
   }]
 }
@@ -61,6 +62,7 @@ UnicodeEncodeError: 'gbk' codec can't encode character '✅'
 |------|------|------|
 | `context_before/after` (6 cues) | SRT 相邻 cue | 对话流上下文，即使邻居也有乱码仍提供部分信息 |
 | `whisper_context` (±30s) | Whisper Tier 2 全转录 | **即使 `whisper_attempt` 为 null**，周围 Whisper 段仍提供声学参考 |
+| `reference_text` | 参考字幕/ (原文，不翻译) | **AI 直接读原文**，结合上下文翻译+纠错一步到位。无需机器翻译 |
 | `episode_title` | 视频文件名 | 故事场景线索（e.g. "黒い宇宙線" → 宇宙/科学相关台词） |
 
 **Flow**:
@@ -95,6 +97,7 @@ AI **可以修改任意一句**（或两者）以使整体通顺：
 
 **Judgment rules**:
 - Trust context, don't trust Whisper (Whisper often drops/corrupts words)
+- **有 `reference_text`** → 参考字幕原文（不翻译），AI 读原文 + 上下文 → 直接写日文 correction。参考字幕可能有错，需结合上下文判断
 - Original is correct but contains Latin letters (e.g. "OK") → keep as-is
 - **原文纯拉丁/单音节（mj < 2）且 Whisper 输出可读** → 直接填 Whisper 输出（噪声→改善）
 - **邻居是明显碎片**（如 `の手紙なんだ` 是前句的尾巴）→ `__DELETE__`
@@ -104,7 +107,7 @@ AI **可以修改任意一句**（或两者）以使整体通顺：
 
 **Apply**:
 ```bash
-python run_all.py --lang ja --apply-ai-review --video-dir "<VIDEO_DIR>"
+python run_all.py --apply-ai-review --video-dir "<VIDEO_DIR>"
 ```
 > ⚠️ 必须带 `--video-dir`，否则无法为人工审查项提取视频片段。
 
@@ -192,7 +195,7 @@ candidates into:
    [{"action":"replace_global","original":"候補","replacement":"規範形"}, ...]
    ```
    如果全部 No → 写入 `[]`
-6. Re-run: `python run_all.py --lang ja --resume`
+6. Re-run: `python run_all.py --resume`
 7. **检查输出**：如果仍有 `AI REVIEW NEEDED: N`（N > 0）→ 回到 Step 1
 8. 循环直到 `Needs AI: 0` 或 `auto_classify handled all`
 
@@ -317,7 +320,7 @@ with open('temp/scans/oped_ai_review.json', 'r+', encoding='utf-8') as f:
 
 **Apply**:
 ```bash
-python oped_fixer.py AI审查后/ --lang ja -o temp/scans/oped_fixes.json \
+python oped_fixer.py AI审查后/ -o temp/scans/oped_fixes.json \
     --apply-ai-review temp/scans/oped_ai_review.json
 ```
 Then re-run `--apply-ai-review` in the full pipeline to apply all fixes.
@@ -328,7 +331,7 @@ Each group has only variant texts (short lyric lines), not full SRT content.
 **Known limitations**:
 - SRT only（ASS 需先转换，见下方）
 - `--min-episodes` 默认 3，测试时可用 `--min-episodes 2`
-- 中文项目可用 `--lang zh`（`_is_valid_japanese` 对中文同样有效，因 CJK 同区）
+- 中文项目可用 `--lang zh` 手动覆盖（自动检测默认正确）
 
 ### ASS → SRT 快速转换（OP/ED 审查用）
 
@@ -353,7 +356,7 @@ for fname in os.listdir('中文字幕范例/'):
     print(f'{fname} -> temp/oped_srt/EP{ep}.srt')
 "
 # 然后跑 oped_fixer
-python fix/oped_fixer.py temp/oped_srt/ --lang ja -o temp/scans/oped_fixes.json \
+python fix/oped_fixer.py temp/oped_srt/ -o temp/scans/oped_fixes.json \
     --ai-review temp/scans/oped_ai_review.json --min-episodes 2
 ```
 
@@ -374,7 +377,7 @@ python fix/oped_fixer.py temp/oped_srt/ --lang ja -o temp/scans/oped_fixes.json 
    ```bash
    cd "<project>" && PYTHONPATH="<scripts>" python \
      "<scripts>/nouns/build_glossary.py" \
-     --findings temp/scans/findings.json -o reports/proper-nouns.md --lang ja \
+     --findings temp/scans/findings.json -o reports/proper-nouns.md \
      --ai-nouns temp/scans/ai_nouns.json
    ```
    AI-sourced nouns bypass min_freq=3 threshold, marked `[AI]`.

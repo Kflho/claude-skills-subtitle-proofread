@@ -407,14 +407,16 @@ def main():
 def _run_pipeline(project_dir, episode, mode, args):
     """Execute the proofread pipeline for one episode.
 
-    Focused on Fixer-related work only: audio/translate → compare → apply → diff.
-    Scan, review, and clean are handled by run_all.py's batch layers.
+    Both audio and text modes now use the same flow:
+    Whisper → triage → AI fragments (with reference text if available).
+
+    Reference subtitles (text mode) are injected as context into
+    ai_fragments_{EP}.json — no separate translate/compare step.
+    Claude reads the reference in its original language and produces
+    the target-language correction directly.
     """
     if args.step is None:
-        if mode == 'text':
-            steps = ['translate', 'compare', 'apply', 'diff']
-        else:  # audio
-            steps = ['audio', 'apply', 'diff']
+        steps = ['audio', 'apply', 'diff']
     else:
         steps = [args.step]
 
@@ -435,20 +437,6 @@ def _run_pipeline(project_dir, episode, mode, args):
         if step == 'audio':
             fixes = step_audio(project_dir, episode, scan_result,
                                dry_run=args.dry_run, video_dir=args.video_dir)
-
-        elif step == 'translate':
-            if mode == 'audio':
-                print('[translate] Skipped — audio mode has no reference subtitles.')
-                continue
-            translated_path = step_translate(project_dir, episode, scan_result,
-                                             dry_run=args.dry_run)
-
-        elif step == 'compare':
-            if mode == 'audio':
-                print('[compare] Skipped — audio mode has no reference subtitles.')
-                continue
-            diffs = step_compare(project_dir, episode, scan_result, translated_path,
-                                dry_run=args.dry_run)
 
         elif step == 'apply':
             if args.dry_run:

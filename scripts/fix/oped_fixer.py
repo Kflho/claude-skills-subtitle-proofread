@@ -880,8 +880,8 @@ Examples:
         """
     )
     parser.add_argument('target_dir', help='Directory containing SRT files')
-    parser.add_argument('--lang', default='ja', choices=['ja', 'zh'],
-                        help='Target language (default: ja)')
+    parser.add_argument('--lang', default='auto',
+                        help='Target language: auto (detect), ja, zh. Default: auto-detect.')
     parser.add_argument('--output', '-o', help='Output JSON path for fixes')
     parser.add_argument('--ai-review',
                         help='Path to write AI review candidates (vocal OP/ED)')
@@ -906,9 +906,19 @@ Examples:
         print(f'ERROR: {args.target_dir} not found or not a directory.', file=sys.stderr)
         sys.exit(1)
 
+    # ── Resolve language: auto-detect or use explicit --lang ──
+    if args.lang == 'auto':
+        from lib.project_utils import detect_project_lang
+        # Detect from the target_dir's parent (project root)
+        project_dir = os.path.dirname(os.path.abspath(args.target_dir))
+        lang = detect_project_lang(project_dir)
+        print(f'[oped] Auto-detected language: {lang}', file=sys.stderr)
+    else:
+        lang = args.lang
+
     fixer = OpedFixer(
         args.target_dir,
-        lang=args.lang,
+        lang=lang,
         op_boundary=args.op_boundary,
         ed_boundary=args.ed_boundary,
         min_episodes=args.min_episodes,

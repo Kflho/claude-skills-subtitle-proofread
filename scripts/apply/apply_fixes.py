@@ -533,16 +533,17 @@ def main():
                         lines = [l for l in lines if l != '']
                         write_ass_file(fpath, lines)
                 total_applied += applied
-                print(f"  {fname}: {applied} 处修复")
+                print(f"  {fname}: {applied} applied")
 
     # ── 报告日志 ──
     if args.log_to_report and args.step and report_entries:
         from utils.update_report import upsert_entries as _upsert
         _upsert(args.log_to_report, step=args.step, entries=report_entries)
-        print(f'\n📋 已记录 {len(report_entries)} 条到问题解决报告第{args.step}层')
+        print(f'\n[apply] {len(report_entries)} entries logged to report layer {args.step}')
 
-    print(f"\n{'[DRY-RUN] ' if args.dry_run else ''}共应用 {total_applied} 项修复，"
-          f"已正确 {total_already} 项，跳过 {total_skipped} 项")
+    print(f"\n{'[DRY-RUN] ' if args.dry_run else ''}"
+          f"{total_applied} applied, {total_already} already correct, "
+          f"{total_skipped} skipped")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -573,8 +574,8 @@ def _run_trad_to_simp(target_dir, dry_run=False):
             total += changed
             if not dry_run:
                 write_ass_file(fpath, lines)
-            print(f'  {"[DRY-RUN]" if dry_run else ""} {fname}: {changed} 处', file=sys.stderr)
-    print(f'[trad→simp] {"预览" if dry_run else "转换"}完成: {total} 处', file=sys.stderr)
+            print(f'  {"[DRY-RUN]" if dry_run else ""} {fname}: {changed} changed', file=sys.stderr)
+    print(f'[trad→simp] {"preview" if dry_run else "done"}: {total} changed', file=sys.stderr)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -638,8 +639,8 @@ def _run_degloss(target_dir, dry_run=False):
             if not dry_run:
                 with open(fpath, 'w', encoding='utf-8') as f:
                     f.write(content)
-            print(f'  {"[DRY-RUN]" if dry_run else ""} {fname}: {changed} 处', file=sys.stderr)
-    print(f'[degloss] {"预览" if dry_run else "修正"}完成: {total} 处', file=sys.stderr)
+            print(f'  {"[DRY-RUN]" if dry_run else ""} {fname}: {changed} changed', file=sys.stderr)
+    print(f'[degloss] {"preview" if dry_run else "done"}: {total} changed', file=sys.stderr)
 
 
 if __name__ == '__main__':

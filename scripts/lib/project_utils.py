@@ -19,6 +19,170 @@ def load_json(path):
         return json.load(f)
 
 
+# ═══════════════════════════════════════════════════════════════
+# Language auto-detection — replaces --lang ja/zh hard requirement
+# ═══════════════════════════════════════════════════════════════
+
+# Regex patterns for script detection (shared across all language detectors)
+_CJK_RE = re.compile(r'[一-鿿]')
+_KANA_RE = re.compile(r'[ぁ-ヿ]')
+_CYRILLIC_RE = re.compile(r'[Ѐ-ӿ]')
+_LATIN_RE = re.compile(r'[a-zA-Z]')
+_MUSIC_MARKER_RE = re.compile(r'^\[[^\]]+\]$')
+
+
+def _is_noise_for_lang_detect(text: str) -> bool:
+    """Quick noise check for language detection sampling.
+
+    Filters out music markers, very short text, and pure numbers/symbols
+    before counting scripts. Less strict than whisper_utils._is_noise() —
+    we just need clean samples for script statistics.
+    """
+    t = text.strip()
+    if not t or len(t) < 2:
+        return True
+    if _MUSIC_MARKER_RE.match(t):
+        return True
+    # Pure numbers/symbols (no letters in any script)
+    if not (_CJK_RE.search(t) or _KANA_RE.search(t) or
+            _CYRILLIC_RE.search(t) or _LATIN_RE.search(t)):
+        return True
+    return False
+
+
+def _detect_cue_script(text: str) -> str:
+    """Detect the dominant script of a single cue's text.
+
+    Returns: 'kana' (Japanese — has hiragana/katakana),
+             'cjk'  (Chinese — CJK without kana),
+             'cyrillic', 'latin', or 'unknown'.
+    """
+    t = text.strip()
+    cjk = len(_CJK_RE.findall(t))
+    kana = len(_KANA_RE.findall(t))
+    cyrillic = len(_CYRILLIC_RE.findall(t))
+    latin = len(_LATIN_RE.findall(t))
+
+    # Prioritize: Kana > CJK > Cyrillic > Latin
+    # Kana first because Japanese always has kana; CJK-only = Chinese
+    if kana > max(cjk, cyrillic, latin):
+        return 'kana'
+    if cjk > max(kana, cyrillic, latin):
+        return 'cjk'
+    if cyrillic > max(cjk, kana, latin):
+        return 'cyrillic'
+    if latin > 0:
+        return 'latin'
+    return 'unknown'
+
+
+def detect_project_lang(project_dir: str, sample_size: int = 100,
+                        cache: bool = True) -> str:
+    """Auto-detect the dominant language of subtitle files in a project.
+
+    Samples non-noise cues from AI审查后/ SRT files and classifies each
+    by its dominant script.  Language is determined by aggregate script
+    distribution across the entire sample — single-script cues can't
+    distinguish Chinese from Japanese, but the corpus always can.
+
+    Detection rules (after sampling ≥sample_size non-noise cues):
+      - kana-dominant corpus  → 'ja' (Japanese — always has kana mixed in)
+      - cjk-dominant, no kana → 'zh' (Chinese — kanji without kana)
+      - cyrillic-dominant     → 'ru'
+      - latin-dominant        → 'en'
+
+    Result is cached to temp/scans/project_lang.json for sub-scripts.
+    Pass cache=False to force re-detection.
+
+    Args:
+        project_dir: project root (must contain AI审查后/ with SRT files)
+        sample_size: number of non-noise cues to sample (default 100)
+        cache: whether to write/read the cached result
+    """
+    cache_path = os.path.join(project_dir, 'temp', 'scans', 'project_lang.json')
+
+    # ── Read cache ──
+    if cache and os.path.exists(cache_path):
+        try:
+            cached = load_json(cache_path)
+            if cached and cached.get('lang'):
+                return cached['lang']
+        except Exception:
+            pass
+
+    # ── Sample SRT files ──
+    from lib.whisper_utils import parse_srt as _parse_srt
+
+    target_dir = os.path.join(project_dir, 'AI审查后')
+    if not os.path.isdir(target_dir):
+        return 'ja'  # Default: Japanese (most common for this tool)
+
+    srt_files = sorted([f for f in os.listdir(target_dir)
+                        if f.endswith('.srt')])
+    if not srt_files:
+        return 'ja'
+
+    scripts = {'kana': 0, 'cjk': 0, 'cyrillic': 0, 'latin': 0, 'unknown': 0}
+    sampled = 0
+
+    for fname in srt_files:
+        if sampled >= sample_size:
+            break
+        try:
+            cues = list(_parse_srt(os.path.join(target_dir, fname),
+                                   mark_garbled=False))
+        except Exception:
+            continue
+        for cue in cues:
+            if sampled >= sample_size:
+                break
+            text = cue.get('text', '')
+            if _is_noise_for_lang_detect(text):
+                continue
+            script = _detect_cue_script(text)
+            scripts[script] += 1
+            sampled += 1
+
+    if sampled == 0:
+        return 'ja'
+
+    # ── Determine language ──
+    total = sum(scripts.values())
+    kana_ratio = scripts['kana'] / total if total > 0 else 0
+    cjk_ratio = scripts['cjk'] / total if total > 0 else 0
+
+    # Japanese: significant kana presence (≥15% of cues have kana-dominant text)
+    if kana_ratio >= 0.15:
+        lang = 'ja'
+    # Chinese: CJK-dominant but no kana
+    elif cjk_ratio >= 0.3:
+        lang = 'zh'
+    # Cyrillic
+    elif scripts['cyrillic'] / max(total, 1) >= 0.3:
+        lang = 'ru'
+    # Latin/English
+    elif scripts['latin'] / max(total, 1) >= 0.5:
+        lang = 'en'
+    else:
+        lang = 'ja'  # Default fallback
+
+    # ── Cache ──
+    if cache:
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        try:
+            with open(cache_path, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'lang': lang,
+                    'sample_size': sampled,
+                    'scripts': scripts,
+                    'kana_ratio': round(kana_ratio, 3),
+                }, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    return lang
+
+
 def detect_mode(project_dir):
     """Auto-detect workflow mode based on project resources.
 

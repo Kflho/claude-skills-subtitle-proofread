@@ -139,6 +139,8 @@ class Fixer:
         self._srt_name = None
         self._cues = None
         self._episode_title = None  # extracted from video filename
+        self._ref_srt_path = None   # reference subtitle for context injection (NO translation)
+        self._ref_cues = None       # parsed reference cues, lazy-loaded
 
         self._resolve_paths()
 
@@ -578,12 +580,14 @@ class Fixer:
     # ═══════════════════════════════════════════════════════════
 
     def run_auto(self) -> FixReport:
-        """Run cascading auto-fix: reference → whisper → human.
+        """Run cascading auto-fix: whisper → AI context completion.
 
-        Priority is hard-coded, not configurable:
-        1. If reference SRT exists in 参考字幕/ → fix_by_reference
-        2. For remaining garbled cues → fix_by_whisper
-        3. For still unfixable → review (generate checklist)
+        Priority:
+        1. If reference SRT exists in 参考字幕/ → inject as AI context
+           (original language, NO machine translation — Claude reads directly)
+        2. Whisper ASR → triage (auto-keep / AI fragments / auto-cut)
+        3. AI fragments include reference_text for Claude to translate+correct
+        4. For still unfixable → review (generate checklist)
 
         Returns combined FixReport.
         """
@@ -593,47 +597,22 @@ class Fixer:
 
         report = FixReport(source='auto')
 
-        # Priority 1: Reference comparison
+        # Priority 1: Find reference SRT for AI context injection
+        # Reference text is kept in its ORIGINAL language — no Baidu Translate.
+        # Claude reads the reference directly in ai_fragments_{EP}.json and
+        # produces the target-language correction with full context.
         ref_dir = os.path.join(self.project_dir, '参考字幕')
-        ref_srt = None
         if os.path.isdir(ref_dir):
             ep_num = self.episode[2:]
             for fname in os.listdir(ref_dir):
                 if fname.endswith('.srt') and ep_num in fname:
-                    ref_srt = os.path.join(ref_dir, fname)
+                    self._ref_srt_path = os.path.join(ref_dir, fname)
+                    print(f'[{self.episode}] Reference SRT found → '
+                          f'will inject as AI context (no translation)',
+                          file=sys.stderr)
                     break
 
-        if ref_srt:
-            # Translate reference first (external step — whole file)
-            translated_dir = os.path.join(self.project_dir, 'temp', 'translations')
-            os.makedirs(translated_dir, exist_ok=True)
-            translated_srt = os.path.join(
-                translated_dir, f'{self.episode}_translated.srt')
-
-            # Only translate if not already done
-            if not os.path.exists(translated_srt):
-                print(f'[{self.episode}] Translating reference SRT ...',
-                      file=sys.stderr)
-                translate_script = os.path.join(_SCRIPT_DIR, 'translate_srt.py')
-                try:
-                    env = os.environ.copy()
-                    if _SCRIPT_DIR not in env.get('PYTHONPATH', ''):
-                        env['PYTHONPATH'] = _SCRIPTS_DIR + (os.pathsep + env['PYTHONPATH'] if env.get('PYTHONPATH') else '')
-                    subprocess.run([
-                        sys.executable, translate_script,
-                        ref_srt, '--to', self.target_lang,
-                        '--output', translated_srt,
-                    ], capture_output=False, timeout=1800, check=False, env=env)
-                except Exception as e:
-                    print(f'[{self.episode}] Translation failed: {e}',
-                          file=sys.stderr)
-                    translated_srt = None
-
-            if translated_srt and os.path.exists(translated_srt):
-                ref_result = self.fix_by_reference(translated_srt)
-                report.merge(ref_result)
-
-        # Priority 2: Whisper for remaining garbled
+        # Priority 2: Whisper for garbled cues
         if not self.is_clean() and self._video_path:
             whisper_result = self.fix_by_whisper()
             report.merge(whisper_result)
@@ -889,6 +868,44 @@ class Fixer:
 
         return window_segs
 
+    def _load_ref_cues(self):
+        """Load parsed reference SRT cues (lazy, cached)."""
+        if self._ref_cues is not None:
+            return self._ref_cues
+        if not self._ref_srt_path or not os.path.exists(self._ref_srt_path):
+            self._ref_cues = []
+            return self._ref_cues
+        try:
+            self._ref_cues = parse_srt(self._ref_srt_path, mark_garbled=False)
+        except Exception:
+            self._ref_cues = []
+        return self._ref_cues
+
+    def _find_ref_text(self, start_s: float, end_s: float,
+                       max_chars: int = 200) -> str:
+        """Find reference subtitle text overlapping a time range.
+
+        Returns the text of the reference cue with the greatest time overlap,
+        or empty string if none found.  Reference text is kept in its
+        ORIGINAL language (no translation) — AI reads it as context and
+        produces the target-language correction directly.
+        """
+        ref_cues = self._load_ref_cues()
+        if not ref_cues:
+            return ''
+
+        best_overlap = 0.0
+        best_text = ''
+        for cue in ref_cues:
+            overlap = min(end_s, cue['end_s']) - max(start_s, cue['start_s'])
+            if overlap > best_overlap and overlap > 0:
+                best_overlap = overlap
+                best_text = cue.get('text', '').strip()
+
+        if best_text and len(best_text) > max_chars:
+            best_text = best_text[:max_chars] + '…'
+        return best_text
+
     def _write_ai_fragments_json(self, fragments: list) -> str | None:
         """Write AI fragments to temp JSON for AI review (replaces ai_review.md).
 
@@ -935,6 +952,12 @@ class Fixer:
             # ── Extract Whisper transcript window (Level 2: ±30s) ──
             whisper_ctx = self._extract_whisper_context(start_s, end_s)
 
+            # ── Reference subtitle context (Level 3: original language) ──
+            # If 参考字幕/ has a matching SRT, include the overlapping cue text
+            # in its ORIGINAL language.  AI reads this directly — no machine
+            # translation needed.  Claude translates + corrects in one step.
+            ref_text = self._find_ref_text(start_s, end_s)
+
             entry = {
                 'start': start_ts,
                 'end': end_ts,
@@ -943,6 +966,7 @@ class Fixer:
                 'context_before': context_before,
                 'context_after': context_after,
                 'whisper_context': whisper_ctx,
+                'reference_text': ref_text,
                 'correction': '',  # AI fills this
             }
             # Paired mode: hallucination-suspect fragments get neighbor cue edit ability
