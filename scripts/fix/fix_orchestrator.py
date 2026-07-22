@@ -1008,6 +1008,8 @@ class Fixer:
                 unfilled.append({
                     'ep': self.episode, 'time': timecode,
                     'original': frag.get('original', ''),
+                    'context_before': frag.get('context_before', []),
+                    'context_after': frag.get('context_after', []),
                 })
                 continue
 
@@ -1107,6 +1109,30 @@ class Fixer:
                     for ss, es in speech_segs
                 )
                 if has_speech:
+                    # ── Noise-context check: if surrounding cues are mostly
+                    #     non-verbal (extended vowels, grunts, single kana),
+                    #     auto-cut even though VAD detected sound — it's just
+                    #     shouting/commotion, not meaningful dialogue.
+                    ctx_before = entry.get('context_before', [])
+                    ctx_after = entry.get('context_after', [])
+                    ctx_cues = ctx_before + ctx_after
+                    if ctx_cues:
+                        noise_count = sum(
+                            1 for t in ctx_cues
+                            if meaningful_jp_count(t) < 2
+                        )
+                        if noise_count / len(ctx_cues) >= 0.6:
+                            cues = [c for c in cues
+                                    if c.get('start', '') != ts]
+                            auto_cut += 1
+                            try:
+                                update_entry_status(
+                                    self._report_path, step='2.5',
+                                    ep=self.episode, time=ts,
+                                    corrected='(噪音包围)', status='🗑️')
+                            except Exception:
+                                pass
+                            continue
                     escalated.append(entry)
                 else:
                     cues = [c for c in cues
