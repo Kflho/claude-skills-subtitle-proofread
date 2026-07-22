@@ -105,19 +105,26 @@ _VEHICLE_KEEP_RE = re.compile(
     r'号$'
 )
 
-# Known anime-specific concepts that should always be kept
-# (avoids false positives from heuristic patterns)
+# Astro Boy proper nouns that heuristic patterns would falsely reject.
+# Only whitelist entries that ARE genuine proper nouns AND match a
+# reject pattern (verb ending, JMdict, modifier, time/number, pronoun).
+# Common nouns like 万馬力/戦闘開始 belong in COMMON_KANJI, not here.
 _ANIME_WHITELIST = frozenset({
-    '科学省', '万馬力', '反重力', '機械人形', '電子相撲', '電子計算',
-    '電子図', '電子角', '宇宙艇', '惑星号', '馬力号', '宇宙放送',
-    '幽霊製造', '風船雲', '次元装置', '念動力', '予知感覚', '神隠',
-    '物質伝送', '伝送機', '誘爆装置', '電磁銃', '小型電子', '新兵器',
-    '人工太陽', '人工人間', '人口人間', '人間軍', '美術品泥',
-    '百万馬力', '最新型', '地球防衛', '戦闘開始', '戦闘準備',
-    '攻撃開始', '攻撃準備', '地球攻撃', '地球最後', '地球連邦',
-    '地球大統', '全人類', '世界最高', '省長官', '日本科学',
-    '秘密研究', '国際宇宙', '宇宙博覧', '海底王国', '大帝国',
-    '三銃士', '黄金如来', '火星銀行', '火星探検', '物質縮小',
+    # Organization / place names that may be in JMdict
+    '科学省',       # Ministry of Science — in JMdict, needs whitelist
+    '科学省長',     # Minister of Science — title, may match heuristics
+    '科学省庁',     # Science Ministry agency
+    # Technology / event names (verb-ending kanji would trigger false reject)
+    '幽霊製造',     # 造 matches verb-ending pattern
+    # Proper names that pass all checks but are kept for clarity
+    '電子相撲',     # Electronic Sumo (event)
+    '風船雲',       # Balloon Cloud (proper name)
+    '次元装置',     # Dimension Device (technology)
+    '電磁銃',       # Electromagnetic Gun (technology)
+    '地球連邦',     # Earth Federation (organization)
+    '三銃士',       # The Three Musketeers
+    '黄金如来',     # Golden Tathagata
+    '火星銀行',     # Mars Bank (organization)
 })
 
 # ── Katakana-specific reject patterns ──

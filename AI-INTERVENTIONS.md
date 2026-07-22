@@ -38,71 +38,46 @@ No manual operation needed. Run `--apply-checklist` after filling human checklis
 
 ## Phase 3: Proper Noun Unification
 
-### Glossary Auto-Clean
+### Glossary Auto-Clean (automatic)
 
-**Trigger**: Phase 1 scan rebuilt `reports/proper-nouns.md` — runs automatically
+Runs automatically at the end of Phase 1 scan — no manual trigger needed.
+`auto_clean_glossary.py --apply --yes` prunes common words from the glossary
+and rebuilds it with updated COMMON_KANJI/COMMON_KATAKANA filters.
 
-**Flow**:
-```bash
-# 1. Dry run
-cd "<project>" && PYTHONPATH="<scripts>" python \
-  "<scripts>/nouns/auto_clean_glossary.py" \
-  --glossary reports/proper-nouns.md --lang ja
-
-# 2. If >0 suggestions → apply + rebuild
-cd "<project>" && PYTHONPATH="<scripts>" python \
-  "<scripts>/nouns/auto_clean_glossary.py" \
-  --glossary reports/proper-nouns.md --lang ja --apply --yes
-
-cd "<project>" && PYTHONPATH="<scripts>" python \
-  "<scripts>/nouns/build_glossary.py" \
-  --findings temp/scans/findings.json -o reports/proper-nouns.md --lang ja
-```
-
-**auto_clean filters**:
+**What it catches**:
 - Katakana: onomatopoeia, laughter, daily words, fragments
 - Kanji: verb stems, time/number fragments, modifier fragments, pronoun fragments
-- Keeps: real names, places, honorifics, known anime terms
+- JMdict entries (common dictionary words that aren't proper nouns)
+- Keeps: real names, places, honorifics, known Astro Boy terms (see `_ANIME_WHITELIST`)
+
+**When it fails** (rare): if a non-proper-noun survives auto_clean, add it to
+`lib/japanese_utils.py` COMMON_KANJI or COMMON_KATAKANA directly, then re-run
+`build_glossary.py`. Do NOT read the full `proper-nouns.md` — just edit the
+Python frozenset.
 
 ---
 
-### Glossary AI Review
+### Noun Variant Detection + Auto-Classify (automatic)
 
-**Trigger**: After auto_clean — review borderline glossary entries
-
-**Flow**:
-1. Read `reports/proper-nouns.md` all three columns
-2. Scan low-frequency/suspicious entries:
-   - Katakana: real character name or onomatopoeia/daily word?
-   - Kanji: proper noun or verb fragment?
-3. Judge as common word → add to `lib/japanese_utils.py` COMMON_KATAKANA or COMMON_KANJI
-4. Rebuild glossary
-
-**Reference**: 鉄腕アトム (1963) character knowledge, Japanese name patterns (surname+given, honorifics), whether a word makes sense as a name vs. common noun.
-
-**Apply**: Edit `japanese_utils.py` → re-run `build_glossary.py`
-
----
-
-### Noun Variant Detection + Auto-Classify
-
-Runs automatically in Phase 3. `noun_checker.py` scans SRTs for proper noun spelling variants, then `auto_classify.py` uses Jamdict + rules to pre-classify candidates into:
+Runs automatically in Phase 3. `noun_checker.py` scans SRTs for proper noun
+spelling variants, then `auto_classify.py` uses Jamdict + rules to pre-classify
+candidates into:
 - **Accepted** → applied automatically (report section: 专名自动应用)
 - **Rejected** → logged only
 - **Needs AI** → triggers Proper Noun AI Judgment below
 
 ---
 
-### Proper Noun AI Judgment
+### Proper Noun AI Judgment (🤖 triggered)
 
 **Trigger**: Pipeline output `AI REVIEW NEEDED: N proper noun candidates`
 (auto_classify handled the rest; these are the borderline cases)
 
-**Data**: `temp/scans/ai_review_candidates.json`
+**Data**: `temp/scans/ai_review_candidates.json` (small file, typically <20 entries)
 
 **Flow**:
-1. Read candidate list
-2. Judge each: proper noun? yes/no
+1. Read `ai_review_candidates.json` — ONLY this small file, NOT the full glossary
+2. Judge each candidate: proper noun? yes/no
 3. Yes → give canonical form
 4. No → mark excluded
 5. Output to `temp/scans/ai_review_fixes.json`:
@@ -110,8 +85,13 @@ Runs automatically in Phase 3. `noun_checker.py` scans SRTs for proper noun spel
    [{"action":"replace_global","original":"候補","replacement":"規範形"}, ...]
    ```
 6. Re-run: `python run_all.py --lang ja --resume`
+   (--resume skips Phase 1+2, only re-runs Phase 3: nouns → apply → deliver)
 
 **If auto_classify handled everything (Needs AI: 0) → skip this step.**
+
+**Token efficiency**: `ai_review_candidates.json` is typically 5-20 entries.
+Never read `reports/proper-nouns.md` directly — it's 200+ lines and auto_clean
+already handles it automatically.
 
 ---
 

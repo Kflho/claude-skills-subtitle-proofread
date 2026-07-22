@@ -99,7 +99,38 @@ def step_scan(project_dir, lang, force_rescan=False):
     ]
     if os.path.exists(ai_nouns):
         cmd.extend(['--ai-nouns', ai_nouns])
-    return _run(cmd, project_dir, desc='scan')
+    ok = _run(cmd, project_dir, desc='scan')
+    if not ok:
+        return False
+
+    # ── Auto-clean glossary (remove common words that slipped through) ──
+    glossary_path = os.path.join(project_dir, 'reports', 'proper-nouns.md')
+    if os.path.exists(glossary_path):
+        auto_clean = os.path.join(_SCRIPT_DIR, 'nouns', 'auto_clean_glossary.py')
+        print('\n[scan] Auto-cleaning glossary...', file=sys.stderr)
+        clean_ok = _run([
+            'python', auto_clean,
+            '--glossary', glossary_path,
+            '--lang', lang,
+            '--apply', '--yes',
+        ], project_dir, desc='auto_clean')
+        if clean_ok:
+            # Rebuild glossary with updated COMMON_KANJI/KATAKANA filters
+            build_glossary = os.path.join(_SCRIPT_DIR, 'nouns', 'build_glossary.py')
+            cmd_rebuild = [
+                'python', build_glossary,
+                '--findings', findings,
+                '-o', glossary_path,
+                '--lang', lang,
+            ]
+            if os.path.exists(ai_nouns):
+                cmd_rebuild.extend(['--ai-nouns', ai_nouns])
+            _run(cmd_rebuild, project_dir, desc='glossary_rebuild')
+        else:
+            print('[scan] auto_clean failed — glossary may contain common words',
+                  file=sys.stderr)
+
+    return True
 
 
 def _parse_episodes(arg, findings=None):
@@ -1022,24 +1053,25 @@ Examples:
     # ═══════════════════════════════════════════════════════════════
     # Phase 2: Fix — Whisper → triage → AI completion
     #
-    #  Triaged into 3 paths at L2:
-    #    • readable Japanese         → write SRT ✅
-    #    • noise (meaningful_jp < 2) → auto-cut
-    #    • has JP + Latin corruption → L2.5 AI completion
-    #
-    #  Noun collection (Phase 3) could run in parallel here since
-    #  it only reads SRT.  Currently sequential for simplicity.
+    #  Skipped with --resume (AI review already done, only re-run Phase 3).
     # ═══════════════════════════════════════════════════════════════
-    print(f'\n{"─"*40}', file=sys.stderr)
-    print('  Phase 2/3: Error fix + AI fragment completion', file=sys.stderr)
-    print(f'{"─"*40}', file=sys.stderr)
-    processed = step_fix_episodes(project_dir, args.lang, mode, video_dir=video_dir,
-                                  skip_whisper=args.skip_whisper,
-                                  episodes=episodes, limit=args.limit,
-                                  start_from=args.start_from,
-                                  skip_if_clean=not args.no_skip_if_clean)
+    if not args.resume:
+        print(f'\n{"─"*40}', file=sys.stderr)
+        print('  Phase 2/3: Error fix + AI fragment completion', file=sys.stderr)
+        print(f'{"─"*40}', file=sys.stderr)
+        processed = step_fix_episodes(project_dir, args.lang, mode, video_dir=video_dir,
+                                      skip_whisper=args.skip_whisper,
+                                      episodes=episodes, limit=args.limit,
+                                      start_from=args.start_from,
+                                      skip_if_clean=not args.no_skip_if_clean)
 
-    step_ai_review(project_dir, args.lang)
+        step_ai_review(project_dir, args.lang)
+    else:
+        print(f'\n{"─"*40}', file=sys.stderr)
+        print('  Phase 2/3: SKIPPED (--resume: AI review done, re-running Phase 3 only)',
+              file=sys.stderr)
+        print(f'{"─"*40}', file=sys.stderr)
+        processed = None
 
     # ═══════════════════════════════════════════════════════════════
     # Phase 3: Unify + Deliver

@@ -28,7 +28,9 @@ cd "<project-root>" && python run_all.py --lang ja --video-dir "<VIDEO_DIR>" [--
 ```
 Phase 1: Scan
   → unified_scanner: garbled chars, repeat patterns, term frequency
-  → Output: findings.json + proper-nouns.md
+  → build_glossary: corpus frequency → proper-nouns.md
+  → auto_clean: prune common words, rebuild clean glossary (automatic)
+  → Output: findings.json + proper-nouns.md (cleaned)
   → Does NOT write to 问题解决报告（scan is read-only, no fixes applied）
 
 Phase 2: Triage
@@ -42,19 +44,20 @@ Phase 2: Triage
               └─ has speech    → checklist.md (👤 人工 → 报告: 人工审查)
 
 Phase 3: Unify
-  ├─ Glossary maintenance: auto_clean → AI review borderline entries → rebuild
   ├─ Noun variant detection: noun_checker scans SRTs against glossary
   ├─ Auto-classify: deterministic accept (→ 报告: 专名自动应用)
   │                 / reject / needs_ai (🤖 → 报告: AI 专名审查)
-  ├─ AI noun judgment: Claude decides borderline candidates → --resume
+  ├─ AI noun judgment: Claude reads ai_review_candidates.json (≤20 entries)
+  │                    → writes ai_review_fixes.json → --resume (Phase 3 only)
   └─ Deliver: apply all fixes + human checklist + video clips
 
 Report: reports/问题解决报告.md（自动生成，按 Phase 分组）
 ```
 
-> **mj** = meaningful Japanese character count (kana/kanji minus exclamation kana like あっ！えーっ！). mj < 2 = noise.
-> AI fragments write to `temp/scans/ai_fragments_{EP}.json` (machine-readable), NOT markdown.
-> Glossary maintenance cycle: build → auto_clean → AI review → rebuild. See [LAYERS.md](LAYERS.md).
+> **mj** = meaningful Japanese character count. mj < 2 = noise.
+> AI fragments → `temp/scans/ai_fragments_{EP}.json` (machine-readable), NOT markdown.
+> Glossary maintenance is automatic: build → auto_clean → rebuild runs in Phase 1.
+> **Token efficiency**: AI never reads `proper-nouns.md` (200+ lines). It only reads small JSON files (ai_fragments_{EP}.json, ai_review_candidates.json).
 
 ## Output → action
 
@@ -81,7 +84,7 @@ Report: reports/问题解决报告.md（自动生成，按 Phase 分组）
 | `-e EP005-EP010` | Specific episode range |
 | `--limit 5` | First N episodes only |
 | `--skip-whisper` | Skip audio processing |
-| `--resume` | Resume after AI noun review |
+| `--resume` | Resume after AI noun review (Phase 3 only — skips scan + audio) |
 | `--force-rescan` | Re-scan even if cache fresh |
 
 > `--apply-ai-review` and `--apply-checklist` are standalone fast paths — never combine with a full run.
