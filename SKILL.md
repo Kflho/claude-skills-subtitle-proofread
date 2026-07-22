@@ -11,6 +11,28 @@ description: >
 
 3-phase pipeline. Run once; handle each 🤖 intervention as it fires.
 
+## End-to-end run（AI 必须执行的完整序列）
+
+```
+Step 0: 读 CLAUDE.md → 获取路径、密钥、项目配置
+Step 1: python run_all.py --lang ja --video-dir "..." --limit N --force-rescan
+           │
+           ├─ 语法错误/编码错误 → 修完 git commit，重跑 Step 1
+           ├─ Pipeline complete + AI REVIEW NEEDED: N
+           │    → 跳到 Step 3（专名审查）
+           └─ Pipeline complete + all phases passed
+                → 跳到 Step 2（碎片补全，如果有 ai_fragments_*.json）
+Step 2: 读 ai_fragments_{EP}.json → 填 correction → --apply-ai-review
+Step 3: 读 ai_review_candidates.json → 判断真伪 → 写 ai_review_fixes.json
+        + 把拒绝项加入 lib/japanese_utils.py COMMON_KANJI
+        → --resume
+        → 重复 Step 3 直到 Needs AI = 0
+Step 4: 检查 reports/问题解决报告.md — 不应有残留 ⬜（除非人工审查）
+Step 5: git commit 两端（skill + project）
+```
+
+> ⚠️ **每步失败必须立刻修，不要跳过。** 缓存不完整（如 auto_clean 失败但 findings.json 已写入）会导致后续跳过关键步骤。
+
 ## Run
 
 ```bash
@@ -36,10 +58,15 @@ Phase 1: Scan
 
 Phase 2: Triage
   → VAD → Whisper → classify each garbled cue:
-      ├─ readable JP           → write SRT ✅ (→ 报告: Whisper 自动修复)
       ├─ noise (mj < 2)        → auto-cut 🗑️
+      ├─ readable JP + 原文无语义 (mj_orig < 2) → auto-keep ✅  噪声→Whisper即改善
+      ├─ readable JP + 长度正常 (ratio ≤ 3x)    → auto-keep ✅
+      ├─ readable JP + 长度异常 (ratio > 3x)     → ai_fragments (🤖 配对审查)
+      │     └─ fragment 带 paired_cues，AI 可改邻居或 __DELETE__
       └─ JP + Latin corruption → ai_fragments_{EP}.json (🤖 AI补全)
           ├─ AI fills correction → --apply-ai-review (→ 报告: AI 短碎片补全)
+          │     ├─ 原文 mj < 2 的 fragment → auto-cut（不升级人工）
+          │     └─ paired mode: AI 可 __DELETE__ 邻居 cue
           └─ AI can't fix      → VAD check
               ├─ no speech     → auto-cut 🗑️
               └─ has speech    → checklist.md (👤 人工 → 报告: 人工审查)
@@ -64,9 +91,11 @@ Report: reports/问题解决报告.md（自动生成，按 Phase 分组）
 
 | Pipeline prints | What to do | Done when |
 |-----------------|------------|-----------|
-| `[ai-review] N pending` | Read `temp/scans/ai_fragments_EP*.json`, fill `"correction"` field per fragment, then `--apply-ai-review` | All fragments have `"correction"` filled or intentionally blank |
-| `AI REVIEW NEEDED: N` | Read `temp/scans/ai_review_candidates.json`, judge each candidate, write `ai_review_fixes.json`, re-run `--resume` | `--resume` completes without error |
-| `Pipeline complete` + checklists exist | Read `reports/manual-review/{EP}/checklist.md`, fill `修正:` for entries you can fix from video context, leave audio-dependent ones ⬜, then `--apply-checklist` | `--apply-checklist` reports applied count |
+| `SyntaxError` / `UnicodeEncodeError` | **立即修代码**。emoji→ASCII, 括号不匹配→补全。修完 git commit，重跑 | 该步骤成功 |
+| `[ai-review] N pending` | 读 `temp/scans/ai_fragments_EP*.json`，每个 fragment 填 `correction`。**配对模式** (`mode:paired`)：可同时填 `paired_cues[*].correction`，邻居填 `__DELETE__` 删除。留空=保持不变。→ `--apply-ai-review` | 所有可判断的 fragment 已填 |
+| `AI REVIEW NEEDED: N` | 读 `temp/scans/ai_review_candidates.json`，判断每个候选是否专名。**拒绝的必须加入 `lib/japanese_utils.py` COMMON_KANJI**。接受的写 `ai_review_fixes.json`。→ `--resume`。**可能需多轮**：12→6→3→0 是正常收敛过程 | `--resume` 输出 `Needs AI: 0` |
+| `Pipeline complete — all phases passed` | 检查 `reports/问题解决报告.md`：专名自动应用有条目（非"暂无记录"），AI专名审查无残留⬜ | 报告无异常 |
+| `Pipeline complete` + checklists exist | 读 `reports/manual-review/{EP}/checklist.md`，填 `修正:`。看视频片段判断 → `--apply-checklist` | `--apply-checklist` 报告 applied count |
 | `Done: 0 fixed` + no `[whisper]` | `--video-dir` is missing or wrong — verify path in CLAUDE.md | Whisper runs and produces output |
 
 ## AI intervention points
