@@ -41,7 +41,7 @@ from lib.whisper_utils import (
     setup_windows_utf8, extract_ep_number, to_seconds, format_tc,
     parse_srt, write_srt, apply_fixes_to_srt, run_whisper,
     extract_audio_wav, is_valid_japanese, classify_garbled_text,
-    get_audio_duration,
+    get_audio_duration, meaningful_jp_count, EXCLAMATION_KANA,
 )
 setup_windows_utf8()
 
@@ -466,64 +466,69 @@ class Fixer:
             if applied_fixes:
                 apply_fixes_to_srt(self._srt_path, applied_fixes)
 
-            # Step 4: Build report with readability-first auto_triage
+            # Step 4: Simplified triage — pre-filter noise, keep good, route rest to AI
+            #
+            #  eval_text = Whisper replacement, or original if Whisper failed
+            #
+            #  ① meaningful_jp < 2  → auto-cut (pure Latin, bare exclamations)
+            #  ② looks plausible     → auto-keep (write to SRT ✅)
+            #  ③ rest                → L2.5 AI completion
+            #       └─ AI fails → VAD check → cut or escalate to L6 human
             report = FixReport(source='whisper', tier=tier,
                               deleted=deleted_count)
 
-            from lib.whisper_utils import (
-                looks_like_plausible_japanese,
-                is_short_garbled_fragment,
-                is_ai_fixable,
-                is_proper_noun_pattern,
-            )
+            from lib.whisper_utils import looks_like_plausible_japanese
 
             auto_keep = []
-            ai_short_fragments = []   # → L2.5 AI上下文补全
-            proper_noun_items = []    # → L3 专名审查
-            human_items = []          # → L6 人工
+            ai_fragments = []        # → L2.5 AI上下文补全
+            auto_cut = []            # → 直接删除 (meaningful_jp < 2)
 
-            for f in fixes:
-                confidence = f.get('confidence', 'none')
-                replacement = f.get('replacement', '')
-                original = f.get('original', '')
+            all_items = list(fixes)
 
-                # Unfixable → check AI-fixable before routing to human
-                if confidence == 'none' or not replacement:
-                    if (is_ai_fixable(original, self.target_lang)
-                            or is_short_garbled_fragment(original, self.target_lang)):
-                        ai_short_fragments.append(f)
-                    else:
-                        human_items.append(f)
-                    continue
-
-                # Readability-first: looks like Japanese → keep immediately
-                if looks_like_plausible_japanese(replacement, self.target_lang):
-                    auto_keep.append(f)
-                    continue
-
-                # Not readable → classify
-                if is_proper_noun_pattern(original):
-                    proper_noun_items.append(f)
-                elif is_short_garbled_fragment(replacement, self.target_lang):
-                    ai_short_fragments.append(f)
-                elif is_ai_fixable(replacement, self.target_lang) or is_ai_fixable(original, self.target_lang):
-                    ai_short_fragments.append(f)
-                else:
-                    human_items.append(f)
-
-            # Fallback: if Whisper produced no fixes but garbled cues remain
-            # (e.g. single isolated cue, no audio output), route to human review.
+            # Fallback: if Whisper produced no fixes, evaluate garbled cues directly
             if not fixes and garbled:
-                print(f'[whisper] No Whisper output — {len(garbled)} garbled '
-                      f'cue(s) → L6 human review', file=sys.stderr)
+                print(f'[whisper] No Whisper output — evaluating {len(garbled)} '
+                      f'garbled cue(s) directly', file=sys.stderr)
                 for g in garbled:
-                    human_items.append({
+                    all_items.append({
                         'start': g['start'], 'end': g['end'],
                         'original': g['text'], 'replacement': None,
                         'confidence': 'none', 'model': 'tier1',
                     })
 
-            # Layer 2: auto-kept (readable) → ✅
+            for f in all_items:
+                # eval_text: prefer Whisper output, fall back to original
+                eval_text = (f.get('replacement') or f.get('original', '')).strip()
+
+                # ① Pre-filter: no meaningful Japanese → auto-cut
+                if meaningful_jp_count(eval_text) < 2:
+                    auto_cut.append(f)
+                    continue
+
+                # ② Readable Japanese → auto-keep
+                if looks_like_plausible_japanese(eval_text, self.target_lang):
+                    auto_keep.append(f)
+                    continue
+
+                # ③ Has Japanese content but with Latin corruption → AI completion
+                ai_fragments.append(f)
+
+            # ── Apply auto-cuts: delete noise cues from SRT ──
+            if auto_cut:
+                cut_starts = {f['start'] for f in auto_cut}
+                kept_cues = [c for c in cues if c.get('start') not in cut_starts]
+                deleted_now = len(cues) - len(kept_cues)
+                if deleted_now > 0:
+                    write_srt(self._srt_path, kept_cues)
+                    cues[:] = kept_cues
+                    report.deleted += deleted_now
+                    print(f'[whisper] Auto-cut {deleted_now} noise cues '
+                          f'(meaningful_jp < 2)', file=sys.stderr)
+                    for f in auto_cut:
+                        print(f'  [cut] {f["start"]}: '
+                              f'"{f.get("original", "")[:60]}"', file=sys.stderr)
+
+            # ── Layer 2: auto-kept (readable Japanese) → write to report ──
             if auto_keep:
                 self._upsert_layer('2', [
                     {'ep': self.episode, 'time': f['start'],
@@ -532,49 +537,27 @@ class Fixer:
                      'status': '✅'}
                     for f in auto_keep
                 ])
-                # Sync: if any auto-kept cues were previously in L6 (human review),
-                # mark them as resolved so the checklist doesn't show stale entries
                 self._sync_layer6_resolved([f['start'] for f in auto_keep])
 
-            # Layer 2.5: short fragments → AI completion
-            if ai_short_fragments:
+            # ── Layer 2.5: AI-fixable fragments → AI completion ──
+            if ai_fragments:
                 self._upsert_layer('2.5', [
                     {'ep': self.episode, 'time': f['start'],
-                     'original': (f.get('replacement') or '')[:80] or f.get('original', '')[:80],
+                     'original': (f.get('replacement') or f.get('original', ''))[:80],
                      'corrected': '',
                      'status': '⬜'}
-                    for f in ai_short_fragments
-                ])
-
-            # Layer 3: proper noun pattern → noun pipeline
-            if proper_noun_items:
-                self._upsert_layer('3', [
-                    {'ep': self.episode, 'time': f['start'],
-                     'original': f.get('original', '')[:80],
-                     'corrected': f.get('replacement', '')[:80],
-                     'status': '⬜'}
-                    for f in proper_noun_items
-                ])
-
-            # Layer 6: unfixable/long-garbled → human
-            if human_items:
-                self._upsert_layer('6', [
-                    {'ep': self.episode, 'time': f['start'],
-                     'original': f.get('original', '')[:80],
-                     'corrected': '',
-                     'status': '⬜'}
-                    for f in human_items
+                    for f in ai_fragments
                 ])
 
             report.applied = len(auto_keep)
-            report.failed = len(human_items)
-            report.ai_review = len(ai_short_fragments)
+            report.ai_review = len(ai_fragments)
+            report.failed = 0   # nothing goes directly to L6 anymore
             report.details = []
 
             print(f'[whisper] {report.applied} auto-keep, '
-                  f'{report.ai_review} AI complete, '
-                  f'{len(proper_noun_items)} → L3, '
-                  f'{report.failed} → L6', file=sys.stderr)
+                  f'{report.ai_review} → AI, '
+                  f'{len(auto_cut)} auto-cut, '
+                  f'{report.deleted} total deleted', file=sys.stderr)
 
             return report
 
@@ -677,7 +660,8 @@ class Fixer:
         out_dir = output_dir or self._review_dir
         is_per_ep = bool(output_dir)  # per-ep folder mode: no EP prefix, checklist.md
 
-        # Read unfixable from report Layer 6
+        # Read unfixable from report Layer 6 (L2.5 items are escalated by
+        # step_deliver() or _apply_ai_checklists() before review() is called)
         from utils.update_report import read_report
         data = read_report(self._report_path)
         entries = data.get('6', [])
@@ -703,8 +687,6 @@ class Fixer:
         entries_md = []
         extracted = 0
         skipped = 0
-        auto_cut = 0
-        auto_cut_times = set()  # collect start times for SRT deletion
 
         for cl in clusters:
             first_g = cl['garbled'][0]
@@ -727,43 +709,26 @@ class Fixer:
             right_text = cl.get('right_text', '')
             garbled_texts = ' | '.join(g['text'][:60] for g in cl['garbled'])
 
-            # ── Auto-cut #1: zero VAD speech → delete from SRT ──
-            if bounds is None:
-                auto_cut += 1
-                auto_cut_times.update(g['start'] for g in cl['garbled'])
-                self._mark_report_resolved(cl['garbled'], 'zero VAD speech')
-                continue
-
-            clip_start, clip_end = bounds
-
-            # ── Auto-cut #2: no meaningful Japanese dialogue ──
-            # Count Japanese characters that are NOT just exclamations.
-            # あっ！えーっ！うんうん… are non-verbal sounds, not dialogue.
-            # Only kana/kanji outside the EXCLAMATION_KANA set count as
-            # evidence of real speech worth human review.
-            all_jp = sum(1 for c in garbled_texts
-                        if 'ぁ' <= c <= 'ヿ' or '一' <= c <= '鿿')
-            exclamation_jp = sum(1 for c in garbled_texts
-                                if c in self.EXCLAMATION_KANA)
-            meaningful_jp = all_jp - exclamation_jp
-            if meaningful_jp < 2:
-                auto_cut += 1
-                auto_cut_times.update(g['start'] for g in cl['garbled'])
-                self._mark_report_resolved(
-                    cl['garbled'],
-                    f'no dialogue JP ({all_jp} jp, {exclamation_jp} exclamation, {meaningful_jp} meaningful)')
-                continue
-
-            # ── Extract clip for human review ──
-            if not os.path.exists(clip_path) and self._video_path:
-                ok = self._extract_clip(self._video_path, clip_start,
-                                        clip_end, clip_path)
-                if ok:
+            # ── Extract clip (skip if no VAD speech in range) ──
+            # Pre-filtering (L2 meaningful_jp + escalate VAD check) already
+            # removed noise; reaching here means real speech was confirmed.
+            # If bounds is None, the speech is too short/edge for a clip
+            # but the entry still goes to the checklist for human review.
+            if bounds is not None:
+                clip_start, clip_end = bounds
+                if not os.path.exists(clip_path) and self._video_path:
+                    ok = self._extract_clip(self._video_path, clip_start,
+                                            clip_end, clip_path)
+                    if ok:
+                        extracted += 1
+                    else:
+                        skipped += 1
+                elif os.path.exists(clip_path):
                     extracted += 1
-                else:
-                    skipped += 1
-            elif os.path.exists(clip_path):
-                extracted += 1
+            else:
+                # No usable VAD bounds → still include entry, but note it
+                clip_name = '(无片段 — VAD未检测到语音)'
+                skipped += 1
 
             entries_md.append(
                 f'{self.episode} | {start_ts} ~ {first_g.get("end", "?")}\n'
@@ -775,21 +740,6 @@ class Fixer:
                 f'修正:\n'
                 f'\n---\n'
             )
-
-        # ── Delete auto-cut cues from SRT ──
-        # Auto-cut cues are non-speech noise (e.g. "me", "dai", "af")
-        # that Whisper can't match. The report was already marked ✅;
-        # now actually remove the garbage from the subtitle file.
-        if auto_cut_times:
-            cues = self._load_cues() or parse_srt(
-                self._srt_path, mark_garbled=False, target_lang=self.target_lang)
-            before = len(cues)
-            cues = [c for c in cues if c.get('start') not in auto_cut_times]
-            deleted = before - len(cues)
-            if deleted > 0:
-                write_srt(self._srt_path, cues)
-                print(f'[{self.episode}] review: auto-deleted {deleted} '
-                      f'noise cues from SRT', file=sys.stderr)
 
         # Write checklist
         if is_per_ep:
@@ -813,8 +763,7 @@ class Fixer:
         self._save_review_clusters(clusters)
 
         print(f'[{self.episode}] review: {len(entries_md)} entries → '
-              f'{checklist_path} ({extracted} clips, {skipped} ffmpeg-failed, '
-              f'{auto_cut} auto-cut)',
+              f'{checklist_path} ({extracted} clips, {skipped} skipped)',
               file=sys.stderr)
         return checklist_path
 
@@ -1198,9 +1147,9 @@ class Fixer:
                       file=sys.stderr)
 
     def _sync_layer6_resolved(self, fixed_starts):
-        """When Whisper re-run fixes a previously-failed cue, clear its L6 entry.
+        """When Whisper re-run fixes a previously-failed cue, clear its L6 + L2.5 entries.
 
-        Only clears L6 entries that have NO human-filled correction text
+        Only clears entries that have NO human-filled correction text
         (status protection: human work is never overwritten).
         """
         if not fixed_starts:
@@ -1208,15 +1157,15 @@ class Fixer:
         try:
             from utils.update_report import read_report, update_entry_status
             data = read_report(self._report_path)
+            # Sync L6
             layer6 = data.get('6', [])
             synced = 0
             for entry in layer6:
                 if (entry.get('ep') == self.episode
                         and entry.get('time', '') in fixed_starts
                         and entry.get('status') == '⬜'):
-                    # Only clear if human hasn't already filled a correction
                     existing_corrected = entry.get('corrected', '')
-                    if existing_corrected and existing_corrected not in ('', '[auto-cut]', '[auto-cut: zero VAD speech]'):
+                    if existing_corrected and existing_corrected not in ('', '[auto-cut]', '[auto-cut: zero VAD speech]', '[escalated to L6]'):
                         continue  # Human already worked on this — don't touch
                     update_entry_status(
                         self._report_path, step='6',
@@ -1224,8 +1173,24 @@ class Fixer:
                         status='✅',
                         corrected='[whisper-retry-fixed]')
                     synced += 1
-            if synced > 0:
-                print(f'[whisper] Synced {synced} L6 entries → ✅ '
+            # Sync L2.5 too — same logic
+            layer25 = data.get('2.5', [])
+            synced25 = 0
+            for entry in layer25:
+                if (entry.get('ep') == self.episode
+                        and entry.get('time', '') in fixed_starts
+                        and entry.get('status') == '⬜'):
+                    existing_corrected = entry.get('corrected', '')
+                    if existing_corrected and existing_corrected not in ('', '[escalated to L6]'):
+                        continue
+                    update_entry_status(
+                        self._report_path, step='2.5',
+                        ep=self.episode, time=entry.get('time', ''),
+                        status='✅',
+                        corrected='[whisper-retry-fixed]')
+                    synced25 += 1
+            if synced > 0 or synced25 > 0:
+                print(f'[whisper] Synced {synced} L6 + {synced25} L2.5 entries → ✅ '
                       f'(Whisper re-run succeeded)', file=sys.stderr)
         except Exception as e:
             print(f'[whisper] Failed to sync L6: {e}', file=sys.stderr)
@@ -1261,14 +1226,6 @@ class Fixer:
 
     # ── Review-specific clustering (tighter than Whisper's 60s gap) ──
     REVIEW_CLUSTER_GAP = 8.0   # seconds — max gap between garbled cues in a review cluster
-
-    # Kana used exclusively in exclamations/grunts/sound-effects, not dialogue.
-    # あっ！えーっ！おっ！うんうん… etc. are non-verbal sounds Whisper
-    # transcribed as kana; they don't indicate real dialogue content.
-    EXCLAMATION_KANA = frozenset(
-        'あいうえおぁぃぅぇぉっーん〜'
-        'アイウエオァィゥェォッ'
-    )
 
     def _build_review_clusters(self, cues, pending_items):
         """Build tight review clusters for human review video clips.

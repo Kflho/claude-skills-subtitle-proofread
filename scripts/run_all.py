@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Single-command full pipeline — scan → fix → review → unify → apply → clean.
+"""Single-command full pipeline — scan → fix → unify → deliver.
+
+3-phase pipeline:
+  Phase 1: Scan — detect garbled text, build glossary
+  Phase 2: Fix  — Whisper ASR → triage (keep / AI-complete / cut noise)
+  Phase 3: Unify — proper nouns + apply + deliver human checklist
 
 Usage:
   python run_all.py --lang ja                          # Full pipeline, all episodes
@@ -629,24 +634,24 @@ def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True,
     layer6 = report_data.get('6', [])
     pending_l6 = [e for e in layer6 if e.get('status') == '⬜']
 
-    # L2.5 items that AI couldn't fix → escalate to L6 human review
+    # L2.5 items: stay in L2.5 for AI review. Escalation to L6 happens
+    # ONLY in _apply_ai_checklists() after --apply-ai-review is run.
     layer25 = report_data.get('2.5', [])
     pending_l25 = [e for e in layer25 if e.get('status') == '⬜']
+    if pending_l25:
+        print(f'[deliver] Note: {len(pending_l25)} L2.5 ⬜ items pending AI review.',
+              file=sys.stderr)
+        print(f'[deliver]   Fill ai_review.md → --apply-ai-review → re-run deliver.',
+              file=sys.stderr)
 
-    # Merge: L6 + escalated L2.5
-    pending = pending_l6 + pending_l25
+    pending = pending_l6
 
     if not pending:
         if pending_l25:
-            print('[deliver] No pending Layer 6 entries, but Layer 2.5 has ⬜ items '
-                  'that need escalation.', file=sys.stderr)
+            print('[deliver] No L6 items — only L2.5 items pending AI review.', file=sys.stderr)
         else:
             print('[deliver] No pending Layer 6 entries — all clean.', file=sys.stderr)
         return True
-
-    if pending_l25:
-        print(f'[deliver] Including {len(pending_l25)} L2.5 ⬜ items '
-              f'(AI could not fix → escalated to human review).', file=sys.stderr)
 
     # Group by episode
     by_ep = {}
@@ -750,7 +755,70 @@ def _apply_ai_checklists(project_dir, lang):
 
     print(f'\n[apply-ai-review] Total: {total_applied} corrections across '
           f'{len(ep_dirs)} episodes', file=sys.stderr)
-    return total_applied > 0
+
+    # Escalate remaining L2.5 ⬜ → VAD check → auto-cut or L6 human
+    from utils.update_report import read_report, upsert_entries, delete_entry
+    from lib.whisper_utils import parse_srt, write_srt, to_seconds
+
+    report_path = os.path.join(project_dir, 'reports', '问题解决报告.md')
+    data = read_report(report_path)
+    pending_l25 = [e for e in data.get('2.5', []) if e.get('status') == '⬜']
+
+    if pending_l25:
+        # Group by episode for VAD lookup
+        by_ep = {}
+        for entry in pending_l25:
+            ep = entry.get('ep', '?')
+            by_ep.setdefault(ep, []).append(entry)
+
+        escalated = 0
+        auto_cut = 0
+
+        for ep, entries in by_ep.items():
+            fixer = Fixer(ep, project_dir)
+            speech_segs = fixer._load_speech_segs()
+            srt_cues = fixer._load_cues()
+
+            for entry in entries:
+                ts = entry.get('time', '')
+                start_s = to_seconds(ts) if ts else 0
+
+                # VAD check: any speech overlapping this cue?
+                has_speech = False
+                if speech_segs:
+                    for ss, es in speech_segs:
+                        if es >= start_s and ss <= start_s + 5.0:
+                            has_speech = True
+                            break
+
+                if has_speech:
+                    # Real speech → escalate to L6 human review
+                    upsert_entries(report_path, step='6', entries=[{
+                        'ep': ep, 'time': ts,
+                        'original': entry.get('original', ''),
+                        'corrected': '',
+                        'status': '⬜',
+                    }])
+                    escalated += 1
+                else:
+                    # No speech → auto-cut: delete cue from SRT
+                    srt_cues = [c for c in srt_cues
+                                if c.get('start', '') != ts]
+                    auto_cut += 1
+
+                delete_entry(report_path, step='2.5', ep=ep, time=ts)
+
+            # Write back SRT if cues were removed
+            if auto_cut > 0 and fixer._srt_path:
+                write_srt(fixer._srt_path, srt_cues)
+
+        print(f'[apply-ai-review] VAD check: {escalated} → L6 human, '
+              f'{auto_cut} auto-cut (no speech)', file=sys.stderr)
+        if escalated:
+            print(f'[apply-ai-review]   Run --apply-checklist after filling '
+                  f'human checklists.', file=sys.stderr)
+
+    return total_applied > 0 or bool(pending_l25)
 
 
 def step_apply_checklist(project_dir, lang, video_dir=None):
@@ -946,9 +1014,11 @@ Examples:
     # Resolve video directory (explicit arg > auto-detect)
     video_dir = _detect_video_dir(project_dir, explicit=args.video_dir)
 
-    # Detect partial vs full run (affects Layer 6 delivery scope)
+    # is_full_run: initial full pipeline (no filters, no resume, no fast-paths).
+    # During full run, L2.5 items stay in L2.5 for AI review before escalation.
     is_full_run = (args.limit == 0 and not args.episodes and not args.start_from
-                   and not args.apply_ai_review)
+                   and not args.resume
+                   and not args.apply_ai_review and not args.apply_checklist)
 
     print(f'{"="*55}', file=sys.stderr)
     print(f'  Subtitle Proofread — {mode.upper()} mode, {(fmt["primary"] or "NONE").upper()} format, '
@@ -978,6 +1048,8 @@ Examples:
         step_apply_all(project_dir, args.lang)
         # Apply per-episode AI review checklists (L2.5 fragments)
         _apply_ai_checklists(project_dir, args.lang)
+        # Regenerate human checklists with escalated L2.5 items
+        step_deliver(project_dir, args.lang, is_full_run=False, video_dir=video_dir)
         step_clean(project_dir)
         return
 
@@ -989,18 +1061,30 @@ Examples:
         step_apply_checklist(project_dir, args.lang, video_dir=video_dir)
         return
 
-    # ── Layer 1: Scan ──
+    # ═══════════════════════════════════════════════════════════════
+    # Phase 1: Scan — detect all issues
+    # ═══════════════════════════════════════════════════════════════
     if not args.resume:
         print(f'\n{"─"*40}', file=sys.stderr)
-        print('  Layer 1/6: Character scan', file=sys.stderr)
+        print('  Phase 1/3: Character scan', file=sys.stderr)
         print(f'{"─"*40}', file=sys.stderr)
         step_scan(project_dir, args.lang, force_rescan=args.force_rescan)
 
     _print_progress(project_dir, 'Status: after scan')
 
-    # ── Layer 2: Fix episodes ──
+    # ═══════════════════════════════════════════════════════════════
+    # Phase 2: Fix — Whisper → triage → AI completion
+    #
+    #  Triaged into 3 paths at L2:
+    #    • readable Japanese         → write SRT ✅
+    #    • noise (meaningful_jp < 2) → auto-cut
+    #    • has JP + Latin corruption → L2.5 AI completion
+    #
+    #  Noun collection (Phase 3) could run in parallel here since
+    #  it only reads SRT.  Currently sequential for simplicity.
+    # ═══════════════════════════════════════════════════════════════
     print(f'\n{"─"*40}', file=sys.stderr)
-    print('  Layer 2/6: Error fix (reference → Whisper → human)', file=sys.stderr)
+    print('  Phase 2/3: Error fix + AI fragment completion', file=sys.stderr)
     print(f'{"─"*40}', file=sys.stderr)
     processed = step_fix_episodes(project_dir, args.lang, mode, video_dir=video_dir,
                                   skip_whisper=args.skip_whisper,
@@ -1008,41 +1092,30 @@ Examples:
                                   start_from=args.start_from,
                                   skip_if_clean=not args.no_skip_if_clean)
 
-    # ── Layer 2.5: AI fragment completion ──
-    print(f'\n{"─"*40}', file=sys.stderr)
-    print('  Layer 2.5/6: AI fragment completion', file=sys.stderr)
-    print(f'{"─"*40}', file=sys.stderr)
     step_ai_review(project_dir, args.lang)
 
-    # ── Layer 3: Proper nouns ──
+    # ═══════════════════════════════════════════════════════════════
+    # Phase 3: Unify + Deliver
+    #
+    #  Nouns: collect → auto_classify → apply (after fix, to avoid
+    #  write conflicts with Phase 2 SRT modifications).
+    #  Deliver: human review checklist + video clips (L6).
+    # ═══════════════════════════════════════════════════════════════
     print(f'\n{"─"*40}', file=sys.stderr)
-    print('  Layer 3/6: Proper noun unification', file=sys.stderr)
+    print('  Phase 3/3: Noun unification + Deliver', file=sys.stderr)
     print(f'{"─"*40}', file=sys.stderr)
     noun_results = step_nouns(project_dir, args.lang)
-
-    # ── AI Review notice ──
     print_ai_review_notice(noun_results, project_dir, args.lang)
 
-    # ── Layer 4: Apply fixes ──
-    print(f'\n{"─"*40}', file=sys.stderr)
-    print('  Layer 4/6: Apply fixes', file=sys.stderr)
-    print(f'{"─"*40}', file=sys.stderr)
     step_apply_all(project_dir, args.lang)
 
-    # ── Layer 5: ASS repair ──
-    print(f'\n{"─"*40}', file=sys.stderr)
-    print('  Layer 5/6: Format repair', file=sys.stderr)
-    print(f'{"─"*40}', file=sys.stderr)
-    step_ass_repair(project_dir)
+    # ASS repair: only for ASS-format projects
+    if fmt['primary'] == 'ass':
+        step_ass_repair(project_dir)
 
-    # ── Human review checklist generation ──
-    print(f'\n{"─"*40}', file=sys.stderr)
-    print('  Review: Generate human review checklist', file=sys.stderr)
-    print(f'{"─"*40}', file=sys.stderr)
     step_deliver(project_dir, args.lang, processed_episodes=processed,
                  is_full_run=is_full_run, video_dir=video_dir)
 
-    # ── Clean ──
     step_clean(project_dir)
 
     _print_progress(project_dir, 'Status: final')
@@ -1055,7 +1128,7 @@ Examples:
         print(f'{"="*55}', file=sys.stderr)
     else:
         print(f'\n{"="*55}', file=sys.stderr)
-        print(f'  Pipeline complete — all layers passed.', file=sys.stderr)
+        print(f'  Pipeline complete — all phases passed.', file=sys.stderr)
         print(f'{"="*55}', file=sys.stderr)
 
 

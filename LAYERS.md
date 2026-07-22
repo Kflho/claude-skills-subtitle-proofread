@@ -1,8 +1,8 @@
-# Layer Reference & Debugging — Subtitle Proofread
+# Reference & Debugging — Subtitle Proofread
 
-所有脚本位于 `C:/Users/54238/.claude/skills/subtitle-proofread/scripts/`。
+All scripts under `C:/Users/54238/.claude/skills/subtitle-proofread/scripts/`.
 
-环境变量前缀：
+Env prefix:
 ```bash
 PROJ="<project-root>"
 SCRIPTS="C:/Users/54238/.claude/skills/subtitle-proofread/scripts"
@@ -11,97 +11,111 @@ export PYTHONPATH="$SCRIPTS"
 
 ---
 
-## Layer 1: Character Scan
+## Phase 1: Scan
 
-`scan/unified_scanner.py` — 单次扫描全部 SRT：乱码字符、重复模式、术语频率。
+`scan/unified_scanner.py` — single scan of all SRTs: garbled chars, repeat patterns, term frequency.
 
 ```bash
 cd "$PROJ" && python "$SCRIPTS/scan/unified_scanner.py" \
   --target-dir AI审查后/ --output-findings temp/scans/findings.json --project-lang ja
 ```
 
-输出：
-- `temp/scans/findings.json` — 全量扫描结果
-- `temp/scans/issues/` — 每集问题详情
-- `reports/proper-nouns.md` — 术语表（如果带 --build-glossary）
+Output:
+- `temp/scans/findings.json` — full scan results
+- `temp/scans/issues/` — per-episode issue details
+- `reports/proper-nouns.md` — glossary (with `--build-glossary`)
 
 ---
 
-## Layer 2: Error Fix (Whisper)
+## Phase 2: Fix (Whisper → Triage)
 
-`fix/fix_orchestrator.py` — 级联修复：参考字幕 → Whisper → 人工分流。
+`fix/fix_orchestrator.py` — cascade: reference → Whisper → triage → human.
+
+### Triage logic
+
+Post-Whisper, each fix is classified by `fix_by_whisper()`:
+
+```
+eval_text = Whisper output (or original if Whisper failed)
+
+① meaningful_jp_count(eval_text) < 2  → auto-cut (pure Latin, bare exclamations)
+② looks_like_plausible_japanese()      → auto-keep (write SRT ✅)
+③ rest (has JP + Latin corruption)     → L2.5 AI completion
+```
+
+AI-unfixable entries go through VAD check:
+- No speech → auto-cut
+- Has speech → escalate to human review
+
+### Standalone commands
 
 ```bash
-# Whisper 修复单集
+# Whisper fix for one episode
 cd "$PROJ" && python "$SCRIPTS/fix/fix_orchestrator.py" EP005 --step whisper
 
-# 检查单集是否干净
+# Check if episode is clean
 cd "$PROJ" && python "$SCRIPTS/fix/fix_orchestrator.py" EP005 --step check
 ```
 
-需要环境变量：`WHISPER_CLI`, `WHISPER_MODEL`, `WHISPER_RETRY_MODEL`。
+Requires env vars: `WHISPER_CLI`, `WHISPER_MODEL`, `WHISPER_RETRY_MODEL`.
 
----
-
-## Layer 2.5: AI Fragment Completion
-
-`run_all.py:step_ai_review` — 带日语语义但含拉丁乱码的碎片，无视频。
+### AI fragment completion
 
 ```bash
-# 生成 AI review checklist
+# Generate AI review checklist
 cd "$PROJ" && python -c "
 from fix.fix_orchestrator import Fixer
 Fixer('EP005', '$PROJ').review_ai()
 "
 ```
 
-AI 填完 → `python run_all.py --lang ja --apply-ai-review`
+AI fills → `python run_all.py --lang ja --apply-ai-review`
 
 ---
 
-## Layer 3: Proper Noun Unification
+## Phase 3: Proper Noun Unification
 
-### L3.0: Build Glossary
+### Build Glossary
 
-`nouns/build_glossary.py` — 从语料词频构建专名表。
+`nouns/build_glossary.py` — corpus frequency → proper noun table.
 
 ```bash
 cd "$PROJ" && python "$SCRIPTS/nouns/build_glossary.py" \
   --findings temp/scans/findings.json -o reports/proper-nouns.md --lang ja
 ```
 
-可选：`--ai-nouns temp/scans/ai_nouns.json` 合并 AI 网上搜索的名词。
+Optional: `--ai-nouns temp/scans/ai_nouns.json` to merge AI-searched nouns.
 
-### L3.1: Auto-clean Glossary
+### Auto-clean Glossary
 
-`nouns/auto_clean_glossary.py` — 启发式剪枝，去除明显非专名。
+`nouns/auto_clean_glossary.py` — heuristic pruning, removes obvious non-proper-nouns.
 
 ```bash
-# 试运行
+# Dry run
 cd "$PROJ" && python "$SCRIPTS/nouns/auto_clean_glossary.py" \
   --glossary reports/proper-nouns.md
 
-# 应用（编辑 japanese_utils.py）
+# Apply (edits japanese_utils.py)
 cd "$PROJ" && python "$SCRIPTS/nouns/auto_clean_glossary.py" \
   --glossary reports/proper-nouns.md --apply --yes
 ```
 
-### L3.3: Noun Checker
+### Noun Checker
 
-`nouns/noun_checker.py` — 扫描 SRT 查找专名变体。
+`nouns/noun_checker.py` — scan SRTs for proper noun variants.
 
 ```bash
-# OP/ED 跨集一致性
+# OP/ED cross-episode consistency
 cd "$PROJ" && python "$SCRIPTS/nouns/noun_checker.py" AI审查后/ --lang ja --oped
 
-# 对照专名表检查（带 --noun-table）
+# Against noun table
 cd "$PROJ" && python "$SCRIPTS/nouns/noun_checker.py" AI审查后/ --lang ja \
   --noun-table reports/proper-nouns.md -o temp/scans/nouns/
 ```
 
-### L3.4: Auto Classify
+### Auto Classify
 
-`nouns/auto_classify.py` — Jamdict + 规则预分类，减少 AI 审查量。
+`nouns/auto_classify.py` — Jamdict + rules pre-classification, reduces AI review volume.
 
 ```bash
 cd "$PROJ" && python "$SCRIPTS/nouns/auto_classify.py" \
@@ -111,9 +125,9 @@ cd "$PROJ" && python "$SCRIPTS/nouns/auto_classify.py" \
 
 ---
 
-## Layer 4: Apply Fixes
+## Apply Fixes
 
-`apply/apply_fixes.py` — 收集所有来源的修复，批量写入 SRT。
+`apply/apply_fixes.py` — collect all fix sources, batch-write SRT.
 
 ```bash
 cd "$PROJ" && python "$SCRIPTS/apply/apply_fixes.py" \
@@ -122,9 +136,9 @@ cd "$PROJ" && python "$SCRIPTS/apply/apply_fixes.py" \
 
 ---
 
-## Layer 5: ASS Format Repair
+## ASS Format Repair
 
-`ass/ass_repair.py` — ASS 格式修复（SRT 项目跳过）。
+`ass/ass_repair.py` — ASS-only (SRT projects skip).
 
 ```bash
 cd "$PROJ" && python "$SCRIPTS/ass/ass_repair.py" \
@@ -133,17 +147,17 @@ cd "$PROJ" && python "$SCRIPTS/ass/ass_repair.py" \
 
 ---
 
-## Layer 6: Human Review Delivery
+## Human Review Delivery
 
-`fix/fix_orchestrator.py:review` — 生成人工审查清单 + 视频片段。
+`fix/fix_orchestrator.py:review` — generate checklist + video clips.
 
 ```bash
 cd "$PROJ" && python "$SCRIPTS/fix/fix_orchestrator.py" EP005 --step review
 ```
 
-在 `reports/manual-review/EP005/` 输出 `checklist.md` + `.mp4` 片段。
+Output: `reports/manual-review/EP005/checklist.md` + `.mp4` clips.
 
-填写 `修正:` 字段后 → `python run_all.py --lang ja --apply-checklist --video-dir "<VIDEO_DIR>"`
+Fill `修正:` → `python run_all.py --lang ja --apply-checklist --video-dir "<VIDEO_DIR>"`
 
 ---
 
@@ -157,13 +171,13 @@ cd "$PROJ" && python "$SCRIPTS/utils/update_report.py" \
 ## Glossary Maintenance Cycle
 
 ```
-L3.0  build_glossary.py      → aggressive JMdict filter → raw glossary
-L3.1  auto_clean_glossary.py → heuristic prune (all 3 sections)
-L3.2  Claude AI review       → semantic judgment on borderline survivors
+build_glossary.py      → aggressive JMdict filter → raw glossary
+auto_clean_glossary.py → heuristic prune (all 3 sections)
+Claude AI review       → semantic judgment on borderline survivors
        ↓
        Rebuild: python build_glossary.py ... → clean glossary
        ↓
-L3.3  noun_checker.py        → scan SRTs for variants
-L3.4  auto_classify.py       → deterministic accept/reject/needs_ai
-L3.5  Claude AI judgment     → decide remaining unknowns
+noun_checker.py        → scan SRTs for variants
+auto_classify.py       → deterministic accept/reject/needs_ai
+Claude AI judgment     → decide remaining unknowns
 ```

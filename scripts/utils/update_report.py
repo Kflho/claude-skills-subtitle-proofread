@@ -350,6 +350,32 @@ def update_entry_status(path, step, ep, time, corrected=None, status=None):
     return False
 
 
+def delete_entry(path, step, ep, time):
+    """从指定层删除单条目。用于条目跨层升级时从源层移除。
+
+    Args:
+        path: 报告文件路径
+        step: 层号字符串
+        ep: 集数标识
+        time: 时间码
+
+    Returns:
+        True 如果找到并删除，False 如果未找到。
+    """
+    data = read_report(path)
+    step = str(step)
+    if step not in data:
+        return False
+
+    for i, entry in enumerate(data[step]):
+        if entry.get('ep') == ep and entry.get('time') == time:
+            data[step].pop(i)
+            write_report(path, data)
+            return True
+
+    return False
+
+
 def get_layer_summary(data):
     """返回每个层的统计: {layer_id: {'fixed': N, 'pending': N, 'deleted': N, 'total': N}}。"""
     summary = {}

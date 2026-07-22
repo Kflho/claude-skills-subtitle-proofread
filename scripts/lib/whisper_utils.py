@@ -700,13 +700,19 @@ def looks_like_plausible_japanese(text, target_lang='ja'):
 
 
 def is_short_garbled_fragment(text, target_lang='ja'):
-    """判断是否为短碎片（AI 可根据上下文补全）。"""
+    """判断是否为短碎片（AI 可根据上下文补全）。
+
+    日语：必须有假名/汉字才有语义可推断，纯拉丁噪音（me/re/go）不算。
+    """
     text = text.strip()
     if not text:
         return False
     if target_lang == 'ja':
         latin_chars = re.findall(r'[a-zA-Z]', text)
-        return len(latin_chars) <= 5 and len(text) <= 15
+        has_jp = bool(re.search(r'[぀-ヿ一-鿿]', text))
+        # Must have some Japanese content to be context-completable;
+        # pure Latin noise (me, re, go) → L6 auto-cut, not L2.5
+        return has_jp and len(latin_chars) <= 5 and len(text) <= 15
     else:
         return len(text) <= 8 and not re.search(r'[一-鿿]', text)
 
@@ -762,3 +768,30 @@ def is_proper_noun_pattern(text):
     if re.search(r'[゠-ヿ]', text) and re.search(r'[a-zA-Z]', text):
         return True
     return False
+
+
+# ── Kana exclusively used in exclamations/grunts/sound-effects ──
+# あっ！えーっ！おっ！うんうん… are non-verbal sounds, not dialogue.
+# Used by meaningful_jp_count() to distinguish real speech from noise.
+EXCLAMATION_KANA = frozenset(
+    'あいうえおぁぃぅぇぉっーん〜'
+    'アイウエオァィゥェォッ'
+)
+
+
+def meaningful_jp_count(text):
+    """Count Japanese characters that are NOT just exclamations/grunts.
+
+    Pure kana like あっ！えーっ！うんうん… are non-verbal sounds
+    that Whisper transcribed as kana; they don't indicate real dialogue.
+    Only kana/kanji outside EXCLAMATION_KANA count as evidence of speech.
+
+    Returns:
+        int: number of meaningful Japanese characters
+    """
+    text = text.strip()
+    if not text:
+        return 0
+    all_jp = sum(1 for c in text if 'ぁ' <= c <= 'ヿ' or '一' <= c <= '鿿')
+    exclamation_jp = sum(1 for c in text if c in EXCLAMATION_KANA)
+    return all_jp - exclamation_jp
