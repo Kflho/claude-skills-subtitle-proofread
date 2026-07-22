@@ -314,10 +314,13 @@ def step_nouns(project_dir, lang):
 
     results = {}
 
-    # OP/ED cross-episode consistency
+    # OP/ED cross-episode consistency — new oped_fixer (replaces old noun_checker --oped)
+    # Uses cross-episode similarity to classify: instrumental (→ auto-clean) vs vocal (→ AI review)
     print('\n[oped] OP/ED consistency check...', file=sys.stderr)
-    _run(['python', checker, target, '--lang', lang, '--oped',
-          '-o', os.path.join(project_dir, 'temp', 'scans', 'oped_fixes.json')],
+    oped_fixer = os.path.join(_SCRIPT_DIR, 'fix', 'oped_fixer.py')
+    oped_output = os.path.join(project_dir, 'temp', 'scans', 'oped_fixes.json')
+    _run(['python', oped_fixer, target, '--lang', lang, '--auto-only',
+          '-o', oped_output],
          project_dir, desc='oped')
 
     # Noun table check (only if glossary exists)

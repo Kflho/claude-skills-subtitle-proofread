@@ -65,6 +65,33 @@ Requires env vars: `WHISPER_CLI`, `WHISPER_MODEL`, `WHISPER_RETRY_MODEL`.
 
 ## Phase 3: Proper Noun Unification
 
+### OP/ED Fixer
+
+`fix/oped_fixer.py` — cross-episode OP/ED detection, classification, and fix generation.
+
+```bash
+# Auto-clean instrumental OP/ED (Whisper hallucinations → [音楽])
+cd "$PROJ" && python "$SCRIPTS/fix/oped_fixer.py" AI审查后/ --lang ja \
+  --auto-only -o temp/scans/oped_fixes.json
+
+# Full: auto-clean + generate AI review for vocal OP/ED lyrics
+cd "$PROJ" && python "$SCRIPTS/fix/oped_fixer.py" AI审查后/ --lang ja \
+  -o temp/scans/oped_fixes.json --ai-review temp/scans/oped_ai_review.json
+
+# Apply AI-reviewed OP/ED fixes
+cd "$PROJ" && python "$SCRIPTS/fix/oped_fixer.py" AI审查后/ --lang ja \
+  -o temp/scans/oped_fixes.json --apply-ai-review temp/scans/oped_ai_review.json
+```
+
+How it works:
+1. Collects cues in OP (0-95s) and ED (last 120s) regions from all episodes
+2. Clusters by time position (±2s tolerance) across episodes
+3. Classifies each cluster:
+   - **Instrumental**: ≥80% noise text → auto-clean (replace with [音楽])
+   - **Vocal**: meaningful JP with variants → AI review candidates
+   - **Dialogue**: unique text per episode → skip (false-positive prevention)
+4. For vocal OP/ED: generates `oped_ai_review.json` → AI fills canonical → apply
+
 ### Glossary Maintenance Cycle
 
 ```
@@ -109,9 +136,6 @@ cd "$PROJ" && python "$SCRIPTS/nouns/auto_clean_glossary.py" \
 `nouns/noun_checker.py` — scan SRTs for proper noun variants.
 
 ```bash
-# OP/ED cross-episode consistency
-cd "$PROJ" && python "$SCRIPTS/nouns/noun_checker.py" AI审查后/ --lang ja --oped
-
 # Against noun table
 cd "$PROJ" && python "$SCRIPTS/nouns/noun_checker.py" AI审查后/ --lang ja \
   --noun-table reports/proper-nouns.md -o temp/scans/nouns/

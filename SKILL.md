@@ -72,6 +72,11 @@ Phase 2: Triage
               └─ has speech    → checklist.md (👤 人工 → 报告: 人工审查)
 
 Phase 3: Unify
+  ├─ OP/ED fixer: cross-episode time clustering → classify:
+  │   ├─ Instrumental (no vocals) → auto-clean Whisper hallucinations → [音楽]
+  │   │   └─ False-positive prevention: cross-ep similarity check → dialogue preserved
+  │   └─ Vocal (with lyrics) → AI review candidates (🤖 oped_ai_review.json)
+  │       └─ AI fills canonical lyrics → --apply-ai-review → unified replacement
   ├─ Noun variant detection: noun_checker scans SRTs against glossary
   ├─ Auto-classify: deterministic accept (→ 报告: 专名自动应用)
   │                 / reject / needs_ai (🤖 → 报告: AI 专名审查)
@@ -94,6 +99,7 @@ Report: reports/问题解决报告.md（自动生成，按 Phase 分组）
 | `SyntaxError` / `UnicodeEncodeError` | **立即修代码**。emoji→ASCII, 括号不匹配→补全。修完 git commit，重跑 | 该步骤成功 |
 | `[ai-review] N pending` | **直接编辑** `temp/scans/ai_fragments_EP*.json`，每个 fragment 填 `correction`。**配对模式** (`mode:paired`)：必须同时填 `fragment.correction` 和 `paired_cues[*].correction`（target cue）。邻居填 `__DELETE__` 删除。留空=保持不变。→ `--apply-ai-review --video-dir "..."`（**必须带 --video-dir**，否则无法提取视频片段） | 所有可判断的 fragment 已填 |
 | `AI REVIEW NEEDED: N` | 读 `temp/scans/ai_review_candidates.json`，判断每个候选是否专名。**拒绝的必须加入 `lib/japanese_utils.py` COMMON_KANJI**。接受的写 `ai_review_fixes.json`。→ `--resume`。**可能需多轮**：12→6→3→0 是正常收敛过程 | `--resume` 输出 `Needs AI: 0` |
+| `[oped] AI review candidates → oped_ai_review.json` | 读 `temp/scans/oped_ai_review.json`，每个候选填 `"canonical"`（正确的日文歌词）。`"__INSTRUMENTAL__"` = 其实是器乐。留空 = 跳过。→ `--apply-ai-review` | 所有候选已判断 |
 | `Pipeline complete — all phases passed` | 检查 `reports/问题解决报告.md`：专名自动应用有条目（非"暂无记录"），AI专名审查无残留⬜ | 报告无异常 |
 | `Pipeline complete` + checklists exist | 读 `reports/manual-review/{EP}/checklist.md`，填 `修正:`。看视频片段判断 → `--apply-checklist` | `--apply-checklist` 报告 applied count |
 | `Done: 0 fixed` + no `[whisper]` | `--video-dir` is missing or wrong — verify path in CLAUDE.md | Whisper runs and produces output |

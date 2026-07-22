@@ -221,6 +221,64 @@ already handles it automatically.
 
 ---
 
+## Phase 3: OP/ED Lyric Unification (🤖 triggered, vocal OP/ED only)
+
+**Trigger**: Pipeline prints `[oped] AI review candidates → temp/scans/oped_ai_review.json`
+with `vocal_clusters > 0`.
+
+**Not triggered when**: Project has instrumental-only OP/ED (like 鉄腕アトム 1963).
+The auto-clean path handles that silently — no AI intervention needed.
+
+**Data**: `temp/scans/oped_ai_review.json`
+
+```json
+{
+  "description": "OP/ED AI Review Candidates — vocal OP/ED lyric variants across episodes.",
+  "total_groups": 5,
+  "op_groups": 3,
+  "ed_groups": 2,
+  "candidates": [{
+    "region": "OP",
+    "time_position_s": 6.1,
+    "episode_count": 50,
+    "variants": {"歌詞の一部": 30, "歌詞が違う": 12},
+    "noise_variants": {"me": 8},
+    "suggested_canonical": "歌詞の一部",
+    "suggested_confidence": 0.6,
+    "canonical": "",
+    "sample_times": [{"ep": "...", "start": "00:00:06.100", "text": "歌詞の一部"}]
+  }]
+}
+```
+
+**Flow**:
+1. Pipeline auto-detects vocal OP/ED via cross-episode text similarity
+2. Instrumental-only regions are auto-cleaned (→ [音楽]) — no AI needed
+3. For vocal regions with text variants, `oped_ai_review.json` is generated
+4. Read the file, fill `"canonical"` for each candidate group
+5. Set `"canonical": "__INSTRUMENTAL__"` if AI determines it's actually instrumental
+6. Leave `"canonical": ""` to skip (no fix applied)
+
+**Judgment rules**:
+- `suggested_canonical` is majority-vote — override if wrong
+- Reference `variants` (meaningful JP) vs `noise_variants` (Whisper hallucinations)
+- If all variants look like noise → set `"__INSTRUMENTAL__"`
+- If uncertain → leave blank (keeps current text)
+- External knowledge of the song lyrics is valid reference
+- The original SRT text and Whisper output can both be referenced
+
+**Apply**:
+```bash
+python oped_fixer.py AI审查后/ --lang ja -o temp/scans/oped_fixes.json \
+    --apply-ai-review temp/scans/oped_ai_review.json
+```
+Then re-run `--apply-ai-review` in the full pipeline to apply all fixes.
+
+**Token efficiency**: Candidates file is small (typically 3-10 groups for vocal OP/ED).
+Each group has only variant texts (short lyric lines), not full SRT content.
+
+---
+
 ## AI Web Search for Proper Nouns (optional)
 
 **Trigger**: User says "网上搜索专有名词" / "search for character names"
