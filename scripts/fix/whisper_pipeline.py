@@ -27,7 +27,7 @@ import lib._path  # noqa: F401
 from lib.whisper_utils import (
     setup_windows_utf8, extract_ep_number, to_seconds, format_tc,
     parse_srt, write_srt, apply_fixes_to_srt, run_whisper,
-    extract_audio_wav, is_valid_japanese,
+    extract_audio_wav, is_valid_subtitle_text,
     separate_vocals, get_audio_duration,
 )
 setup_windows_utf8()
@@ -153,16 +153,26 @@ def cue_overlaps_speech(cue, speech_segs, min_overlap_s=0.0):
     return False
 
 
-from lib.japanese_utils import NON_DIALOGUE_PATTERNS
-NON_DIALOGUE_RE = re.compile('|'.join(NON_DIALOGUE_PATTERNS))
+# Non-dialogue markers — compiled per language on first use
+_NON_DIALOGUE_CACHE = {}
 
 
-def is_non_dialogue_marker(text):
-    """Check if text is a known non-dialogue editorial marker."""
-    return bool(NON_DIALOGUE_RE.match(text.strip()))
+def _get_non_dialogue_re(target_lang='ja'):
+    """Get compiled regex for non-dialogue markers in the target language."""
+    if target_lang not in _NON_DIALOGUE_CACHE:
+        from lib.language_utils import get_lang_utils
+        lu = get_lang_utils(target_lang)
+        patterns = getattr(lu, 'NON_DIALOGUE_PATTERNS', [])
+        _NON_DIALOGUE_CACHE[target_lang] = re.compile('|'.join(patterns)) if patterns else re.compile(r'$^')
+    return _NON_DIALOGUE_CACHE[target_lang]
 
 
-def vad_delete_nonspeech(audio_path, cues, srt_path):
+def is_non_dialogue_marker(text, target_lang='ja'):
+    """Check if text is a known non-dialogue editorial marker (language-aware)."""
+    return bool(_get_non_dialogue_re(target_lang).match(text.strip()))
+
+
+def vad_delete_nonspeech(audio_path, cues, srt_path, target_lang='ja'):
     """Delete non-dialogue cues. Two-tier strategy:
 
     Tier A — Content-based: Always delete known editorial markers
@@ -193,7 +203,7 @@ def vad_delete_nonspeech(audio_path, cues, srt_path):
         text = c['text'].strip()
 
         # Tier A: known non-dialogue markers — always delete
-        if is_non_dialogue_marker(text):
+        if is_non_dialogue_marker(text, target_lang):
             deleted.append(c)
             continue
 
@@ -202,8 +212,8 @@ def vad_delete_nonspeech(audio_path, cues, srt_path):
         # if VAD says no speech (VAD can miss short/spoken lines).
         has_speech = cue_overlaps_speech(c, speech_segs, min_overlap_s=0.0)
         if not has_speech:
-            from lib.whisper_utils import looks_like_plausible_japanese
-            if looks_like_plausible_japanese(text):
+            from lib.whisper_utils import looks_like_plausible_text
+            if looks_like_plausible_text(text, target_lang):
                 kept.append(c)
                 continue
             cue_dur = c['end_s'] - c['start_s']
@@ -647,7 +657,7 @@ def _concat_wavs(seg_paths, output_path, silence_s=2.0, sample_rate=16000):
 # Tier 2: full-episode fix
 # ═══════════════════════════════════════════════════════════════
 
-def align_and_fix(cues, whisper_segs, save_transcript_to: str = None):
+def align_and_fix(cues, whisper_segs, save_transcript_to: str = None, target_lang='ja'):
     """Align whisper segments to SRT cues by time overlap.
 
     Args:
@@ -690,7 +700,7 @@ def align_and_fix(cues, whisper_segs, save_transcript_to: str = None):
                         best_overlap = ratio
                         best_seg = wh
 
-        if best_seg and best_overlap >= 0.3 and is_valid_japanese(best_seg['text']):
+        if best_seg and best_overlap >= 0.3 and is_valid_subtitle_text(best_seg['text'], target_lang):
             fixes.append({
                 'start': c['start'], 'end': c['end'],
                 'original': c['text'][:80],

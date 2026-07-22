@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Shared Chinese text utilities — trad→simp mapping, pinyin normalization.
+"""Shared Chinese text utilities — trad→simp mapping, pinyin normalization,
+common words, non-dialogue markers, proper noun patterns.
 
-Used by: apply_fixes.py, noun_checker.py (ChineseNormalizer)
+Used by: apply_fixes.py, noun_checker.py, build_glossary.py, auto_classify.py
 """
+
+import re
 
 # Traditional → Simplified Chinese character mapping
 # Merged from apply_fixes.py (comprehensive) and noun_checker.py (ChineseNormalizer)
@@ -56,3 +59,102 @@ PINYIN_TONES = str.maketrans({
     'ū':'u','ú':'u','ǔ':'u','ù':'u',
     'ǖ':'v','ǘ':'v','ǚ':'v','ǜ':'v',
 })
+
+
+# ═══════════════════════════════════════════════════════════════
+# Common words — frequent Chinese compounds that are NOT proper nouns
+# Used by build_glossary.py + auto_classify.py for zh projects
+# ═══════════════════════════════════════════════════════════════
+
+COMMON_WORDS = frozenset({
+    # Function words / particles
+    '的', '了', '在', '是', '有', '和', '就', '都', '也', '要', '会', '能',
+    '不', '没', '很', '还', '更', '最', '只', '才', '又', '再', '已经',
+    '把', '被', '让', '给', '对', '从', '到', '向', '跟', '比', '因为',
+    '所以', '但是', '虽然', '如果', '可以', '应该', '可能', '必须',
+    # Pronouns
+    '我', '你', '他', '她', '它', '我们', '你们', '他们', '她们',
+    '自己', '大家', '谁', '什么', '哪', '怎么', '怎么样', '为什么',
+    '这个', '那个', '这些', '那些', '这里', '那里', '这么', '那么',
+    # Common verbs / adjectives
+    '说', '看', '来', '去', '做', '想', '知道', '觉得', '告诉', '问',
+    '看见', '听见', '找到', '得到', '变成', '成为', '发生', '开始',
+    '喜欢', '爱', '希望', '相信', '忘记', '记得', '需要', '明白',
+    '好', '大', '小', '多', '少', '新', '旧', '快', '慢', '高', '低',
+    '对', '错', '真', '假', '难', '容易', '重要', '特别', '一样',
+    # Time / quantity
+    '今天', '明天', '昨天', '现在', '以前', '以后', '时间', '时候',
+    '一个', '两个', '三个', '第一', '第二', '一次', '两次', '几次',
+    '一些', '一点', '很多', '全部', '所有', '每个', '整个', '一半',
+    # Common compounds (nouns that aren't proper nouns)
+    '世界', '地球', '宇宙', '人类', '国家', '城市', '地方', '东西',
+    '事情', '问题', '办法', '结果', '原因', '意思', '关系', '朋友',
+    '敌人', '家人', '生命', '机器', '电脑', '科学', '技术', '力量',
+    '当时', '刚才', '立即', '马上', '突然', '终于', '一直', '常常',
+    '正在', '一定', '当然', '其实', '只是', '还是', '就是', '的话',
+    '没有', '不是', '不要', '不会', '不能', '不用', '不准',
+    # Exclamations / interjections (not meaningful dialogue)
+    '啊', '呀', '哦', '嗯', '哎', '嘿', '哟', '哇', '嘻', '呵',
+    '喂', '噢', '嘛', '呃', '咯', '唔', '哈', '哼', '唉',
+})
+
+# ── Exclamation characters for meaningful_char_count ──
+EXCLAMATION_CHARS = frozenset(
+    '啊呀哦嗯哎嘿哟哇嘻呵咳呕咚叮当噼啪哗啦咯唔嘛呃噢嗷呜哼嘶喔吱呱啾嘎哞咩'
+)
+
+# ── Non-dialogue editorial markers (Chinese) ──
+NON_DIALOGUE_PATTERNS = [
+    r'^\[音乐\]$',
+    r'^\[BGM\]$',
+    r'^\[背景音乐\]$',
+    r'^\[掌声\]$',
+    r'^\[笑声\]$',
+    r'^\[欢呼\]$',
+    r'^\[尖叫声\]$',
+    r'^\[哭声\]$',
+    r'^\[音效\]$',
+    r'^\[脚步声\]$',
+    r'^\[钟声\]$',
+    r'^\[哨声\]$',
+    r'^\[雷声\]$',
+    r'^\[风声\]$',
+    r'^\[海浪\]$',
+    r'^\[雨声\]$',
+    r'^\[爆炸\]$',
+    r'^\[枪声\]$',
+    r'^\[汽车\]$',
+    r'^\[飞机\]$',
+    r'^\[电话\]$',
+    r'^\[门铃\]$',
+    r'^\[敲门\]$',
+    r'^\[开门\]$',
+    r'^\[SE\]$',
+    r'^\[嘈杂\]$',
+    r'^\[骚动\]$',
+    r'^\[动物叫声\]$',
+]
+
+# Non-word patterns: dashes, repeated chars
+NON_WORD_RE = re.compile(
+    r'^[-—]{2,}$|'
+    r'^(.)\1{2,}$|'
+    r'^(啊|呀|哦|嗯|哎|嘿|哟|哇|哈){2,}$'
+)
+
+# Honorific / title suffix patterns for Chinese proper name detection
+_HONORIFIC_LIST = (
+    '先生', '女士', '小姐', '博士', '教授', '老师', '医生', '律师',
+    '局长', '部长', '市长', '校长', '院长', '队长', '船长', '机长',
+    '总统', '总理', '主席', '将军', '元帅', '司令',
+)
+
+# Chinese proper noun patterns (for compound extraction)
+PROPER_NOUN_PATTERNS = [
+    r'[一-鿿]{2,4}',  # 2-4 hanzi compounds → possible transliterated names
+]
+
+# Common Chinese surnames (for proper noun identification)
+SURNAMES = frozenset(
+    '王李张刘陈杨赵黄周吴徐孙马胡朱郭何罗高林郑梁谢唐许冯宋韩邓彭曹肖田董潘袁蔡蒋余杜叶程苏魏吕丁任卢姚钟姜崔谭陆范汪廖石金贾夏韦付方白邹孟熊秦邱江尹薛闫段雷侯龙史陶黎贺顾毛郝龚邵万钱严覃武戴莫孔向汤温芦季俞章鲁葛苗'
+)

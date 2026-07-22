@@ -42,7 +42,7 @@ from lib.whisper_utils import (
     setup_windows_utf8, extract_ep_number, to_seconds, format_tc,
     parse_srt, write_srt, apply_fixes_to_srt, run_whisper,
     extract_audio_wav, classify_garbled_text,
-    get_audio_duration, meaningful_jp_count, is_length_anomaly,
+    get_audio_duration, meaningful_char_count, is_length_anomaly,
 )
 setup_windows_utf8()
 
@@ -357,7 +357,8 @@ class Fixer:
                 try:
                     extract_audio_wav(self._video_path, vad_audio)
                     cues, deleted, speech_segs = vad_delete_nonspeech(
-                        vad_audio, cues, self._srt_path)
+                        vad_audio, cues, self._srt_path,
+                        target_lang=self.target_lang)
                     deleted_count = len(deleted)
                     # Persist speech_segs for later use (human review VAD alignment)
                     self._save_speech_segs(speech_segs)
@@ -457,11 +458,11 @@ class Fixer:
             report = FixReport(source='whisper', tier=tier,
                               deleted=deleted_count)
 
-            from lib.whisper_utils import looks_like_plausible_japanese
+            from lib.whisper_utils import looks_like_plausible_text
 
             auto_keep = []
             ai_fragments = []        # → L2.5 AI上下文补全
-            auto_cut = []            # → 直接删除 (meaningful_jp < 2)
+            auto_cut = []            # → 直接删除 (meaningful chars < 2)
 
             all_items = list(fixes)
 
@@ -480,26 +481,26 @@ class Fixer:
                 # eval_text: prefer Whisper output, fall back to original
                 eval_text = (f.get('replacement') or f.get('original', '')).strip()
 
-                # ① Pre-filter: no meaningful Japanese → auto-cut
-                if meaningful_jp_count(eval_text) < 2:
+                # ① Pre-filter: no meaningful characters in target language → auto-cut
+                if meaningful_char_count(eval_text, self.target_lang) < 2:
                     auto_cut.append(f)
                     continue
 
-                # ② Readable Japanese → auto-keep (unless hallucination-suspect)
-                if looks_like_plausible_japanese(eval_text, self.target_lang):
+                # ② Readable target language → auto-keep (unless hallucination-suspect)
+                if looks_like_plausible_text(eval_text, self.target_lang):
                     original = f.get('original', '')
                     # Only check length anomaly if the ORIGINAL had meaningful
-                    # Japanese content.  Pure noise (Latin, single kana) has
-                    # nothing to preserve — Whisper output is always an improvement.
+                    # content.  Pure noise has nothing to preserve — Whisper
+                    # output is always an improvement.
                     if (f.get('replacement')
-                            and meaningful_jp_count(original) >= 2
+                            and meaningful_char_count(original, self.target_lang) >= 2
                             and is_length_anomaly(original, eval_text)):
                         ai_fragments.append(f)
                     else:
                         auto_keep.append(f)
                     continue
 
-                # ③ Has Japanese content but with Latin corruption → AI completion
+                # ③ Has target-language content but with corruption → AI completion
                 ai_fragments.append(f)
 
             # ── Apply auto-cuts: delete noise cues from SRT ──
@@ -1120,7 +1121,7 @@ class Fixer:
                 # Re-check original text: Latin-only noise that Whisper
                 # hallucinated onto should be auto-cut, not escalated.
                 original = entry.get('original', '')
-                if meaningful_jp_count(original) < 2:
+                if meaningful_char_count(original, self.target_lang) < 2:
                     cues = [c for c in cues
                             if c.get('start', '') != ts]
                     auto_cut += 1
@@ -1147,7 +1148,7 @@ class Fixer:
                     if ctx_cues:
                         noise_count = sum(
                             1 for t in ctx_cues
-                            if meaningful_jp_count(t) < 2
+                            if meaningful_char_count(t, self.target_lang) < 2
                         )
                         if noise_count / len(ctx_cues) >= 0.6:
                             cues = [c for c in cues

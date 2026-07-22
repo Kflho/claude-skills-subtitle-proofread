@@ -300,8 +300,11 @@ def _parse_glossary_section(content, section_header, stop_headers):
     return words
 
 
-def scan_glossary(glossary_path):
+def scan_glossary(glossary_path, lang='ja'):
     """Scan ALL sections of proper-nouns.md for common words that should be filtered.
+
+    Currently only supports Japanese (ja). For zh/en, returns empty result
+    since the glossary format and cleaning rules are Japanese-specific.
 
     Returns:
         dict: {
@@ -311,6 +314,12 @@ def scan_glossary(glossary_path):
             'jamdict_available': bool,
         }
     """
+    if lang != 'ja':
+        print(f'[auto_clean] Skipping — lang={lang} not supported (Japanese-only glossary cleaning).',
+              file=sys.stderr)
+        return {'suggestions': [], 'kept': [], 'total_scanned': 0,
+                'jamdict_available': False, 'skipped': True, 'reason': f'lang={lang} not ja'}
+
     if not os.path.exists(glossary_path):
         return {'error': f'Glossary not found: {glossary_path}'}
 
@@ -589,7 +598,7 @@ Examples:
     )
     parser.add_argument('--glossary', required=True,
                         help='Path to proper-nouns.md')
-    parser.add_argument('--lang', default='ja', choices=['ja', 'zh'],
+    parser.add_argument('--lang', default='ja', choices=['ja', 'zh', 'en'],
                         help='Target language (default: ja)')
     parser.add_argument('--apply', action='store_true',
                         help='Apply suggestions (edit japanese_utils.py)')
@@ -603,7 +612,7 @@ Examples:
         print(f'ERROR: {args.glossary} not found.', file=sys.stderr)
         sys.exit(1)
 
-    result = scan_glossary(args.glossary)
+    result = scan_glossary(args.glossary, lang=args.lang)
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))

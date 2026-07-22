@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 import lib._path  # noqa: F401
 from lib.whisper_utils import (
     OP_BOUNDARY_SEC, ED_BOUNDARY_SEC,
-    parse_srt, write_srt, meaningful_jp_count,
+    parse_srt, write_srt,
 )
 
 
@@ -82,43 +82,54 @@ def _text_similarity(a: str, b: str) -> float:
     return len(intersection) / len(union)
 
 
-def _is_noise(text: str) -> bool:
+def _is_noise(text: str, target_lang: str = 'ja') -> bool:
     """Check if text is Whisper hallucination noise, not real language.
 
-    Noise patterns:
-      - Very short (≤2 chars, except valid Japanese particles)
-      - Pure Latin alphabet (no kana/kanji)
-      - Repetitive single character ("ああああああ")
-      - Latin ratio > 50% with no CJK
+    Noise patterns (language-aware):
+      - Very short (≤2 chars for ja, empty for all)
+      - Pure Latin alphabet with no target-language script
+      - Repetitive single character ("ああああああ", "aaaaaa")
+      - Latin ratio > 50% with no CJK (ja/zh)
     """
     t = text.strip()
     if not t:
         return True
-    if len(t) <= NOISE_MAX_LEN:
-        # Short, but could be valid like "はい" or "うん"
-        has_kana = bool(re.search(r'[ぁ-ヿ]', t))
-        has_kanji = bool(re.search(r'[一-鿿]', t))
-        has_latin = bool(re.search(r'[a-zA-Z]', t))
-        if has_latin and not has_kana and not has_kanji:
-            return True  # Pure Latin short text → noise
-        if not has_kana and not has_kanji and not has_latin:
-            return True  # Pure numbers/symbols → noise
-        # Single kana could be noise or valid — check repetitiveness
-        if len(t) <= 1 and has_kana:
-            return True  # Single kana → likely noise
-        return False  # 2-3 char kana/kanji → could be valid
 
     has_kana = bool(re.search(r'[ぁ-ヿ]', t))
     has_kanji = bool(re.search(r'[一-鿿]', t))
     has_latin = bool(re.search(r'[a-zA-Z]', t))
 
-    # Pure Latin, no Japanese characters
-    if has_latin and not has_kana and not has_kanji:
-        latin_chars = sum(1 for c in t if c.isascii() and c.isalpha())
-        if latin_chars / len(t) > 0.5:
+    if target_lang == 'zh':
+        # Chinese: has hanzi = valid; pure Latin = noise
+        if len(t) <= 1:
+            return not has_kanji  # single hanzi could be valid
+        if has_latin and not has_kanji:
+            latin_chars = sum(1 for c in t if c.isascii() and c.isalpha())
+            if latin_chars / len(t) > 0.5:
+                return True
+    elif target_lang == 'en':
+        # English: has Latin = valid; pure CJK = noise (shouldn't appear in EN subs)
+        if len(t) <= 1:
+            return not has_latin
+        if has_kanji and not has_latin:
             return True
+    else:
+        # Japanese: existing logic
+        if len(t) <= NOISE_MAX_LEN:
+            if has_latin and not has_kana and not has_kanji:
+                return True
+            if not has_kana and not has_kanji and not has_latin:
+                return True
+            if len(t) <= 1 and has_kana:
+                return True
+            return False
 
-    # Repetitive: same char > 70% of string
+        if has_latin and not has_kana and not has_kanji:
+            latin_chars = sum(1 for c in t if c.isascii() and c.isalpha())
+            if latin_chars / len(t) > 0.5:
+                return True
+
+    # Repetitive: same char > 70% of string (applies to all languages)
     if len(t) >= 4:
         char_counts = Counter(t)
         most_common_ratio = char_counts.most_common(1)[0][1] / len(t)
@@ -128,19 +139,42 @@ def _is_noise(text: str) -> bool:
     return False
 
 
-def _is_valid_japanese(text: str) -> bool:
-    """Check if text looks like real Japanese content (not noise)."""
+def _is_valid_text(text: str, target_lang: str = 'ja') -> bool:
+    """Check if text looks like real target-language content (not noise).
+
+    ja: has kana/kanji, Latin ratio ≤ 50%
+    zh: has hanzi, not pure Latin/symbols
+    en: has Latin words, not pure CJK/symbols
+    """
     t = text.strip()
     if len(t) < 2:
         return False
-    has_kana = bool(re.search(r'[ぁ-ヿ]', t))
-    has_kanji = bool(re.search(r'[一-鿿]', t))
-    if not (has_kana or has_kanji):
-        return False
-    latin_ratio = sum(1 for c in t if c.isascii() and c.isalpha()) / max(len(t), 1)
-    if latin_ratio > 0.5:
-        return False
-    return True
+
+    if target_lang == 'zh':
+        has_hanzi = bool(re.search(r'[一-鿿]', t))
+        if not has_hanzi:
+            return False
+        return True
+    elif target_lang == 'en':
+        has_latin = bool(re.search(r'[a-zA-Z]{2,}', t))
+        has_hanzi = bool(re.search(r'[一-鿿]', t))
+        return has_latin and not has_hanzi
+    else:
+        # Japanese
+        has_kana = bool(re.search(r'[ぁ-ヿ]', t))
+        has_kanji = bool(re.search(r'[一-鿿]', t))
+        if not (has_kana or has_kanji):
+            return False
+        latin_ratio = sum(1 for c in t if c.isascii() and c.isalpha()) / max(len(t), 1)
+        if latin_ratio > 0.5:
+            return False
+        return True
+
+
+# Backward compatibility alias
+def _is_valid_japanese(text: str) -> bool:
+    """[DEPRECATED] Use _is_valid_text(text, 'ja') instead."""
+    return _is_valid_text(text, 'ja')
 
 
 def _is_music_marker(text: str) -> bool:
@@ -483,9 +517,9 @@ class OpedFixer:
             for text, count in text_counts.items():
                 if _is_music_marker(text):
                     continue  # Already a marker, don't count
-                if _is_noise(text):
+                if _is_noise(text, self.lang):
                     noise_count += count
-                elif _is_valid_japanese(text):
+                elif _is_valid_text(text, self.lang):
                     valid_count += count
 
             cluster.noise_count = noise_count
@@ -534,7 +568,7 @@ class OpedFixer:
         all_texts = list(set(e['text'] for e in cluster.entries))
         if len(all_texts) <= 1:
             # All identical — could be OP/ED lyrics already correct, or noise
-            if _is_noise(all_texts[0]) if all_texts else True:
+            if _is_noise(all_texts[0], self.lang) if all_texts else True:
                 cluster.is_instrumental = True
                 self.instrumental_clusters.append(cluster)
             else:
@@ -578,7 +612,7 @@ class OpedFixer:
                 text = entry['text'].strip()
                 if _is_music_marker(text):
                     continue  # Already a marker
-                if not _is_noise(text) and _is_valid_japanese(text):
+                if not _is_noise(text, self.lang) and _is_valid_text(text, self.lang):
                     continue  # Real Japanese in an instrumental cluster → keep
 
                 fixes.append({
@@ -617,7 +651,7 @@ class OpedFixer:
             for text, count in cluster.variants.items():
                 if _is_music_marker(text):
                     continue
-                if _is_noise(text):
+                if _is_noise(text, self.lang):
                     noise_variants[text] = count
                 else:
                     variants[text] = count

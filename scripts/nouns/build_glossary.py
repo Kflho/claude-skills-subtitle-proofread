@@ -19,7 +19,7 @@ from collections import defaultdict
 
 import lib._path  # noqa: F401
 
-from lib.japanese_utils import COMMON_KATAKANA as _COMMON_KATAKANA, COMMON_KANJI as _COMMON_KANJI, NON_WORD_RE
+from lib.language_utils import get_lang_utils
 
 # Minimum frequency to include in glossary
 _MIN_FREQ = 3
@@ -94,10 +94,17 @@ def build_glossary(term_freq, min_freq=_MIN_FREQ, lang='ja', use_jamdict=True,
 
     Returns dict with keys: characters, places, organizations, terms, kanji_compounds.
     """
-    # ── Jamdict pre-filter (if available) ──
+    # ── Language-specific utilities ──
+    _LU = get_lang_utils(lang)
+    _COMMON_KATAKANA = getattr(_LU, 'COMMON_KATAKANA', frozenset())
+    _COMMON_KANJI = getattr(_LU, 'COMMON_KANJI', frozenset())
+    _COMMON_WORDS = getattr(_LU, 'COMMON_WORDS', frozenset())
+    NON_WORD_RE = getattr(_LU, 'NON_WORD_RE', re.compile(r'$^'))
+
+    # ── Jamdict pre-filter (Japanese only) ──
     _jam = None
     _jamdict_warned = False
-    if use_jamdict:
+    if use_jamdict and lang == 'ja':
         try:
             from jamdict import Jamdict
             _jam = Jamdict()
@@ -111,25 +118,21 @@ def build_glossary(term_freq, min_freq=_MIN_FREQ, lang='ja', use_jamdict=True,
     def _is_common_word(word):
         """Check if a word is a common (non-proper-noun) entry.
 
-        Aggressive strategy: if it's in JMdict at all → common word → reject.
-        The user only cares about character names and anime-specific concepts
-        (not real-world terms like 日本/東京/火星).
-
-        COMMON_KANJI/COMMON_KATAKANA serve as hard override + fallback when
-        Jamdict is unavailable.
+        ja: Jamdict + COMMON_KANJI/COMMON_KATAKANA
+        zh/en: COMMON_WORDS frozenset only
         """
-        # Hard override: frozensets always apply
-        if word in _COMMON_KANJI or word in _COMMON_KATAKANA:
+        # Hard override: language-specific common word lists
+        if word in _COMMON_KANJI or word in _COMMON_KATAKANA or word in _COMMON_WORDS:
             return True
 
-        # Jamdict: in JMdict → common word (ignore JMnedict entirely)
+        # Jamdict: Japanese only — in JMdict → common word
         if _jam:
             try:
                 result = _jam.lookup(word.strip())
                 if len(result.entries) > 0:
                     return True
             except Exception:
-                pass  # fall through
+                pass
 
         return False
 

@@ -195,15 +195,27 @@ def scan_file(filepath, skip_oped=True, target_lang='ja'):
         classification = classify_garbled_text(c['text'], target_lang=target_lang)
         gtype = classification['type']
 
-        # ── 术语收集（所有 cue） ──
+        # ── 术语收集（所有 cue，按语言提取） ──
         text = c['text']
         if target_lang == 'ja':
             # Katakana words: 2-6 chars
             for m in re.finditer(r'[゠-ヿ]{2,6}', text):
                 term_freq[m.group()] += 1
-        # Kanji/hanzi compounds: 2-4 consecutive characters (shared for ja and zh)
-        for m in re.finditer(r'[一-鿿]{2,4}', text):
-            term_freq[m.group()] += 1
+            # Kanji compounds: 2-4 consecutive characters
+            for m in re.finditer(r'[一-鿿]{2,4}', text):
+                term_freq[m.group()] += 1
+        elif target_lang == 'zh':
+            # Hanzi compounds: 2-4 characters (Chinese transliterated names)
+            for m in re.finditer(r'[一-鿿]{2,4}', text):
+                term_freq[m.group()] += 1
+        elif target_lang == 'en':
+            # Capitalized words: potential proper nouns in English subtitles
+            for m in re.finditer(r'\b[A-Z][a-z]{2,}\b', text):
+                term_freq[m.group()] += 1
+        else:
+            # Fallback: CJK compounds (generic)
+            for m in re.finditer(r'[一-鿿]{2,4}', text):
+                term_freq[m.group()] += 1
 
         # ── 重复检测（所有 cue） ──
         cue_repeats = _find_repeats(c['text'])

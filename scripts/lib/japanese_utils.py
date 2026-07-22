@@ -187,6 +187,8 @@ COMMON_KANJI = frozenset({
     'そんなこと言','集ま','やっぱりが掘',
     # ── auto_clean_glossary (1 kanji words) ──
     '何気',  # time/number fragment
+    # ── auto_clean_glossary (1 kanji words) ──
+    '力持',  # verb stem: ends with "持"
 })
 
 # Non-word patterns: dashes, repeated chars, breathing/filler sounds.

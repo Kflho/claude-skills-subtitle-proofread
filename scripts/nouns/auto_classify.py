@@ -23,9 +23,9 @@ import sys
 
 import lib._path  # noqa: F401
 
-from lib.japanese_utils import COMMON_KATAKANA as _JA_COMMON_WORDS, COMMON_KANJI as _JA_COMMON_KANJI, NON_WORD_RE
+from lib.language_utils import get_lang_utils
 
-# ── Try to import Jamdict (optional, graceful fallback) ──
+# ── Try to import Jamdict (optional, graceful fallback, Japanese only) ──
 _JAMDICT_AVAILABLE = False
 _jam = None
 try:
@@ -79,7 +79,7 @@ def _in_jamdict_names(text):
 
 
 def classify_candidate(candidate_text, context_cue='', episode_count=1, lang='ja'):
-    """Classify a proper noun candidate.
+    """Classify a proper noun candidate (language-aware).
 
     Args:
         candidate_text: the candidate word/phrase
@@ -93,68 +93,97 @@ def classify_candidate(candidate_text, context_cue='', episode_count=1, lang='ja
     if not text:
         return {'verdict': 'REJECT', 'reason': 'empty'}
 
-    # ── Automatic REJECT ──
+    # ── Language-specific utilities ──
+    _LU = get_lang_utils(lang)
+    _COMMON_WORDS = getattr(_LU, 'COMMON_WORDS', frozenset())
+    _COMMON_KATAKANA = getattr(_LU, 'COMMON_KATAKANA', frozenset())
+    _COMMON_KANJI = getattr(_LU, 'COMMON_KANJI', frozenset())
+    NON_WORD_RE = getattr(_LU, 'NON_WORD_RE', re.compile(r'$^'))
+
+    # ── Automatic REJECT (language-agnostic) ──
 
     # Non-word patterns (dashes, breathing sounds, repetition)
     if NON_WORD_RE.match(text):
         return {'verdict': 'REJECT', 'reason': 'non-word pattern (onomatopoeia/filler)'}
 
-    # Pure hiragana — proper nouns are almost never pure hiragana in Japanese
-    if re.fullmatch(r'[ぁ-ゟ]+', text):
-        return {'verdict': 'REJECT', 'reason': 'pure hiragana (likely verb/adjective fragment)'}
-
     # Single character + single episode → likely ASR fragment
     if len(text) == 1 and episode_count == 1:
         return {'verdict': 'REJECT', 'reason': 'single char, single episode (ASR fragment)'}
 
-    # Latin-only → not a Japanese proper noun
-    if re.fullmatch(r'[a-zA-Z\s]+', text):
-        return {'verdict': 'REJECT', 'reason': 'latin-only (not JP proper noun)'}
+    # ── Language-specific REJECT rules ──
 
-    # ── Jamdict check (if available) ──
-    # Aggressive: in JMdict → common word → REJECT (ignore JMnedict).
-    # User only cares about character names & anime-specific concepts.
+    if lang == 'ja':
+        # Pure hiragana — proper nouns are almost never pure hiragana
+        if re.fullmatch(r'[ぁ-ゟ]+', text):
+            return {'verdict': 'REJECT', 'reason': 'pure hiragana (likely verb/adjective fragment)'}
 
-    # If it's a known common word → REJECT unconditionally
-    if _in_jamdict_common(text):
-        return {'verdict': 'REJECT',
-                'reason': 'in JMdict (common word)'}
+        # Latin-only → not a Japanese proper noun
+        if re.fullmatch(r'[a-zA-Z\s]+', text):
+            return {'verdict': 'REJECT', 'reason': 'latin-only (not JP proper noun)'}
 
-    # If in proper names dictionary (and NOT in JMdict) → ACCEPT
-    if _in_jamdict_names(text):
-        return {'verdict': 'ACCEPT', 'reason': 'in JMnedict (proper name dictionary)'}
+        # Jamdict check (Japanese dictionary)
+        if _in_jamdict_common(text):
+            return {'verdict': 'REJECT', 'reason': 'in JMdict (common word)'}
+        if _in_jamdict_names(text):
+            return {'verdict': 'ACCEPT', 'reason': 'in JMnedict (proper name dictionary)'}
 
-    # ── Automatic ACCEPT ──
+        # Known common words → REJECT
+        if text in _COMMON_KATAKANA or text in _COMMON_KANJI:
+            return {'verdict': 'REJECT',
+                    'reason': 'known common JP word (KATAKANA/KANJI)'}
 
-    # In known common katakana words list → REJECT
-    if text in _JA_COMMON_WORDS:
-        return {'verdict': 'REJECT', 'reason': 'known common katakana word'}
+        # Appears with honorific suffix → likely a name
+        if context_cue and _HONORIFIC_PATTERNS.search(text):
+            return {'verdict': 'ACCEPT',
+                    'reason': f'matches honorific pattern: ...{text}...'}
 
-    # In known common kanji words list → REJECT (hard override, catches
-    # words that are in both JMdict + JMnedict as rare surnames)
-    if text in _JA_COMMON_KANJI:
-        return {'verdict': 'REJECT', 'reason': 'known common kanji word'}
+        # Appears in self-introduction context
+        if context_cue and re.search(re.escape(text) + _INTRO_SUFFIX, context_cue):
+            return {'verdict': 'ACCEPT', 'reason': 'appears in intro pattern'}
 
-    # Appears with honorific suffix in context → likely a name
-    if context_cue and _HONORIFIC_PATTERNS.search(text):
-        return {'verdict': 'ACCEPT',
-                'reason': f'matches honorific pattern: ...{text}...'}
+        # Katakana + multi-episode → high probability proper noun
+        if re.search(r'[゠-ヿ]', text) and episode_count >= 2:
+            return {'verdict': 'ACCEPT',
+                    'reason': f'katakana + {episode_count} episodes'}
 
-    # Appears in self-introduction context
-    if context_cue and re.search(
-        re.escape(text) + _INTRO_SUFFIX, context_cue
-    ):
-        return {'verdict': 'ACCEPT', 'reason': 'appears in intro pattern'}
+        # Kanji name pattern (2-4 kanji, multi-episode)
+        if re.fullmatch(r'[一-鿿]{2,4}', text) and episode_count >= 2:
+            return {'verdict': 'ACCEPT',
+                    'reason': f'kanji name + {episode_count} episodes'}
 
-    # Katakana + multi-episode → high probability proper noun
-    if re.search(r'[゠-ヿ]', text) and episode_count >= 2:
-        return {'verdict': 'ACCEPT',
-                'reason': f'katakana + {episode_count} episodes'}
+    elif lang == 'zh':
+        # Known common Chinese words → REJECT
+        if text in _COMMON_WORDS:
+            return {'verdict': 'REJECT', 'reason': 'known common Chinese word'}
 
-    # Kanji name pattern (2-4 kanji, multi-episode)
-    if re.fullmatch(r'[一-鿿]{2,4}', text) and episode_count >= 2:
-        return {'verdict': 'ACCEPT',
-                'reason': f'kanji name + {episode_count} episodes'}
+        # Pure kana → not a Chinese proper noun
+        if re.fullmatch(r'[ぁ-ヿ]+', text):
+            return {'verdict': 'REJECT', 'reason': 'pure kana (not Chinese)'}
+
+        # Hanzi compound + multi-episode → likely proper noun
+        if re.fullmatch(r'[一-鿿]{2,4}', text) and episode_count >= 2:
+            return {'verdict': 'ACCEPT',
+                    'reason': f'hanzi compound + {episode_count} episodes'}
+
+        # Single hanzi → usually not a name
+        if len(text) == 1 and re.search(r'[一-鿿]', text):
+            return {'verdict': 'NEEDS_AI', 'reason': 'single hanzi — ambiguous'}
+
+    elif lang == 'en':
+        # Known common English words → REJECT
+        if text.lower() in _COMMON_WORDS:
+            return {'verdict': 'REJECT', 'reason': 'known common English word'}
+
+        # Capitalized word → likely proper noun
+        if re.fullmatch(r'[A-Z][a-z]{2,}', text):
+            if episode_count >= 2:
+                return {'verdict': 'ACCEPT',
+                        'reason': f'capitalized word + {episode_count} episodes'}
+            return {'verdict': 'NEEDS_AI', 'reason': 'capitalized word, single episode'}
+
+        # Multi-word capitalized → proper noun
+        if re.fullmatch(r'[A-Z][a-z]+ [A-Z][a-z]+', text):
+            return {'verdict': 'ACCEPT', 'reason': 'multi-word capitalized (likely name)'}
 
     # ── Remaining → NEEDS_AI ──
     return {'verdict': 'NEEDS_AI', 'reason': 'ambiguous — requires language judgment'}

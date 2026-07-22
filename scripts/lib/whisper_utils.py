@@ -239,7 +239,7 @@ def classify_garbled_text(text, target_lang='ja'):
 
     Args:
         text: 字幕文本（已 strip 标签）
-        target_lang: 目标语言 'ja'=日语, 'zh'=中文。决定哪些字符算"外文"。
+        target_lang: 字幕语言 'ja'|'zh'|'en'。决定哪些字符算"外文"。
 
     Returns:
         dict: {
@@ -260,6 +260,10 @@ def classify_garbled_text(text, target_lang='ja'):
     if target_lang == 'zh':
         # 中文项目：假名也是外文字符。仅汉字（无假名/拉丁/西里尔）为干净。
         if not has_latin and not has_cyrillic and not has_kana:
+            return {'type': 'clean', 'has_kana': False, 'has_kanji': has_kanji}
+    elif target_lang == 'en':
+        # 英文项目：拉丁字母=目标字符。CJK/假名/西里尔 = 外文乱码。
+        if not has_cyrillic and not has_kana and not has_kanji:
             return {'type': 'clean', 'has_kana': False, 'has_kanji': has_kanji}
     else:
         # 日语项目：假名+汉字均为目标字符。无拉丁/西里尔为干净。
@@ -624,25 +628,51 @@ def separate_vocals(audio_path, output_dir=None, python_exe=None):
 
 
 # ═══════════════════════════════════════════════════════════════
-# 8. 日语质量判断
+# 8. 字幕语言质量判断（ja/zh/en）
 # ═══════════════════════════════════════════════════════════════
 
+def is_valid_subtitle_text(text, target_lang='ja'):
+    """判断文本是否为有效的目标语言字幕（非纯罗马字幻觉/噪音）。
+
+    ja: 含假名或汉字 + 非纯拉丁
+    zh: 含汉字 + 非西里尔 + len≥2
+    en: 含拉丁字母(≥2字母的单词) + 非西里尔 + len≥3
+    """
+    text = text.strip()
+    if not text:
+        return False
+
+    if target_lang == 'zh':
+        has_hanzi = bool(re.search(r'[一-鿿]', text))
+        has_cyrillic = bool(re.search(r'[А-яЁё]', text))
+        return has_hanzi and not has_cyrillic and len(text) >= 2
+    elif target_lang == 'en':
+        has_latin_word = bool(re.search(r'[a-zA-Z]{2,}', text))
+        has_cyrillic = bool(re.search(r'[А-яЁё]', text))
+        return has_latin_word and not has_cyrillic and len(text) >= 3
+    else:
+        # Japanese (default)
+        has_kana = bool(re.search(r'[぀-ヿ]', text))
+        has_kanji = bool(re.search(r'[一-鿿]', text))
+        is_pure_romaji = bool(re.fullmatch(r'[a-zA-Z\s\d.,!?\'\"\-]+', text))
+        return (has_kana or has_kanji) and not is_pure_romaji
+
+
+# Backward compatibility alias
 def is_valid_japanese(text):
-    """判断文本是否为有效日语（含假名/汉字，非纯罗马字幻觉）。"""
-    has_kana = bool(re.search(r'[぀-ヿ]', text))
-    has_kanji = bool(re.search(r'[一-鿿]', text))
-    is_pure_romaji = bool(re.fullmatch(r'[a-zA-Z\s\d.,!?\'\"\-]+', text))
-    return (has_kana or has_kanji) and not is_pure_romaji
+    """[DEPRECATED] Use is_valid_subtitle_text(text, 'ja') instead."""
+    return is_valid_subtitle_text(text, 'ja')
 
 
-def looks_like_plausible_japanese(text, target_lang='ja'):
-    """可读性优先判断 — 文本是否像一句可读的目标语言。
+def looks_like_plausible_text(text, target_lang='ja'):
+    """可读性优先判断 — 文本是否像一句可读的目标语言字幕。
 
     比 classify_garbled_text 更宽松：只要看起来像正常台词就通过。
     不要求完美正确 — Whisper 听错一两个音但仍可读的句子也放行。
 
-    日语条件：含假名或汉字 + 不含拉丁字母 + 长度≥3 + 非纯数字/符号
-    中文条件：含汉字 + 不含假名 + 含拉丁也算可读（如英文名）
+    ja: 含假名或汉字 + 不含拉丁 + 不含西里尔 + 长度≥3
+    zh: 含汉字 + 不含西里尔 + 长度≥3
+    en: 含拉丁 + 不含西里尔 + 长度≥3
 
     Returns True if the text looks like readable target-language content.
     """
@@ -664,13 +694,29 @@ def looks_like_plausible_japanese(text, target_lang='ja'):
         if has_latin and not has_cyrillic and len(text) <= 10:
             return True
         return False
+    elif target_lang == 'en':
+        # 英文：有拉丁字母即通过；纯CJK/假名/西里尔 = 不是英文
+        if has_cyrillic:
+            return False
+        if has_kana and not has_latin:
+            return False
+        if has_hanzi and not has_latin:
+            return False
+        # 至少包含拉丁字母
+        return has_latin
     else:
         # 日语：有假名或汉字 + 无拉丁 + 无西里尔
         return (has_kana or has_kanji) and not has_latin and not has_cyrillic
 
 
+# Backward compatibility alias
+def looks_like_plausible_japanese(text, target_lang='ja'):
+    """[DEPRECATED] Use looks_like_plausible_text(text, target_lang) instead."""
+    return looks_like_plausible_text(text, target_lang)
+
+
 def is_short_garbled_fragment(text, target_lang='ja'):
-    """[DEPRECATED — triage now uses meaningful_jp_count + looks_like_plausible_japanese]
+    """[DEPRECATED — triage now uses meaningful_char_count + looks_like_plausible_text]
     判断是否为短碎片（AI 可根据上下文补全）。"""
     text = text.strip()
     if not text:
@@ -678,15 +724,17 @@ def is_short_garbled_fragment(text, target_lang='ja'):
     if target_lang == 'ja':
         latin_chars = re.findall(r'[a-zA-Z]', text)
         has_jp = bool(re.search(r'[぀-ヿ一-鿿]', text))
-        # Must have some Japanese content to be context-completable;
-        # pure Latin noise (me, re, go) → L6 auto-cut, not L2.5
         return has_jp and len(latin_chars) <= 5 and len(text) <= 15
+    elif target_lang == 'en':
+        # 短英文片段 → AI 可补全
+        return len(text) <= 20 and bool(re.search(r'[a-zA-Z]', text))
     else:
+        # zh: 短中文片段
         return len(text) <= 8 and not re.search(r'[一-鿿]', text)
 
 
 def is_ai_fixable(text, target_lang='ja'):
-    """[DEPRECATED — triage now uses meaningful_jp_count + looks_like_plausible_japanese]
+    """[DEPRECATED — triage now uses meaningful_char_count + looks_like_plausible_text]
     判断文本是否可由 AI 根据上下文推断修复。"""
     text = text.strip()
     if not text:
@@ -696,16 +744,17 @@ def is_ai_fixable(text, target_lang='ja'):
         has_kana = bool(re.search(r'[぀-ヿ]', text))
         has_kanji = bool(re.search(r'[一-鿿]', text))
         has_latin = bool(re.search(r'[a-zA-Z]', text))
-
-        # 要有日语语义 且 有拉丁乱码
         if not (has_kana or has_kanji):
             return False
         if not has_latin:
             return False
-        # 不要太长（一句话以内 AI 才能准确推断）
         if len(text) > 80:
             return False
         return True
+    elif target_lang == 'en':
+        # 英文：有拉丁 + 不太长 → AI 可修复
+        has_latin = bool(re.search(r'[a-zA-Z]', text))
+        return has_latin and len(text) <= 120
     else:
         # 中文：有汉字 + 拉丁乱码 + 不太长
         has_hanzi = bool(re.search(r'[一-鿿]', text))
@@ -713,45 +762,99 @@ def is_ai_fixable(text, target_lang='ja'):
         return has_hanzi and has_latin and len(text) <= 80
 
 
-def is_proper_noun_pattern(text):
-    """判断文本是否符合专名模式（片假名/汉字名 → 应送 L3 而非 AI 补全）。"""
-    # 纯片假名 → 可能是人名/角色名
-    if re.fullmatch(r'[゠-ヿー]{2,}', text):
-        return True
-    # 汉字组合 → 可能是日本人名
-    if re.fullmatch(r'[一-鿿]{2,4}', text):
-        return True
-    # 片假名+拉丁混合 → 可能是外来语专名
-    if re.search(r'[゠-ヿ]', text) and re.search(r'[a-zA-Z]', text):
-        return True
-    return False
+def is_proper_noun_pattern(text, target_lang='ja'):
+    """判断文本是否符合专名模式（语言感知）。
+
+    ja: 片假名/汉字名 → 应送 L3 而非 AI 补全
+    zh: 2-4 汉字（可能是音译日本名）
+    en: 首字母大写的单词（可能是英文译名）
+    """
+    if target_lang == 'zh':
+        # 2-4 汉字 → 可能是中文音译专名（阿童木、茶水博士）
+        if re.fullmatch(r'[一-鿿]{2,4}', text):
+            return True
+        # 中文姓氏 + 1-2 汉字 → 可能是人名
+        return False
+    elif target_lang == 'en':
+        # 首字母大写的 2+ 字母单词 → 可能是英文专名
+        if re.fullmatch(r'[A-Z][a-z]{2,}', text):
+            return True
+        # 首字母大写词组（如 Astro Boy）
+        if re.fullmatch(r'[A-Z][a-z]+ [A-Z][a-z]+', text):
+            return True
+        return False
+    else:
+        # 日语（默认）
+        # 纯片假名 → 可能是人名/角色名
+        if re.fullmatch(r'[゠-ヿー]{2,}', text):
+            return True
+        # 汉字组合 → 可能是日本人名
+        if re.fullmatch(r'[一-鿿]{2,4}', text):
+            return True
+        # 片假名+拉丁混合 → 可能是外来语专名
+        if re.search(r'[゠-ヿ]', text) and re.search(r'[a-zA-Z]', text):
+            return True
+        return False
 
 
-# ── Kana exclusively used in exclamations/grunts/sound-effects ──
-# あっ！えーっ！おっ！うんうん… are non-verbal sounds, not dialogue.
-# Used by meaningful_jp_count() to distinguish real speech from noise.
+# ── Exclamation/non-verbal character sets per language ──
+# Used by meaningful_char_count() to distinguish real speech from noise.
+
+# Japanese: あっ！えーっ！おっ！うんうん… are non-verbal sounds, not dialogue.
 EXCLAMATION_KANA = frozenset(
     'あいうえおぁぃぅぇぉっーん〜'
     'アイウエオァィゥェォッ'
 )
 
+# Chinese: 啊呀哦嗯哎嘿哟哇嘻呵… are exclamations/grunts, not meaningful words.
+_EXCLAMATION_HANZI = frozenset(
+    '啊呀哦嗯哎嘿哟哇嘻呵咳呕咚叮当噼啪哗啦咯唔嘛呃噢嗷呜哼嘶喔吱呱啾嘎哞咩'
+)
 
-def meaningful_jp_count(text):
-    """Count Japanese characters that are NOT just exclamations/grunts.
+# English: common filler words / exclamations, not meaningful dialogue.
+_EXCLAMATION_EN = frozenset({
+    'um', 'uh', 'oh', 'ah', 'eh', 'hmm', 'er', 'hmph', 'ugh', 'ack',
+    'ow', 'whoa', 'hey', 'huh', 'mm', 'hm', 'ha', 'heh', 'meh',
+    'shh', 'psst', 'ughh', 'argh', 'grr', 'ahem',
+})
 
-    Pure kana like あっ！えーっ！うんうん… are non-verbal sounds
-    that Whisper transcribed as kana; they don't indicate real dialogue.
-    Only kana/kanji outside EXCLAMATION_KANA count as evidence of speech.
+
+def meaningful_char_count(text, target_lang='ja'):
+    """Count meaningful characters in the target subtitle language.
+
+    Filters out exclamations, grunts, and non-verbal sounds that
+    Whisper may transcribe but don't constitute real dialogue.
+
+    Japanese:  counts kana + kanji, minus EXCLAMATION_KANA
+    Chinese:  counts hanzi, minus _EXCLAMATION_HANZI
+    English:  counts words (≥2 letters), minus _EXCLAMATION_EN
 
     Returns:
-        int: number of meaningful Japanese characters
+        int: number of meaningful characters/words
     """
     text = text.strip()
     if not text:
         return 0
-    all_jp = sum(1 for c in text if 'ぁ' <= c <= 'ヿ' or '一' <= c <= '鿿')
-    exclamation_jp = sum(1 for c in text if c in EXCLAMATION_KANA)
-    return all_jp - exclamation_jp
+
+    if target_lang == 'zh':
+        hanzi = sum(1 for c in text if '一' <= c <= '鿿')
+        excl = sum(1 for c in text if c in _EXCLAMATION_HANZI)
+        return max(0, hanzi - excl)
+    elif target_lang == 'en':
+        words = re.findall(r'[a-zA-Z]{2,}', text)
+        excl = sum(1 for w in words if w.lower() in _EXCLAMATION_EN)
+        return max(0, len(words) - excl)
+    else:
+        # Japanese (default)
+        all_jp = sum(1 for c in text if 'ぁ' <= c <= 'ヿ' or '一' <= c <= '鿿')
+        exclamation_jp = sum(1 for c in text if c in EXCLAMATION_KANA)
+        return all_jp - exclamation_jp
+
+
+# Backward compatibility alias
+def meaningful_jp_count(text):
+    """[DEPRECATED] Use meaningful_char_count(text, 'ja') instead."""
+    return meaningful_char_count(text, 'ja')
 
 
 def is_length_anomaly(original, whisper_text, ratio=3.0):

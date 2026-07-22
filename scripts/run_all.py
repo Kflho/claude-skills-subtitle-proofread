@@ -58,7 +58,7 @@ def _run(cmd_parts, cwd, timeout=600, desc=''):
 
 # ── Pipeline steps ──
 
-def _save_glossary_borderline(project_dir, glossary_path):
+def _save_glossary_borderline(project_dir, glossary_path, lang):
     """Save low-frequency kept entries from auto_clean for AI review.
 
     After auto_clean prunes the glossary, some non-proper-nouns may survive
@@ -67,7 +67,7 @@ def _save_glossary_borderline(project_dir, glossary_path):
     """
     try:
         from nouns.auto_clean_glossary import scan_glossary
-        result = scan_glossary(glossary_path)
+        result = scan_glossary(glossary_path, lang=lang)
     except Exception as e:
         print(f'[scan] Borderline scan failed: {e}', file=sys.stderr)
         return
@@ -180,7 +180,7 @@ def step_scan(project_dir, lang, force_rescan=False):
             # After auto_clean, entries that survived may still include
             # non-proper-nouns. Save low-frequency kept entries so AI can
             # review them without reading the full 200+ line glossary.
-            _save_glossary_borderline(project_dir, glossary_path)
+            _save_glossary_borderline(project_dir, glossary_path, lang)
         else:
             print('[scan] auto_clean failed — glossary may contain common words',
                   file=sys.stderr)
@@ -465,7 +465,7 @@ def _apply_classified_results(project_dir, candidates, unknowns, cands, lang):
         with open(fixes_path, 'w', encoding='utf-8') as f:
             json.dump({'fixes': accepted_fixes}, f, ensure_ascii=False, indent=2)
         results['auto_accepted'] = len(classified['accepted'])
-        _append_to_glossary(project_dir, classified['accepted'])
+        _append_to_glossary(project_dir, classified['accepted'], lang)
 
         # ── Write L3 report entries (replace: auto_classify is a full snapshot) ──
         try:
@@ -594,7 +594,7 @@ def step_ass_repair(project_dir):
                 project_dir, desc='ass')
 
 
-def _append_to_glossary(project_dir, accepted_candidates):
+def _append_to_glossary(project_dir, accepted_candidates, lang):
     """Append auto-classified proper nouns to the glossary — with validation.
 
     Only appends entries that pass basic proper-noun checks (not sound effects,
@@ -605,9 +605,16 @@ def _append_to_glossary(project_dir, accepted_candidates):
     if not accepted_candidates:
         return
 
-    # ── Validation helpers (same logic as auto_clean_glossary.py) ──
+    # ── Language-aware validation helpers ──
     import re as _re
+    from lib.language_utils import get_lang_utils
+    _LU = get_lang_utils(lang)
+    _COMMON_WORDS = getattr(_LU, 'COMMON_WORDS', frozenset())
+    _COMMON_KATAKANA = getattr(_LU, 'COMMON_KATAKANA', frozenset())
+    _COMMON_KANJI = getattr(_LU, 'COMMON_KANJI', frozenset())
+    _EXCLAMATION_CHARS = getattr(_LU, 'EXCLAMATION_CHARS', frozenset())
 
+    # Japanese-specific validation patterns (only used when lang='ja')
     _SOUND_RE = _re.compile(
         r'^([ア-ヾ]{2})\1+ン?$|'
         r'^[ア-ヾ]{1,3}[ッっ]$|'
@@ -615,30 +622,29 @@ def _append_to_glossary(project_dir, accepted_candidates):
         r'^[ア-ヾ]{2,3}ーン$|'
         r'^[ア-ヾ]{2,3}ョン$'
     )
-    _EXCLAMATION = frozenset({
-        'ハッハー', 'ハハハ', 'アハハ', 'イェーイ', 'ワーイ',
-        'エーッ', 'アーッ', 'キャー', 'ウワー', 'ヤッター',
-        'ハーイ', 'ニャー', 'ニャーニャー', 'チャー',
-    })
-    _COMMON_WORDS = frozenset({
-        'パパ', 'ママ', 'パパママ', 'バイキン', 'アイスクリー',
-        'バイバイ', 'バイバーイ', 'パパー', 'エネルギ', 'ネルギー',
-        'プロダクショ', 'リボリュー',
-    })
     _FRAGMENT_RE = _re.compile(r'^ー[ア-ヾ]')
 
     def _is_valid_proper_noun(name):
-        """Quick validation: reject obvious non-proper-nouns."""
-        if _SOUND_RE.match(name):
-            return False
-        if name in _EXCLAMATION:
-            return False
-        if name in _COMMON_WORDS:
-            return False
-        if _FRAGMENT_RE.match(name):
-            return False
+        """Quick validation: reject obvious non-proper-nouns (language-aware)."""
         if len(name) < 2:
             return False
+        # Language-specific common word lists
+        if name in _COMMON_WORDS or name in _COMMON_KATAKANA or name in _COMMON_KANJI:
+            return False
+        # Japanese-specific checks
+        if lang == 'ja':
+            if _SOUND_RE.match(name):
+                return False
+            if _FRAGMENT_RE.match(name):
+                return False
+        # Chinese: reject pure kana (shouldn't be in Chinese glossary)
+        if lang == 'zh':
+            if _re.fullmatch(r'[ぁ-ヿ]+', name):
+                return False
+        # English: reject non-Latin (shouldn't be in English glossary)
+        if lang == 'en':
+            if not _re.search(r'[a-zA-Z]', name):
+                return False
         return True
 
     # ── Read existing entries ──
