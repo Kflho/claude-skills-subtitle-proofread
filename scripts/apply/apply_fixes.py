@@ -411,7 +411,7 @@ def main():
                     applied += 1
             if applied > 0:
                 total_applied += 1
-                print(f"  ✓ {fix.get('note', fix['action'])} → 影响 {applied} 个文件")
+                print(f"  [OK] {fix.get('note', fix['action'])} -> 影响 {applied} 个文件")
             elif already > 0:
                 total_already += 1
 
@@ -435,7 +435,7 @@ def main():
                     applied += 1
             if applied > 0:
                 total_applied += 1
-                print(f"  ✓ {fix.get('note', fix['action'])} → 影响 {applied} 个文件")
+                print(f"  [OK] {fix.get('note', fix['action'])} -> 影响 {applied} 个文件")
 
     # 3. 逐文件逐行修复
     if per_file_fixes:

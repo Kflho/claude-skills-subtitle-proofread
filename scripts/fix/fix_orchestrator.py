@@ -272,15 +272,14 @@ class Fixer:
             apply_fixes_to_srt(self._srt_path, fixes)
             report.applied = len(fixes)
 
-        # Log to report
-        self._upsert_layer('2', [
-            {'ep': self.episode, 'time': f['start'],
-             'original': f['original'], 'corrected': f['replacement'],
-             'status': '✅'}
-            for f in fixes
-        ])
+        # SRT is the source of truth — no report write needed for fixes.
+        # Unfixable items → save to temp JSON for step_deliver() pick-up.
         if unfixable:
-            self._upsert_layer('6', unfixable)
+            pending_path = os.path.join(self._temp_dir,
+                                        f'{self.episode}_pending_human.json')
+            os.makedirs(self._temp_dir, exist_ok=True)
+            with open(pending_path, 'w', encoding='utf-8') as fp:
+                json.dump(unfixable, fp, ensure_ascii=False, indent=2)
 
         report.failed = len(unfixable)
         report.details = [f'{d["verdict"]}: {d.get("whisper","")[:60]}' for d in diffs
@@ -364,33 +363,6 @@ class Fixer:
             if not garbled:
                 print(f'[whisper] All garbled cues deleted by VAD',
                       file=sys.stderr)
-                return FixReport(source='whisper', deleted=deleted_count)
-
-            # Filter out cues already marked ✅ in report (idempotent re-run)
-            if garbled:
-                from utils.update_report import read_report
-                try:
-                    report_data = read_report(self._report_path)
-                    layer2_fixed = set()
-                    for entry in report_data.get('2', []):
-                        if (entry.get('ep') == self.episode
-                                and entry.get('status') == '✅'):
-                            layer2_fixed.add(entry.get('time', ''))
-                    if layer2_fixed:
-                        already_ok = [c for c in garbled
-                                      if c.get('start', '') in layer2_fixed]
-                        if already_ok:
-                            print(f'[whisper] {len(already_ok)} cues already '
-                                  f'✅ in report → skipping',
-                                  file=sys.stderr)
-                            garbled = [c for c in garbled
-                                       if c.get('start', '') not in layer2_fixed]
-                except Exception:
-                    pass  # If report read fails, process all — conservative
-
-            if not garbled:
-                print(f'[whisper] All remaining garbled cues already fixed '
-                      f'in report', file=sys.stderr)
                 return FixReport(source='whisper', deleted=deleted_count)
 
             # Step 2: Build clusters + run Whisper
@@ -528,26 +500,18 @@ class Fixer:
                         print(f'  [cut] {f["start"]}: '
                               f'"{f.get("original", "")[:60]}"', file=sys.stderr)
 
-            # ── Layer 2: auto-kept (readable Japanese) → write to report ──
-            if auto_keep:
-                self._upsert_layer('2', [
-                    {'ep': self.episode, 'time': f['start'],
-                     'original': f.get('original', '')[:80],
-                     'corrected': f.get('replacement', '')[:80],
-                     'status': '✅'}
-                    for f in auto_keep
-                ])
-                self._sync_layer6_resolved([f['start'] for f in auto_keep])
+            # ── Auto-keep: SRT already has the fix (applied above) ──
+            # SRT is the source of truth — no report write needed.
 
-            # ── Layer 2.5: AI-fixable fragments → AI completion ──
+            # ── AI-fixable fragments → generate ai_review.md directly ──
             if ai_fragments:
-                self._upsert_layer('2.5', [
-                    {'ep': self.episode, 'time': f['start'],
-                     'original': (f.get('replacement') or f.get('original', ''))[:80],
-                     'corrected': '',
-                     'status': '⬜'}
-                    for f in ai_fragments
-                ])
+                frag_data = [{
+                    'start': f['start'],
+                    'end': f.get('end', ''),
+                    'original': f.get('original', '')[:200],
+                    'replacement': f.get('replacement', ''),
+                } for f in ai_fragments]
+                self.review_ai_from_fragments(frag_data)
 
             report.applied = len(auto_keep)
             report.ai_review = len(ai_fragments)
@@ -643,33 +607,28 @@ class Fixer:
     # Source 3: Human review
     # ═══════════════════════════════════════════════════════════
 
-    def review(self, output_dir: str = None) -> str | None:
-        """Generate manual review checklist + video clips.
+    def review_from_items(self, items: list,
+                            output_dir: str = None) -> str | None:
+        """Generate manual review checklist + video clips from explicit item list.
 
-        Uses the same build_clusters() as Whisper for context wrapping
-        (left clean cue → garbled cues → right clean cue).  Extracts
-        video clips for human judgment (口型/场景/字幕叠加).
-
-        Args:
-            output_dir: where to write clips + checklist
-                       (default: reports/manual-review/)
+        Like review() but accepts pending items directly instead of reading
+        from the report. Each item dict has keys: 'ep', 'time', 'original'.
 
         Returns:
-            Path to checklist.md, or None if nothing to review
+            Path to checklist.md, or None if no items
         """
+        if not items:
+            print(f'[{self.episode}] review_from_items: empty list',
+                  file=sys.stderr)
+            return None
+
         out_dir = output_dir or self._review_dir
-        is_per_ep = bool(output_dir)  # per-ep folder mode: no EP prefix, checklist.md
+        is_per_ep = bool(output_dir)
 
-        # Read unfixable from report Layer 6 (L2.5 items are escalated by
-        # step_deliver() or _apply_ai_checklists() before review() is called)
-        from utils.update_report import read_report
-        data = read_report(self._report_path)
-        entries = data.get('6', [])
-        pending = [e for e in entries
-                   if e.get('status') == '⬜' and e.get('ep') == self.episode]
-
+        pending = [e for e in items if e.get('ep') == self.episode]
         if not pending:
-            print(f'[{self.episode}] review: nothing pending', file=sys.stderr)
+            print(f'[{self.episode}] review_from_items: nothing for this ep',
+                  file=sys.stderr)
             return None
 
         # Load cues and build clusters (same logic as Whisper)
@@ -678,7 +637,7 @@ class Fixer:
         clusters = self._build_review_clusters(cues, pending)
 
         if not clusters:
-            print(f'[{self.episode}] review: could not build clusters',
+            print(f'[{self.episode}] review_from_items: could not build clusters',
                   file=sys.stderr)
             return None
 
@@ -694,14 +653,12 @@ class Fixer:
             start_ts = first_g['start']
             safe_start = start_ts.replace(':', '-').replace(',', '-').replace('.', '-')
 
-            # Per-ep folder mode: clip is <timestamp>.mp4 inside the ep folder
             clip_name = f'{safe_start}.mp4'
             clip_path = os.path.join(out_dir, clip_name)
 
             garbled_start = first_g['start_s']
             garbled_end = last_g['end_s']
 
-            # ── VAD-aware clip bounds ──
             bounds = self._compute_review_clip_bounds(
                 garbled_start, garbled_end, cl.get('ss'), cl.get('es'))
 
@@ -709,11 +666,6 @@ class Fixer:
             right_text = cl.get('right_text', '')
             garbled_texts = ' | '.join(g['text'][:60] for g in cl['garbled'])
 
-            # ── Extract clip (skip if no VAD speech in range) ──
-            # Pre-filtering (L2 meaningful_jp + escalate VAD check) already
-            # removed noise; reaching here means real speech was confirmed.
-            # If bounds is None, the speech is too short/edge for a clip
-            # but the entry still goes to the checklist for human review.
             if bounds is not None:
                 clip_start, clip_end = bounds
                 if not os.path.exists(clip_path) and self._video_path:
@@ -726,7 +678,6 @@ class Fixer:
                 elif os.path.exists(clip_path):
                     extracted += 1
             else:
-                # No usable VAD bounds → still include entry, but note it
                 clip_name = '(无片段 — VAD未检测到语音)'
                 skipped += 1
 
@@ -741,7 +692,6 @@ class Fixer:
                 f'\n---\n'
             )
 
-        # Write checklist
         if is_per_ep:
             checklist_path = os.path.join(out_dir, 'checklist.md')
         else:
@@ -759,43 +709,51 @@ class Fixer:
             for entry_md in entries_md:
                 f.write(entry_md)
 
-        # Save cluster info for apply() VAD alignment
         self._save_review_clusters(clusters)
 
-        print(f'[{self.episode}] review: {len(entries_md)} entries → '
+        print(f'[{self.episode}] review_from_items: {len(entries_md)} entries → '
               f'{checklist_path} ({extracted} clips, {skipped} skipped)',
               file=sys.stderr)
         return checklist_path
+
+    def review(self, output_dir: str = None) -> str | None:
+        """[Legacy] Generate manual review checklist by reading report L6.
+
+        Delegates to review_from_items() after loading from report.
+        """
+        from utils.update_report import read_report
+        data = read_report(self._report_path)
+        entries = data.get('6', [])
+        pending = [e for e in entries
+                   if e.get('status') == '⬜' and e.get('ep') == self.episode]
+
+        if not pending:
+            print(f'[{self.episode}] review: nothing pending', file=sys.stderr)
+            return None
+
+        return self.review_from_items(pending, output_dir)
 
     # ═══════════════════════════════════════════════════════════
     # Source 3b: AI short fragment completion (Layer 2.5)
     # ═══════════════════════════════════════════════════════════
 
-    def review_ai(self, output_dir: str = None) -> str | None:
-        """Generate AI-review checklist for short garbled fragments.
+    def review_ai_from_fragments(self, fragments: list,
+                                   output_dir: str = None) -> str | None:
+        """Generate AI-review checklist from explicit fragment list.
 
-        Like review() but WITHOUT video clips — AI infers text from
-        surrounding dialogue context rather than listening to audio.
-        Reuses the same checklist markdown format so apply() works unchanged.
-
-        Reads Layer 2.5 ⬜ entries from the report.
+        Like review_ai() but accepts fragment data directly instead of
+        reading from the report. Each fragment dict has keys:
+        'start', 'end', 'original', 'replacement'.
 
         Returns:
-            Path to ai_review.md, or None if nothing to review
+            Path to ai_review.md, or None if fragments is empty
         """
-        out_dir = output_dir or self._review_dir
-
-        from utils.update_report import read_report
-        data = read_report(self._report_path)
-        entries = data.get('2.5', [])
-        pending = [e for e in entries
-                   if e.get('status') == '⬜' and e.get('ep') == self.episode]
-
-        if not pending:
-            print(f'[{self.episode}] review_ai: nothing pending',
+        if not fragments:
+            print(f'[{self.episode}] review_ai_from_fragments: empty list',
                   file=sys.stderr)
             return None
 
+        out_dir = output_dir or self._review_dir
         cues = self._load_cues() or parse_srt(
             self._srt_path, mark_garbled=False)
 
@@ -803,11 +761,11 @@ class Fixer:
         today = datetime.now().strftime('%Y-%m-%d')
         entries_md = []
 
-        for item in pending:
-            start_ts = item.get('time', '')
-            end_ts = item.get('end', '')
-            original = item.get('original', '')
-            corrected = item.get('corrected', '')
+        for f in fragments:
+            start_ts = f.get('start', '')
+            end_ts = f.get('end', '')
+            original = f.get('original', '')
+            corrected = f.get('replacement', '')
 
             # Find adjacent clean cues for context
             start_s = to_seconds(start_ts) if start_ts else 0
@@ -820,14 +778,11 @@ class Fixer:
                 ct = cue.get('text', '').strip()
                 if ct and not cue.get('is_garbled'):
                     if cs < start_s - 1:
-                        # Keep last 2 cues before target
                         context_before.append(ct)
                         if len(context_before) > 2:
                             context_before.pop(0)
                     elif cs > end_s + 1 and len(context_after) < 2:
                         context_after.append(ct)
-
-            safe_start = start_ts.replace(':', '-').replace(',', '-').replace('.', '-')
 
             entries_md.append(
                 f'{self.episode} | {start_ts} ~ {end_ts or "?"}\n'
@@ -850,32 +805,52 @@ class Fixer:
                   f'> 不确定则留空，不要猜。格式与人工清单相同，apply() 自动应用。\n'
                   f'>\n'
                   f'---\n\n')
-        with open(checklist_path, 'w', encoding='utf-8') as f:
-            f.write(header)
+        with open(checklist_path, 'w', encoding='utf-8') as fh:
+            fh.write(header)
             for entry_md in entries_md:
-                f.write(entry_md)
+                fh.write(entry_md)
 
-        print(f'[{self.episode}] review_ai: {len(entries_md)} entries → '
-              f'{checklist_path}', file=sys.stderr)
+        print(f'[{self.episode}] review_ai_from_fragments: {len(entries_md)} '
+              f'entries → {checklist_path}', file=sys.stderr)
         return checklist_path
 
+    def review_ai(self, output_dir: str = None) -> str | None:
+        """[Legacy] Generate AI-review checklist by reading report L2.5.
+
+        Delegates to review_ai_from_fragments() after loading from report.
+        """
+        out_dir = output_dir or self._review_dir
+
+        from utils.update_report import read_report
+        data = read_report(self._report_path)
+        entries = data.get('2.5', [])
+        pending = [e for e in entries
+                   if e.get('status') == '⬜' and e.get('ep') == self.episode]
+
+        if not pending:
+            print(f'[{self.episode}] review_ai: nothing pending',
+                  file=sys.stderr)
+            return None
+
+        fragments = [{
+            'start': e.get('time', ''),
+            'end': e.get('end', ''),
+            'original': e.get('original', ''),
+            'replacement': e.get('corrected', ''),
+        } for e in pending]
+
+        return self.review_ai_from_fragments(fragments, out_dir)
+
     def apply(self, checklist_path: str) -> int:
-        """Apply human corrections from a filled checklist.
+        """Apply corrections from a filled checklist.
 
-        For each ⬜ entry:
-        - '修正:' = '删除' → remove cue from SRT → report ✅
-        - '修正:' = text → VAD time-align → replace in SRT → report ✅
-        - '修正:' = empty → skip, keep ⬜
-
-        VAD alignment with robust fallbacks:
-        1. Extract cluster audio → VAD → 1 speech segment → use VAD boundaries
-        2. VAD returns 0 segments → mark as likely non-speech, suggest deletion
-        3. VAD returns N≠1 segments → fallback: keep original cue time, replace text
-        4. VAD unavailable (no webrtcvad / no audio) → fallback: keep original
-        5. No video/cluster info → fallback: find by timecode, replace text
+        For each entry:
+        - '修正:' = '删除' → remove cue from SRT
+        - '修正:' = text → VAD time-align → replace in SRT
+        - '修正:' = empty → skip
 
         Returns count of applied corrections.
-        Idempotent: only processes ⬜ entries.
+        Idempotent: only processes entries with filled 修正: fields.
         """
         if not os.path.exists(checklist_path):
             print(f'[apply] Checklist not found: {checklist_path}', file=sys.stderr)
@@ -884,9 +859,6 @@ class Fixer:
         if not self._srt_path or not os.path.exists(self._srt_path):
             print(f'[apply] SRT not found for {self.episode}', file=sys.stderr)
             return 0
-
-        # Determine report layer: ai_review.md → L2.5, checklist.md → L6
-        report_step = '2.5' if os.path.basename(checklist_path) == 'ai_review.md' else '6'
 
         # Parse checklist
         corrections = self._parse_checklist(checklist_path)
@@ -917,7 +889,6 @@ class Fixer:
                 removed = cues.pop(target_idx)
                 print(f'[apply] Deleted: {timecode} "{removed["text"][:60]}"',
                       file=sys.stderr)
-                self._mark_checklist_done(corrections, timecode, '✅', step=report_step)
                 applied += 1
                 continue
 
@@ -926,7 +897,6 @@ class Fixer:
             if target_idx is None:
                 print(f'[apply] Cue not found: {timecode} — may already be fixed',
                       file=sys.stderr)
-                self._mark_checklist_done(corrections, timecode, '✅', step=report_step)
                 continue
 
             corrected_text = text.strip()
@@ -953,8 +923,6 @@ class Fixer:
 
             print(f'[apply] {tag} {timecode} → "{corrected_text[:60]}"',
                   file=sys.stderr)
-            self._mark_checklist_done(corrections, timecode, '✅',
-                                      step=report_step, corrected=corrected_text)
             applied += 1
 
         # Write back SRT
@@ -1123,77 +1091,6 @@ class Fixer:
     # ═══════════════════════════════════════════════════════════
     # Internal helpers
     # ═══════════════════════════════════════════════════════════
-
-    def _upsert_layer(self, step: str, entries: list):
-        """Write entries to the report. Wraps update_report.upsert_entries."""
-        try:
-            from utils.update_report import upsert_entries
-            upsert_entries(self._report_path, step=step, entries=entries)
-        except Exception as e:
-            print(f'[report] Failed to update Layer {step}: {e}',
-                  file=sys.stderr)
-
-    def _mark_report_resolved(self, garbled_cues, reason=''):
-        """Mark Layer 6 report entries as resolved for all cues in a cluster."""
-        from utils.update_report import update_entry_status
-        for g in garbled_cues:
-            ts = g.get('start', '')
-            ok = update_entry_status(
-                self._report_path, step='6', ep=self.episode,
-                time=ts, status='✅',
-                corrected=f'[auto-cut: {reason}]' if reason else '[auto-cut]')
-            if not ok:
-                print(f'  [warn] Could not find report entry for {ts}',
-                      file=sys.stderr)
-
-    def _sync_layer6_resolved(self, fixed_starts):
-        """When Whisper re-run fixes a previously-failed cue, clear its L6 + L2.5 entries.
-
-        Only clears entries that have NO human-filled correction text
-        (status protection: human work is never overwritten).
-        """
-        if not fixed_starts:
-            return
-        try:
-            from utils.update_report import read_report, update_entry_status
-            data = read_report(self._report_path)
-            # Sync L6
-            layer6 = data.get('6', [])
-            synced = 0
-            for entry in layer6:
-                if (entry.get('ep') == self.episode
-                        and entry.get('time', '') in fixed_starts
-                        and entry.get('status') == '⬜'):
-                    existing_corrected = entry.get('corrected', '')
-                    if existing_corrected and existing_corrected not in ('', '[auto-cut]', '[auto-cut: zero VAD speech]', '[escalated to L6]'):
-                        continue  # Human already worked on this — don't touch
-                    update_entry_status(
-                        self._report_path, step='6',
-                        ep=self.episode, time=entry.get('time', ''),
-                        status='✅',
-                        corrected='[whisper-retry-fixed]')
-                    synced += 1
-            # Sync L2.5 too — same logic
-            layer25 = data.get('2.5', [])
-            synced25 = 0
-            for entry in layer25:
-                if (entry.get('ep') == self.episode
-                        and entry.get('time', '') in fixed_starts
-                        and entry.get('status') == '⬜'):
-                    existing_corrected = entry.get('corrected', '')
-                    if existing_corrected and existing_corrected not in ('', '[escalated to L6]'):
-                        continue
-                    update_entry_status(
-                        self._report_path, step='2.5',
-                        ep=self.episode, time=entry.get('time', ''),
-                        status='✅',
-                        corrected='[whisper-retry-fixed]')
-                    synced25 += 1
-            if synced > 0 or synced25 > 0:
-                print(f'[whisper] Synced {synced} L6 + {synced25} L2.5 entries → ✅ '
-                      f'(Whisper re-run succeeded)', file=sys.stderr)
-        except Exception as e:
-            print(f'[whisper] Failed to sync L6: {e}', file=sys.stderr)
 
     # ── VAD & review cluster persistence ──
 
@@ -1433,24 +1330,6 @@ class Fixer:
 
         return corrections
 
-    def _mark_checklist_done(self, corrections: list, timecode: str,
-                             status: str, step: str = '6',
-                             corrected: str = None):
-        """Update report entry for a single applied correction.
-
-        Updates the report Layer entry from ⬜ → ✅, and updates
-        corrected text if provided.
-        """
-        try:
-            from utils.update_report import update_entry_status
-            update_entry_status(
-                self._report_path, step=step,
-                ep=self.episode, time=timecode,
-                status=status,
-                corrected=corrected,
-            )
-        except Exception as e:
-            print(f'[report] Failed to update status: {e}', file=sys.stderr)
 
 
 # ═══════════════════════════════════════════════════════════════
