@@ -57,6 +57,54 @@ def _run(cmd_parts, cwd, timeout=600, desc=''):
 
 # ── Pipeline steps ──
 
+def _save_glossary_borderline(project_dir, glossary_path):
+    """Save low-frequency kept entries from auto_clean for AI review.
+
+    After auto_clean prunes the glossary, some non-proper-nouns may survive
+    because they don't match any reject pattern. AI reviews only these
+    borderline entries (frequency ≤ 5) — NOT the full glossary.
+    """
+    try:
+        from nouns.auto_clean_glossary import scan_glossary
+        result = scan_glossary(glossary_path)
+    except Exception as e:
+        print(f'[scan] Borderline scan failed: {e}', file=sys.stderr)
+        return
+
+    kept = result.get('kept', [])
+    if not kept:
+        return
+
+    # Filter: only low-frequency entries that aren't in the anime whitelist
+    from nouns.auto_clean_glossary import _ANIME_WHITELIST
+    borderline = [
+        {'word': w, 'freq': f, 'section': s}
+        for w, f, s in kept
+        if f <= 5 and w not in _ANIME_WHITELIST
+    ]
+
+    if not borderline:
+        return
+
+    # Save to small JSON — AI reads this instead of 200+ line glossary
+    out_path = os.path.join(project_dir, 'temp', 'scans', 'glossary_borderline.json')
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, 'w', encoding='utf-8') as f:
+        json.dump(borderline, f, ensure_ascii=False, indent=2)
+
+    print(f'\n[scan] {len(borderline)} borderline glossary entries → {out_path}',
+          file=sys.stderr)
+
+    # Print the entries directly so Claude sees them without reading the file
+    print(f'[scan] 🤖 Glossary AI Review candidates (low-freq, ≤5 occurrences):',
+          file=sys.stderr)
+    for entry in borderline:
+        print(f'  {entry["word"]} ({entry["freq"]}x) [{entry["section"]}]',
+              file=sys.stderr)
+    print(f'[scan] Judge each: proper noun? If not, add to COMMON_KANJI/KATAKANA '
+          f'in japanese_utils.py.', file=sys.stderr)
+
+
 def step_scan(project_dir, lang, force_rescan=False):
     """Layer 1: unified_scanner + build_glossary.
 
@@ -126,6 +174,12 @@ def step_scan(project_dir, lang, force_rescan=False):
             if os.path.exists(ai_nouns):
                 cmd_rebuild.extend(['--ai-nouns', ai_nouns])
             _run(cmd_rebuild, project_dir, desc='glossary_rebuild')
+
+            # ── Save borderline entries for AI review ──
+            # After auto_clean, entries that survived may still include
+            # non-proper-nouns. Save low-frequency kept entries so AI can
+            # review them without reading the full 200+ line glossary.
+            _save_glossary_borderline(project_dir, glossary_path)
         else:
             print('[scan] auto_clean failed — glossary may contain common words',
                   file=sys.stderr)

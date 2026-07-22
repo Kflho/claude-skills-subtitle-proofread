@@ -30,6 +30,7 @@ Phase 1: Scan
   → unified_scanner: garbled chars, repeat patterns, term frequency
   → build_glossary: corpus frequency → proper-nouns.md
   → auto_clean: prune common words, rebuild clean glossary (automatic)
+  → glossary AI review: borderline entries printed inline (🤖, ≤20 entries)
   → Output: findings.json + proper-nouns.md (cleaned)
   → Does NOT write to 问题解决报告（scan is read-only, no fixes applied）
 

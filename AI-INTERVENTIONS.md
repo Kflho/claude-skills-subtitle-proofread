@@ -50,10 +50,33 @@ and rebuilds it with updated COMMON_KANJI/COMMON_KATAKANA filters.
 - JMdict entries (common dictionary words that aren't proper nouns)
 - Keeps: real names, places, honorifics, known Astro Boy terms (see `_ANIME_WHITELIST`)
 
-**When it fails** (rare): if a non-proper-noun survives auto_clean, add it to
-`lib/japanese_utils.py` COMMON_KANJI or COMMON_KATAKANA directly, then re-run
-`build_glossary.py`. Do NOT read the full `proper-nouns.md` — just edit the
-Python frozenset.
+---
+
+### Glossary AI Review (🤖 triggered, low-token)
+
+**Trigger**: Phase 1 scan prints `[scan] 🤖 Glossary AI Review candidates`
+
+The pipeline saves low-frequency entries (≤5 occurrences) that survived
+auto_clean to `temp/scans/glossary_borderline.json`. These are borderline
+cases — auto_clean couldn't determine if they're proper nouns or not.
+
+**Token efficiency**: Candidates are printed inline to stderr during the run.
+Claude sees them directly — no file read needed. Typical count: 5-20 entries.
+
+**Flow**:
+1. Pipeline prints candidates inline (see them in the scan output)
+2. Judge each: proper noun or common word?
+3. Common word → add to `lib/japanese_utils.py` COMMON_KANJI or COMMON_KATAKANA
+4. Proper noun → leave as-is
+5. Next `--force-rescan` will rebuild with updated filters
+
+**Judgment rules**:
+- Katakana: real character name? or onomatopoeia/daily word?
+- Kanji: surname/place/org? or verb fragment/common compound?
+- Reference: 鉄腕アトム (1963) character knowledge, Japanese name patterns
+
+**Do NOT read `reports/proper-nouns.md`** — it's 200+ lines. The candidates
+are already printed inline by the pipeline.
 
 ---
 
