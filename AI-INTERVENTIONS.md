@@ -267,6 +267,34 @@ The auto-clean path handles that silently — no AI intervention needed.
 - External knowledge of the song lyrics is valid reference
 - The original SRT text and Whisper output can both be referenced
 
+**How to fill canonical（重要 — 避免 0 fixes 陷阱）**:
+
+⚠️ **不要手工重写整个 JSON 文件。** 人工重写极易丢失 `sample_times` 字段，
+导致 `--apply-ai-review` 生成 0 条修复。
+
+正确做法：只修改每个 candidate 的 `"canonical"` 字段：
+
+```python
+# 方式1：用 Python 脚本填（推荐）
+python -c "
+import json
+with open('temp/scans/oped_ai_review.json', 'r+', encoding='utf-8') as f:
+    data = json.load(f)
+    for c in data['candidates']:
+        t = c['time_position_s']
+        # AI 判断逻辑在这里...
+        if t == 0.0: c['canonical'] = '正しい歌詞'
+        elif t == 3.2: c['canonical'] = '正しい歌詞2'
+        # 不确定 → 留空或跳过
+    f.seek(0); f.truncate()
+    json.dump(data, f, ensure_ascii=False, indent=2)
+"
+```
+
+```bash
+# 方式2：用 Edit 工具只改 canonical 行（保留其他字段不动）
+```
+
 **Apply**:
 ```bash
 python oped_fixer.py AI审查后/ --lang ja -o temp/scans/oped_fixes.json \
@@ -276,6 +304,38 @@ Then re-run `--apply-ai-review` in the full pipeline to apply all fixes.
 
 **Token efficiency**: Candidates file is small (typically 3-10 groups for vocal OP/ED).
 Each group has only variant texts (short lyric lines), not full SRT content.
+
+**Known limitations**:
+- SRT only（ASS 需先转换，见下方）
+- `--min-episodes` 默认 3，测试时可用 `--min-episodes 2`
+- 中文项目可用 `--lang zh`（`_is_valid_japanese` 对中文同样有效，因 CJK 同区）
+
+### ASS → SRT 快速转换（OP/ED 审查用）
+
+```bash
+# 从 ASS 提取 OP/ED 行生成临时 SRT（仅用于 oped_fixer 审查）
+python -c "
+import re, os
+os.makedirs('temp/oped_srt', exist_ok=True)
+for fname in os.listdir('中文字幕范例/'):
+    if not fname.endswith('.ass'): continue
+    with open(f'中文字幕范例/{fname}', 'r', encoding='utf-8') as f:
+        lines = [l for l in f if l.startswith('Dialogue:') and 'Opening' in l]
+    ep = re.search(r'(\d+)', fname).group(1)
+    with open(f'temp/oped_srt/EP{ep}.srt', 'w', encoding='utf-8') as out:
+        for i, line in enumerate(lines, 1):
+            p = line.split(',', 9)
+            start, end, text = p[1], p[2], re.sub(r'\{[^}]*\}', '', p[9]).replace('\\\\N', ' ').strip()
+            def tc(t):  # ASS centiseconds → SRT milliseconds
+                h,m,s = t.split(':'); sec,cs = s.split('.')
+                return f'{int(h):02d}:{int(m):02d}:{int(sec):02d},{int(cs)*10:03d}'
+            out.write(f'{i}\n{tc(start)} --> {tc(end)}\n{text}\n\n')
+    print(f'{fname} -> temp/oped_srt/EP{ep}.srt')
+"
+# 然后跑 oped_fixer
+python fix/oped_fixer.py temp/oped_srt/ --lang ja -o temp/scans/oped_fixes.json \
+    --ai-review temp/scans/oped_ai_review.json --min-episodes 2
+```
 
 ---
 
