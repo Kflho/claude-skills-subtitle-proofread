@@ -108,29 +108,23 @@ AI **可以修改任意一句**（或两者）以使整体通顺：
 - **上下文语义清晰**（context_before/after 干净且主题连贯）→ AI 能可靠推断
 - 有 `reference_text` → 参考字幕原文 + 上下文 → 直接写日文 correction
 
-**Tier 2：Whisper 批量重试（~2s/ep，仅 Tier 1 无法确定时）**
+**Tier 2：Whisper 逐条重试（~1.5s/条，仅 Tier 1 无法确定时）**
 
 触发条件：Tier 1 走完后仍有 fragment 的 correction 为空，且：
 - whisper_attempt 为 null（pipeline 完全失败）
 - 或原文大部分不可读（mj < 3）
 - 或原文不构成可理解的日语句子
 
-**批量策略（一个 episode 只加载一次模型）**：
+**逐条跑，不合并**（合并音频需复杂 ffmpeg filter，AI 容易写错，不值得为省几秒引入 bug）：
 ```bash
-# 1. 将该 episode 所有待重试片段合并为一个音频文件
-#    每个片段前后各留 0.5s 静音间隔
-ffmpeg -y -i "视频.mkv" \
-  -ss 00:03:07 -to 00:03:12 -ss 00:14:48 -to 00:14:53 \
-  -filter_complex "[0:a]atrim=...concat=n=N:v=0:a=1" \
-  -ac 1 -ar 16000 temp/ep099_retry_batch.wav
-
-# 2. 一次性跑 Whisper（只付一次模型加载成本）
-"$WHISPER_CLI" -m "$WHISPER_MODEL" -l ja -f temp/ep099_retry_batch.wav --no-timestamps
-
-# 3. 将输出按时间边界切分回各个 fragment
+# 每条 fragment 单独提取+转录（~1.5s/条，模型加载 1.1s + 推理 0.4s）
+ffmpeg -y -i "视频.mkv" -ss {start} -to {end} -vn -ac 1 -ar 16000 temp/frag_{N}.wav
+"$WHISPER_CLI" -m "$WHISPER_MODEL" -l ja -f temp/frag_{N}.wav --no-timestamps
+# 不确定时换备用模型再跑一次
+"$WHISPER_CLI" -m "$WHISPER_RETRY_MODEL" -l ja -f temp/frag_{N}.wav --no-timestamps
 ```
 
-> 单条跑：N × 1.5s。批量跑：1.1s + N × 0.4s。N=6 时批量省 ~5s，N=20 时省 ~20s。
+> 典型 episode 3-6 条 fragment → 5-9 秒。Tier 1 已经过滤掉可推断的，到 Tier 2 的通常是真正需要 Whisper 的少数。
 > 两个模型都跑不出可读结果 → 升级 Tier 3。
 
 **Tier 3：升级人工（Tier 1+2 均无法确定）**
