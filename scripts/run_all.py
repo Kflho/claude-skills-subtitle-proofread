@@ -624,12 +624,29 @@ def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True,
     from fix.fix_orchestrator import Fixer
 
     report_data = read_report(report_path)
+
+    # L6 items (from L2 unfixable triage)
     layer6 = report_data.get('6', [])
-    pending = [e for e in layer6 if e.get('status') == '⬜']
+    pending_l6 = [e for e in layer6 if e.get('status') == '⬜']
+
+    # L2.5 items that AI couldn't fix → escalate to L6 human review
+    layer25 = report_data.get('2.5', [])
+    pending_l25 = [e for e in layer25 if e.get('status') == '⬜']
+
+    # Merge: L6 + escalated L2.5
+    pending = pending_l6 + pending_l25
 
     if not pending:
-        print('[deliver] No pending Layer 6 entries — all clean.', file=sys.stderr)
+        if pending_l25:
+            print('[deliver] No pending Layer 6 entries, but Layer 2.5 has ⬜ items '
+                  'that need escalation.', file=sys.stderr)
+        else:
+            print('[deliver] No pending Layer 6 entries — all clean.', file=sys.stderr)
         return True
+
+    if pending_l25:
+        print(f'[deliver] Including {len(pending_l25)} L2.5 ⬜ items '
+              f'(AI could not fix → escalated to human review).', file=sys.stderr)
 
     # Group by episode
     by_ep = {}
