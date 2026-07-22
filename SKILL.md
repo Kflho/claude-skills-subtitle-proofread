@@ -57,11 +57,14 @@ python "<scripts-dir>/run_all.py" --video-dir "<VIDEO_DIR>" [--limit N | -e EP00
 **必须**执行，不靠 "Pipeline complete" 判断成功：
 
 1. 读 `reports/问题解决报告.md`
-2. 搜索 `⬜` — 有则回到对应[暂停点](#暂停点--action)
+2. 搜索 `⬜` → 逐个分析每条 ⬜：
+   - 同一 (EP, 时间) 在「Whisper自动修复」section 已有 ✅ → **false alarm**，忽略
+   - 同一 (EP, 时间) 在 AI fragment section 有 correction 非空但仍是 ⬜ → SRT 已修，报告未同步，忽略
+   - 其余 → 回到对应[暂停点](#暂停点--action)处理
 3. 确认 Phase 3「专名自动应用」非空（非"暂无记录"）
-4. 全部 ✅ + 0 ⬜ → 完成
+4. 0 条**真正待处理**的 ⬜ → 完成
 
-> 脚本 exit 0 ≠ 成功。报告中有 ⬜ 就是未完。
+> 脚本 exit 0 ≠ 成功。同一个 cue 可能出现在报告多个 section，一边 ✅ 就算干净。
 
 ## Pipeline
 

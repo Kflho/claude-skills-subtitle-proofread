@@ -1096,11 +1096,14 @@ class Fixer:
 
             # Update report: mark Layer 2.5 entry as fixed
             try:
-                update_entry_status(self._report_path, step='2.5',
+                ok = update_entry_status(self._report_path, step='2.5',
                                     ep=self.episode, time=timecode,
                                     corrected=correction, status='✅')
-            except Exception:
-                pass
+                if not ok:
+                    print(f'[apply-ai] Report entry not found for {self.episode} '
+                          f'{timecode} — may be in another step', file=sys.stderr)
+            except Exception as e:
+                print(f'[apply-ai] Report update failed: {e}', file=sys.stderr)
 
         if applied > 0:
             write_srt(self._srt_path, cues)
@@ -1125,8 +1128,9 @@ class Fixer:
                         update_entry_status(self._report_path, step='2.5',
                                             ep=self.episode, time=ts,
                                             corrected='(原文无语义)', status='🗑️')
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f'[apply-ai] Report update failed (no-semantics): {e}',
+                              file=sys.stderr)
                     continue
                 has_speech = any(
                     es >= start_s and ss <= start_s + 5.0
@@ -1154,8 +1158,9 @@ class Fixer:
                                     self._report_path, step='2.5',
                                     ep=self.episode, time=ts,
                                     corrected='(噪音包围)', status='🗑️')
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                print(f'[apply-ai] Report update failed (noise): {e}',
+                                      file=sys.stderr)
                             continue
                     escalated.append(entry)
                 else:
@@ -1167,8 +1172,9 @@ class Fixer:
                         update_entry_status(self._report_path, step='2.5',
                                             ep=self.episode, time=ts,
                                             corrected='(VAD无语音)', status='🗑️')
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f'[apply-ai] Report update failed (VAD): {e}',
+                              file=sys.stderr)
             if auto_cut > 0:
                 write_srt(self._srt_path, cues)
 

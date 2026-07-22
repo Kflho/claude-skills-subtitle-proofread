@@ -298,15 +298,32 @@ def upsert_entries(path, step, entries):
     if step not in data:
         data[step] = []
 
-    # 构建现有条目索引
+    # 构建本层现有条目索引
     existing = {_entry_key(e): i for i, e in enumerate(data[step])}
+
+    # 构建跨层索引：其他层中同一 (ep, time) 的最高优先级条目
+    cross_step = {}
+    for s, entries_list in data.items():
+        if s == step:
+            continue
+        for e in entries_list:
+            k = _entry_key(e)
+            if k not in cross_step or STATUS_PRIORITY.get(e.get('status', '⬜'), 0) > STATUS_PRIORITY.get(cross_step[k].get('status', '⬜'), 0):
+                cross_step[k] = e
 
     for entry in entries:
         key = _entry_key(entry)
+        new_status = entry.get('status', '⬜')
+
+        # 跨层去重：其他层已有更高优先级条目 → 跳过（不降级写入）
+        if key in cross_step:
+            cross_status = cross_step[key].get('status', '⬜')
+            if STATUS_PRIORITY.get(cross_status, 0) > STATUS_PRIORITY.get(new_status, 0):
+                continue
+
         if key in existing:
             old_entry = data[step][existing[key]]
             old_status = old_entry.get('status', '⬜')
-            new_status = entry.get('status', '⬜')
             # 永不降级：保留更高优先级的状态
             if STATUS_PRIORITY.get(new_status, 0) >= STATUS_PRIORITY.get(old_status, 0):
                 # 如果新条目的 corrected 为空但旧的有值，保留旧的 corrected
