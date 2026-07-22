@@ -275,8 +275,13 @@ def write_report(path, data):
 # ═══════════════════════════════════════════════════════════════
 
 def _entry_key(entry):
-    """条目的去重键：(集数, 时间)。"""
-    return (entry.get('ep', ''), entry.get('time', ''))
+    """条目的去重键：(集数, 时间) 或 (专名,) 当 ep 为空。"""
+    ep = entry.get('ep', '')
+    time = entry.get('time', '')
+    if not ep and not time:
+        # Noun entries (layers 3/3.5): use original text as distinguishing key
+        return ('__noun__', entry.get('original', ''))
+    return (ep, time)
 
 
 def upsert_entries(path, step, entries):
@@ -373,6 +378,22 @@ def delete_entry(path, step, ep, time):
             return True
 
     return False
+
+
+def replace_layer(path, step, entries):
+    """替换某层的全部条目（不追加，不合并）。
+
+    用于 auto_classify 等每次输出完整快照的场景。
+    传入空列表会将该层重置为「暂无记录」。
+
+    Args:
+        path: 报告文件路径
+        step: 层号字符串 ('3', '3.5' 等)
+        entries: 完整的条目列表，将完全替换该层现有条目
+    """
+    data = read_report(path)
+    data[str(step)] = list(entries)
+    write_report(path, data)
 
 
 def get_layer_summary(data):

@@ -29,6 +29,7 @@ if _ROOT_DIR not in sys.path:
     sys.path.insert(0, _ROOT_DIR)
 
 from utils.update_report import upsert_entries as _upsert_report
+from utils.update_report import replace_layer as _replace_layer
 
 from lib.project_utils import load_json, detect_mode, detect_format
 
@@ -450,10 +451,10 @@ def _apply_classified_results(project_dir, candidates, unknowns, cands, lang):
         results['auto_accepted'] = len(classified['accepted'])
         _append_to_glossary(project_dir, classified['accepted'])
 
-        # ── Write L3 report entries ──
+        # ── Write L3 report entries (replace: auto_classify is a full snapshot) ──
         try:
             report_path = os.path.join(project_dir, 'reports', '问题解决报告.md')
-            _upsert_report(report_path, step='3', entries=[
+            _replace_layer(report_path, step='3', entries=[
                 {'ep': '', 'time': '', 'original': c['candidate'],
                  'corrected': c['candidate'], 'status': '✅'}
                 for c in classified['accepted']
@@ -478,10 +479,10 @@ def _apply_classified_results(project_dir, candidates, unknowns, cands, lang):
             json.dump(results['ai_candidates'], f, ensure_ascii=False, indent=2)
         results['ai_review_file'] = ai_path
 
-        # ── Write L3.5 report entries ──
+        # ── Write L3.5 report entries (replace: auto_classify is a full snapshot) ──
         try:
             report_path = os.path.join(project_dir, 'reports', '问题解决报告.md')
-            _upsert_report(report_path, step='3.5', entries=[
+            _replace_layer(report_path, step='3.5', entries=[
                 {'ep': '', 'time': '', 'original': c['candidate'],
                  'corrected': '', 'status': '⬜'}
                 for c in classified['needs_ai']
