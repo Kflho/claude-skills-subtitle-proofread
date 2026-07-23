@@ -140,7 +140,7 @@ python "<scripts-dir>/run_all.py" \
    - 同一 (EP, 时间) 在「Whisper自动修复」section 已有 ✅ → **false alarm**，忽略
    - 同一 (EP, 时间) 在 AI fragment section 有 correction 非空但仍是 ⬜ → SRT 已修，报告未同步，忽略
    - 其余 → 回到对应[暂停点](#暂停点--action)处理
-3. 确认 Phase 3「专名自动应用」非空（非"暂无记录"）
+3. 确认 Phase 3「疑似专名搜索」非空（非"暂无记录"）
 4. 0 条**真正待处理**的 ⬜ → 完成
 
 > 脚本 exit 0 ≠ 成功。同一个 cue 可能出现在报告多个 section，一边 ✅ 就算干净。
@@ -163,75 +163,26 @@ python "<scripts-dir>/run_all.py" \
 > Baidu 翻译为**可选**：未配置时自动降级，日语原文保留在 AI fragments 中由 AI 自行翻译。
 > AI 润色为**可选**：Pipeline 末尾交互提问。需要 `LLM_API_KEY` 环境变量。无 key 时降级为 AI 助理自行润色（⚠️ 高 token 消耗，7.5 万 cue）。
 
-## 名词库准备（翻译前置）
+## 名词库准备 + 翻译
 
-翻译项目**必须先准备名词库**，否则专名翻译不一致。校对项目可跳过（校对管线有自己的专名流程）。
+翻译项目**必须先准备名词库**，否则专名翻译不一致。
 
-### 数据流
+→ 完整流程见 [references/translation.md](references/translation.md)
 
-```
-unified_scanner.py → findings.json (term_frequencies)
-build_glossary.py  → reports/proper-nouns.md (人类审查用)
-                   → temp/noun_mappings.json (脚本用, ja→zh)
-        ↓
-  🤖 AI 审查词表
-        ↓
-translate_srt.py --mappings temp/noun_mappings.json
-```
-
-### 步骤
-
-**Step 1 — 扫描 + 生成词表**：
-
+简短版：
 ```bash
-cd "<project>"
-python "<scripts>/scan/unified_scanner.py" \
-  --target-dir "<日文源字幕>" \
-  --output-findings temp/scans/findings_ja.json \
-  --output-issues temp/scans/issues_ja/ \
-  --build-glossary --glossary-output reports/proper-nouns.md \
-  --project-lang ja
+# 1. 扫描生成词表
+python "<scripts>/scan/unified_scanner.py" --target-dir "<日文源>" \
+  --build-glossary --glossary-output reports/proper-nouns.md --project-lang ja
+python "<scripts>/nouns/build_glossary.py" --findings temp/scans/findings.json \
+  -o reports/proper-nouns.md --mappings-output temp/noun_mappings.json
 
-python "<scripts>/nouns/build_glossary.py" \
-  --findings temp/scans/findings_ja.json \
-  -o reports/proper-nouns.md \
-  --mappings-output temp/noun_mappings.json
-```
+# 2. 🤖 AI 审查词表 → 编辑 temp/noun_mappings.json
 
-输出：
-- `reports/proper-nouns.md` — 人类可读的专名表（Markdown）
-- `temp/noun_mappings.json` — 机器可读的 ja→zh 映射（JSON），zh 值初始为空
-
-**Step 2 — 🤖 AI 审查词表**：
-
-1. 读 `reports/proper-nouns.md`（全文）
-2. 逐条判断：专有名词 or 普通词？
-3. **专有名词** → 确定中文译名 → 写入 `temp/noun_mappings.json`
-4. **普通词** → 加入 `COMMON_KANJI` / `COMMON_KATAKANA` 黑名单
-5. 重跑 `build_glossary.py`（自动保留已填入的 zh 翻译）
-
-`noun_mappings.json` 格式极简，AI 直接编辑即可：
-```json
-{
-  "アトム": "阿童木",
-  "お茶の水": "御茶水",
-  "プルート": "普鲁托",
-  "ハカセ": ""
-}
-```
-zh 值为空 = AI 尚未审查或判定为普通词。
-
-> **注意**：`--mappings-output` 重新运行时自动保留已填入的 zh 翻译（merge 逻辑）。新增词条 zh 为空。
-
-**Step 3 — 翻译时使用**：
-
-```bash
-python "<scripts>/translate_srt.py" \
-  --input-dir "<日文源>" --output-dir "<中文输出>" \
+# 3. 翻译
+python "<scripts>/translate_srt.py" --input-dir "<日文源>" --output-dir "<输出>" \
   --mappings temp/noun_mappings.json
 ```
-
-`--mappings` 优先于 `--glossary`（后者保留向后兼容）。
 
 ## Pipeline
 
@@ -276,34 +227,11 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 
 **触发**: `[suspect-nouns] N entries → report layer 3` 或 `[SUSPECT GROUPS]`
 
-**流程**：
-
 1. 读 `temp/scans/suspect_nouns.json`
-2. 检查 `groups`（同源异译聚类）：
-   - 同一日语词翻译为多种中文 → 可能是专名翻译不一致
-   - 确认 canonical 译名 → 更新 `noun_mappings.json`
-3. 检查 `singletons`（独立疑似词）：
-   - 分词发现的不在词表中的短词/片假名
-   - 逐条判断：专有名词 or 普通词？
-   - 专名 → 加入词表；普通词 → 忽略
-4. 更新 `noun_mappings.json` 后，重跑翻译可自动应用
+2. 逐条判断：专有名词 or 普通词？
+3. 专名 → 确认译名 → 更新 `noun_mappings.json`；普通词 → 忽略
 
-**独立使用**（可不依赖 pipeline）：
-
-```bash
-# 中文翻译中找疑似专名（需日文源做交叉参照）
-python "<scripts>/nouns/find_suspect_nouns.py" \
-  --input-dir "中文AI翻译验证/" \
-  --source-dir "日文ai修复版/" \
-  --mappings temp/noun_mappings.json \
-  --lang zh --mode translation
-
-# 日文源中找未识别专名
-python "<scripts>/nouns/find_suspect_nouns.py" \
-  --input-dir "日文ai修复版/" \
-  --glossary reports/proper-nouns.md \
-  --lang ja --mode source
-```
+→ 详细用法见 [references/translation.md](references/translation.md)
 
 ### AI 碎片补全
 
@@ -363,14 +291,7 @@ python "<scripts>/nouns/find_suspect_nouns.py" \
 
 **触发**: Pipeline 末尾交互提问 `是否对最终字幕进行 AI 润色？(y/n)`
 
-- **y** + 已设 `LLM_API_KEY` → 自动调用 `polish_zh.py`（支持 SRT/ASS），输出到 `中文润色后/`
-- **y** + 无 key → AI 助理自行润色：
-  1. 读 `AI审查后/` 下所有字幕文件（SRT 或 ASS）
-  2. 逐文件、逐句润色对白文本（去翻译腔、口语化）
-  3. 保留专有名词（参考 `reports/proper-nouns.md` 如有）
-  4. 写回原目录或 `中文润色后/`
-  5. **仅适合 ≤5 集的样本项目**。全集项目（>10集）→ 建议配置 API key
-- **n** → 跳过，直接交付 `AI审查后/`
+→ 详细说明见 [references/translation.md](references/translation.md)
 
 ## 错误恢复
 
@@ -410,8 +331,6 @@ python "<scripts>/nouns/find_suspect_nouns.py" \
 | `--force-rescan` | Re-scan even if cache fresh |
 | `LLM_API_KEY` (env) | LLM API key for translation + polish (optional, --lang zh). Separate from Claude Code's. |
 | `--mappings <JSON>` | translate_srt.py: path to noun_mappings.json (preferred over --glossary) |
-| `--mappings-output <JSON>` | build_glossary.py: also write machine-readable ja→zh dict |
-| `--mode source|translation` | find_suspect_nouns.py: source=find unrecognized names, translation=find inconsistent |
-| `--source-dir <DIR>` | find_suspect_nouns.py: Japanese source for cross-reference clustering |
 
 > `--apply-ai-review` 是后处理快速路径，不能和 full run 一起用。
+> 翻译工具完整参数见 [references/translation.md](references/translation.md)。
