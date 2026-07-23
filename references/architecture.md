@@ -7,7 +7,7 @@
 ```
 scripts/
 ├── run_all.py                     ← 批量编排器，逐集调 episode_workflow
-├── scan/unified_scanner.py        ← 单次遍历：乱码检测 + 重复检测 + 术语收集
+├── scan/unified_scanner.py        ← 单次遍历：乱码检测 + 重复检测 + 术语收集 + (v5.0) VAD 无字幕检测
 ├── fix/
 │   ├── fix_orchestrator.py        ← 统一修复模块（Fixer 类）：参考→Whisper→auto_triage
 │   ├── episode_workflow.py        ← 单集编排器（大部分逻辑已迁移到 Fixer）
@@ -50,10 +50,15 @@ scripts/
 ```
 run_all.py (唯一入口)
   ├─→ unified_scanner.py              Phase 1: 全量扫描 → findings.json
+  │     ├─ 字符扫描: garbled chars + repeats + term freq
+  │     └─ (v5.0) VAD 扫描: 提取音频 → WebRTC VAD → missing_subtitles
+  │           缓存 speech timeline → temp/scans/EPxxx_vad.json
   ├─→ episode_workflow.py EPxxx       Phase 2: 逐集（subprocess）
-  │     └─→ Fixer.run_auto()          (cascading: ref → Whisper → human)
+  │     └─→ Fixer.run_auto()          (cascading: ref → Whisper → missing-sub fill)
   │           ├─ fix_by_reference()    → translate_srt.py + compare_srt.py
   │           ├─ fix_by_whisper()      → whisper_pipeline.py → whisper-cli.exe
+  │           │     └─ 复用 Phase 1 VAD 缓存 (避免重复提取音频)
+  │           ├─ fix_missing_subtitles() (v5.0) → gap 音频 → Whisper → 插入新 cue
   │           ├─ review_ai()           AI 短碎片清单
   │           └─ review()              人工审查清单 + 视频片段
   ├─→ step_nouns()                    Phase 3: noun_checker + auto_classify
@@ -104,3 +109,69 @@ Whisper 输出 replacement
       ├─ is_short_garbled_fragment(replacement) → AI 上下文补全
       └─ 其余 → 人工
 ```
+
+## v5.0: VAD 有人声无字幕检测
+
+### 设计理念
+
+"有人声无字幕" 是字幕文件的 **第一类错误**，与乱码字符并列。v5.0 将其从 Phase 2 的副作用升级为 Phase 1 的正式检测。
+
+### 数据流
+
+```
+Phase 1 (Scan)
+  unified_scanner.py --video-dir <DIR>
+    │
+    ├─ 文本扫描 (existing): garbled_cues → findings.json
+    │
+    └─ VAD 扫描 (NEW):
+        1. _find_video_for_srt() → 匹配视频文件（集号匹配）
+        2. extract_audio_wav() → 16kHz mono WAV
+        3. whisper_pipeline.get_speech_timeline() → WebRTC VAD
+        4. whisper_pipeline.find_missing_subtitle_gaps() → 发现 gaps
+        5. 写入 findings.json:
+           {
+             "missing_subtitles": {
+               "EP001": [{"start_s": 120.5, "end_s": 125.3, "duration": 4.8}, ...]
+             }
+           }
+        6. _save_vad_cache() → temp/scans/EPxxx_vad.json (Phase 2 复用)
+
+Phase 2 (Fix)
+  Fixer.fix_missing_subtitles()
+    │
+    1. 读 findings.json → missing_subtitles[episode]
+    2. 每个 gap: extract_audio_wav(ss, dur) → run_whisper()
+    3. 成功: is_valid_subtitle_text() → 插入新 cue (format_tc)
+    4. 失败: → 插入 [???] 标记 cue
+    5. write_srt() (插入 + 排序 + 重编号)
+    6. upsert_entries() → 问题解决报告.md (Layer 2)
+
+  Fixer.fix_by_whisper() — VAD clean 复用:
+    │
+    1. _load_speech_segs() → 尝试读取 Phase 1 缓存
+    2. 缓存命中: _apply_vad_clean_from_cache() (跳过音频提取)
+    3. 缓存未命中: 原有流程 (extract + VAD)
+```
+
+### 关键常量
+
+| 常量 | 值 | 位置 |
+|------|-----|------|
+| `MISSING_SUBTITLE_MIN_GAP` | 3.0s | unified_scanner.py |
+| `MISSING_SUBTITLE_MERGE_GAP` | 5.0s | unified_scanner.py |
+| `MISSING_SUBTITLE_MAX_GAP` | 45.0s | unified_scanner.py (跳过 OP/ED 歌曲) |
+| `SUSPICIOUS_GAP_SEC` | 20.0s | unified_scanner.py (文本启发式阈值) |
+
+### 新增 CLI 标志
+
+| Flag | 用途 |
+|------|------|
+| `--video-dir <DIR>` | 启用 Phase 1 VAD 检测 + Phase 2 Whisper |
+| `--skip-vad` | 跳过 VAD 检测（即使有 --video-dir） |
+| `--vad-cache-dir <DIR>` | VAD 缓存目录（默认 temp/scans/） |
+
+### 向后兼容
+
+- 无 `--video-dir` → Phase 1 仅字符扫描，Phase 2 跳过（残血模式）
+- Phase 2 仍保留 fallback: 如 Phase 1 未产生 findings，`fix_by_whisper()` 的 `detect_missing_dialogue` 参数仍可在 Phase 2 做内联检测

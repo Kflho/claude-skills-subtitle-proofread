@@ -57,6 +57,18 @@ export WHISPER_RETRY_MODEL='<backup_model_path>'
 export BAIDU_APPID=''
 export BAIDU_SECRET=''
 # export BAIDU_API_ENDPOINT='http://<IP>:<端口>/api/trans/vip/translate'
+
+# ── LLM API（翻译 + 润色共用，--lang zh 项目可选）──
+# 支持任何 OpenAI 兼容 API（DeepSeek、OpenAI、Gemini 等）
+# 翻译脚本 (translate_srt.py) 和润色脚本 (polish_zh.py) 共用此配置
+#
+# 获取 key: https://platform.deepseek.com/（推荐，有免费额度）
+# 其他: https://platform.openai.com/ / https://aistudio.google.com/
+#
+# ⚠️ 实际 key 建议设为系统环境变量，不要明文写入此文件
+export LLM_API_KEY=''
+export LLM_MODEL='deepseek-chat'
+export LLM_BASE_URL='https://api.deepseek.com/v1'
 ```
 
 ## 运行

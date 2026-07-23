@@ -9,9 +9,11 @@ description: >
 
 # Subtitle Proofread
 
-3-phase pipeline：扫描乱码 → Whisper 修复 → 专名统一 + 交付。
+3-phase pipeline：扫描（乱码 + VAD无字幕检测）→ Whisper 修复 + 缺字幕补全 → 专名统一 + 交付。
 
-**资源驱动**：有什么用什么。有视频+Whisper→修复乱码；有参考字幕→注入 AI 校对上下文。缺资源也能残血运行——跳过缺失步骤，剩余步骤照常。
+**资源驱动**：有什么用什么。有视频+Whisper→修复乱码+补全缺字幕；有参考字幕→注入 AI 校对上下文。缺资源也能残血运行——跳过缺失步骤，剩余步骤照常。
+
+> v5.0: Phase 1 新增 VAD 有人声无字幕检测（需 `--video-dir`），作为第一类错误与乱码并列。详见 [references/architecture.md](references/architecture.md)。
 
 ### ASS 格式项目
 
@@ -69,33 +71,63 @@ python -c "import jieba; jieba.initialize(); print('[OK] jieba', len(jieba.dt.FR
 - **Janome** 不可用 → Phase 1 退回 n-gram 切分（~40% 碎片率）
 - **jieba** 不可用 → Phase 1 退回 n-gram 切分，Phase 3 退回规则分类
 
-### 2.6. AI 润色密钥（--lang zh 可选）
+### 2.6. LLM API 密钥（翻译 + 润色，--lang zh 可选）
 
 ```bash
-# OpenAI 兼容 API（批量润色中文字幕，10句/批）
+# OpenAI 兼容 API — 翻译脚本 + 润色脚本共用
 # 支持 DeepSeek、OpenAI、Gemini 等任何 /chat/completions 端点
-export POLISH_API_KEY="sk-..."
+export LLM_API_KEY="sk-..."
 # 可选：覆盖默认模型和端点
-export POLISH_MODEL="gpt-4o-mini"          # 默认 deepseek-chat
-export POLISH_BASE_URL="https://api.openai.com/v1"  # 默认 DeepSeek
+export LLM_MODEL="deepseek-chat"                    # 默认
+export LLM_BASE_URL="https://api.deepseek.com/v1"   # 默认
 ```
 
-> ⚠️ 不要复用 Claude Code 的 key。创建独立的 API key 用于润色脚本。
-> 未设置时降级：Pipeline 末尾交互提问时选 `y` → AI 助理逐句润色（~7.5 万 cue，高 token 消耗）。
+> ⚠️ 不要复用 Claude Code 的 key。创建独立的 API key。
+> 未设置时降级：翻译功能不可用（需先配 key）；Pipeline 末尾润色交互提问时选 `y` → AI 助理逐句润色（⚠️ 高 token 消耗，7.5 万 cue）。
 > 选 `n` → 跳过润色，直接交付。
 
 ### 3. 运行
 
+**⚠️ 破坏性改动前必须 git 备份。** Pipeline 的 Phase 2/3 会直接修改 SRT 文件（原地覆写），
+没有撤销按钮。跑 pipeline 前：
+
 ```bash
 cd "<project-root>"
-python "<scripts-dir>/run_all.py" \
-  --input-dir "<SUBTITLE_DIR>" \
-  [--video-dir "<VIDEO_DIR>"] \
-  [--skip-whisper] [--limit N | -e EP001-EP010]
+git add -A && git commit -m "备份：pipeline前 — $(date +%Y-%m-%d)"
 ```
 
-> `--input-dir` 指定字幕子目录（默认 `AI审查后`）。无视频时加 `--skip-whisper` 残血运行。
-> `--lang` 自动检测。`--limit` 只限 Phase 2 修复集数，扫描覆盖全部文件。
+> 如果项目目录还不是 git repo，SKILL.md 加载后第一时间 `git init` + `git add -A` + `git commit`。
+> 开发者模式下修改 skill 文件前后也需要 git 备份（skill 目录和项目目录各一份）。
+
+```bash
+cd "<project-root>"
+
+# 完整 pipeline（推荐）：扫描 + VAD 无字幕检测 + Whisper 修复
+python "<scripts-dir>/run_all.py" \
+  --input-dir "<SUBTITLE_DIR>" \
+  --video-dir "<VIDEO_DIR>"
+
+# 残血运行（无视频/Whisper）：仅字符扫描 + 专名统一
+python "<scripts-dir>/run_all.py" \
+  --input-dir "<SUBTITLE_DIR>" \
+  --skip-whisper
+
+# 仅扫描预演（不改文件）
+python "<scripts-dir>/run_all.py" \
+  --input-dir "<SUBTITLE_DIR>" \
+  --video-dir "<VIDEO_DIR>" \
+  --dry-run
+
+# 指定集数范围
+python "<scripts-dir>/run_all.py" \
+  --input-dir "<SUBTITLE_DIR>" \
+  --video-dir "<VIDEO_DIR>" \
+  --limit 5
+```
+
+> `--input-dir` 指定字幕子目录（默认 `AI审查后`）。`--lang` 自动检测。
+> `--video-dir` 启用 VAD 有人声无字幕检测 + Whisper 修复。无视频时加 `--skip-whisper` 残血运行。
+> `--limit` 只限 Phase 2 修复集数，扫描覆盖全部文件。
 
 ### 4. 验证
 
@@ -129,32 +161,25 @@ python "<scripts-dir>/run_all.py" \
 
 > `--lang zh` 时使用 jieba 分词 + 词典查询对标 jamdict。jieba 不可用时退回 n-gram + 启发式规则。
 > Baidu 翻译为**可选**：未配置时自动降级，日语原文保留在 AI fragments 中由 AI 自行翻译。
-> AI 润色为**可选**：Pipeline 末尾交互提问。需要 `POLISH_API_KEY` 环境变量。无 key 时降级为 AI 助理自行润色（⚠️ 高 token 消耗，7.5 万 cue）。
+> AI 润色为**可选**：Pipeline 末尾交互提问。需要 `LLM_API_KEY` 环境变量。无 key 时降级为 AI 助理自行润色（⚠️ 高 token 消耗，7.5 万 cue）。
 
 ## Pipeline
 
 ```
 Phase 1: Scan
   → unified_scanner: garbled chars, repeat patterns, term frequency
-      ja: Janome 形态素解析（名词提取），zh: jieba 分词，en: n-gram
-  → build_glossary: jamdict/jieba 词典过滤 + frozenset → proper-nouns.md
-  → auto_clean: prune common words, rebuild clean glossary (automatic)
+  → VAD 有人声无字幕检测（需 --video-dir，无视频自动跳过）
+  → build_glossary + auto_clean → proper-nouns.md
   → glossary AI review: borderline entries printed inline (🤖, ≤20 entries)
   → Output: findings.json + proper-nouns.md (cleaned)
   → Does NOT write to 问题解决报告（scan is read-only）
 
 Phase 2: Triage
   → 若有参考字幕 → 注入 reference_text 到 AI fragments（原文，不翻译）
-  → VAD → Whisper → Baidu 翻译 (zh only) → classify each garbled cue:
-      ├─ noise (mj < 2)        → auto-cut 🗑️
-      ├─ readable JP + 原文无语义 → auto-keep ✅
-      ├─ readable JP + 长度正常 → auto-keep ✅
-      ├─ readable JP + 长度异常 → ai_fragments (🤖 配对审查)
-      └─ JP + Latin corruption → ai_fragments_{EP}.json (🤖 AI补全)
-          ├─ AI fills correction → --apply-ai-review
-          └─ AI can't fix → VAD check → auto-cut or 人工审查
-  → Baidu 翻译 (--lang zh 项目): Whisper 输出 ja→zh 翻译后进入分类
-      无凭证时降级: 日语原文 → AI fragments (AI 自行翻译)
+  → VAD clean + Whisper garbled fix (复用 Phase 1 VAD 缓存)
+  → (v5.0) Missing subtitle fill: gap 音频 → Whisper → 插入新 cue / [???]
+  → classify + triage → auto-keep ✅ / ai_fragments 🤖 / auto-cut 🗑️
+  → Baidu 翻译 (--lang zh): Whisper 输出 ja→zh（无凭证时降级 AI 翻译）
 
 Phase 3: Unify
   ├─ OP/ED fixer: cross-episode clustering → instrumental auto-clean / vocal AI review
@@ -163,7 +188,7 @@ Phase 3: Unify
 
 Phase 4: Polish (--lang zh only, optional)
   └─ 交互提问 → LLM 批量润色（10句/批，OpenAI 兼容 API）
-       ├─ 有 POLISH_API_KEY → polish_zh.py 自动润色
+       ├─ 有 LLM_API_KEY → polish_zh.py 自动润色
        └─ 无 key → AI 助理自行润色（⚠️ 高耗费，7.5万 cue）
 
 Report: reports/问题解决报告.md（自动生成，按 Phase 分组）
@@ -199,7 +224,10 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 3. 专名 → 写 `ai_review_fixes.json`；普通词 → 加入对应语言 utils 的 COMMON_KANJI（ja: `japanese_utils.py`，zh: `chinese_utils.py`）
 4. 运行：`python run_all.py --resume`
 5. **迭代**直到 `Needs AI: 0`（12→6→3→0 是正常收敛）
-6. **收敛后**：向用户展示最终专有名词表（`reports/proper-nouns.md`），询问是否采用当前词表。用户确认后再进入 Phase 3 交付步骤
+6. **收敛后 → 用户确认 + 补充**：向用户展示最终专有名词表（`reports/proper-nouns.md`），询问：
+   - 是否采用当前词表？
+   - 有无补充？（脚本未检测到的专名、别名/变体、译名偏好）
+   - 用户补充后更新词表，`--resume` 应用；无补充 → 进入交付
 
 > 详细规则 → [references/interventions.md](references/interventions.md)
 
@@ -223,7 +251,7 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 
 **触发**: Pipeline 末尾交互提问 `是否对最终字幕进行 AI 润色？(y/n)`
 
-- **y** + 已设 `POLISH_API_KEY` → 自动调用 `polish_zh.py`（支持 SRT/ASS），输出到 `中文润色后/`
+- **y** + 已设 `LLM_API_KEY` → 自动调用 `polish_zh.py`（支持 SRT/ASS），输出到 `中文润色后/`
 - **y** + 无 key → AI 助理自行润色：
   1. 读 `AI审查后/` 下所有字幕文件（SRT 或 ASS）
   2. 逐文件、逐句润色对白文本（去翻译腔、口语化）
@@ -241,7 +269,7 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 | 某步骤失败但已写中间文件 | 清空 `temp/` + `reports/`，加 `--force-rescan` 重跑 |
 | 参考字幕乱码（西里尔/中文变 `?`） | v2 已自动检测编码（UTF-8/CP1251/KOI8-R/Shift-JIS/GBK） |
 | `[translate] Baidu credentials not found` | 正常降级。配置 `BAIDU_APPID` + `BAIDU_SECRET` 或接受 AI 自行翻译 |
-| `[polish] POLISH_API_KEY not set` | 正常降级。设置环境变量或选 `n` 跳过润色。不要复用 Claude Code 内部 key |
+| `[polish] LLM_API_KEY not set` | 正常降级。设置环境变量或选 `n` 跳过润色。不要复用 Claude Code 内部 key |
 
 ## AI 介入点
 
@@ -262,11 +290,12 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 | `--dry-run` | Preview, no file changes |
 | `--input-dir <DIR>` | Subtitle subdirectory (default: `AI审查后`). Use `.` for direct path |
 | `--target-dir <DIR>` | Project root (default: CWD) |
+| `--video-dir <DIR>` | Video directory — enables VAD + Whisper (v5.0: VAD missing-sub detection) |
 | `-e EP005-EP010` | Specific episode range |
 | `--limit 5` | First N episodes only |
 | `--skip-whisper` | Skip audio processing (残血模式) |
 | `--resume` | Resume after AI noun review (Phase 3 only) |
 | `--force-rescan` | Re-scan even if cache fresh |
-| `POLISH_API_KEY` (env) | Chinese AI polish (optional). Separate key from Claude Code's. |
+| `LLM_API_KEY` (env) | LLM API key for translation + polish (optional, --lang zh). Separate from Claude Code's. |
 
 > `--apply-ai-review` 和 `--apply-checklist` 是后处理快速路径，不能和 full run 一起用。

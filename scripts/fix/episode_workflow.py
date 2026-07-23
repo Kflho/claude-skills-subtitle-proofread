@@ -141,38 +141,57 @@ def step_compare(project_dir, episode, scan_result, translated_path, dry_run=Fal
 # ═══════════════════════════════════════════════════════════════
 
 def step_audio(project_dir, episode, scan_result, dry_run=False, video_dir=None, target_lang='ja'):
-    """Audio mode: dispatch garbled cues to VAD + Whisper.
+    """Audio mode: dispatch garbled cues to VAD + Whisper, then fill missing subtitles.
 
-    Delegates to Fixer.fix_by_whisper() which handles the full pipeline:
-    VAD clean → build clusters → Tier 1/2 Whisper → apply to SRT → update report.
+    Delegates to Fixer.fix_by_whisper() + Fixer.fix_missing_subtitles() which
+    handle the full pipeline: VAD clean → garbled fix → gap fill → apply → report.
     """
-    if not scan_result or not scan_result.get('issues'):
-        print('[audio] No garbled cues to process.')
-        from fix.fix_orchestrator import FixReport
-        return FixReport(source='audio')
-
-    issues = scan_result['issues']
-    print(f'[audio] {len(issues)} garbled cue(s) → VAD + Whisper')
-
-    if dry_run:
-        print(f'\n[audio] DRY RUN — would call Fixer.fix_by_whisper()')
-        from fix.fix_orchestrator import FixReport
-        return FixReport(source='audio', applied=len(issues))
-
-    from fix.fix_orchestrator import Fixer
+    from fix.fix_orchestrator import Fixer, FixReport
 
     fixer = Fixer(episode, project_dir, target_lang=target_lang, video_dir=video_dir)
-    if fixer.is_clean():
-        print('[audio] Already clean — nothing to fix.')
-        from fix.fix_orchestrator import FixReport
+
+    # Separate garbled cues from VAD gap issues (they share the same issue list)
+    all_issues = scan_result.get('issues', []) if scan_result else []
+    garbled_issues = [i for i in all_issues if i.get('type') != 'missing_subtitle']
+    # VAD gap issues have type='missing_subtitle' and no 'line' field
+    has_garbled = bool(garbled_issues)
+    has_missing_subs = fixer._has_missing_subtitles()
+
+    if not has_garbled and not has_missing_subs:
+        print('[audio] No garbled cues and no missing subtitles — nothing to fix.')
         return FixReport(source='audio')
 
-    print(f'\n[audio] Running Whisper via Fixer...')
-    report = fixer.fix_by_whisper(separate_vocals=True)
-    print(f'[audio] Done: {report.applied} fixed, {report.ai_review} AI review, '
+    if dry_run:
+        print(f'[audio] DRY RUN — {len(garbled_issues)} garbled cues + '
+              f'{"VAD gaps present" if has_missing_subs else "no VAD gaps"}')
+        return FixReport(source='audio', applied=len(garbled_issues))
+
+    report = FixReport(source='audio')
+
+    # Priority 1: Fix garbled cues via Whisper
+    if has_garbled and not fixer.is_clean():
+        print(f'[audio] {len(garbled_issues)} garbled cue(s) → VAD + Whisper')
+        print(f'\n[audio] Running Whisper via Fixer...')
+        whisper_result = fixer.fix_by_whisper(separate_vocals=True)
+        report.merge(whisper_result)
+        print(f'[audio] Garbled fix done: {whisper_result.applied} fixed, '
+              f'{whisper_result.ai_review} AI review, {whisper_result.failed} unfixable')
+    elif has_garbled:
+        print('[audio] Garbled cues already clean — skipping Whisper fix.')
+
+    # Priority 2: Fill missing subtitles (v5.0 — VAD gaps → Whisper → new cues)
+    if has_missing_subs and fixer._video_path:
+        print(f'\n[audio] Missing subtitle fill → Whisper...')
+        miss_result = fixer.fix_missing_subtitles()
+        report.merge(miss_result)
+        print(f'[audio] Missing fill done: {miss_result.applied} inserted, '
+              f'{miss_result.failed} gaps → [???]')
+    elif has_missing_subs:
+        print('[audio] No video path — skipping missing subtitle fill.')
+
+    print(f'[audio] Done: {report.applied} fixed/inserted, {report.ai_review} AI review, '
           f'{report.failed} unfixable')
 
-    # Return fixes from report for backward compatibility with step_apply
     return report
 
 

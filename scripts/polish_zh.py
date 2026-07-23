@@ -15,17 +15,17 @@ Usage:
       --glossary reports/proper-nouns.md
 
   # 使用 OpenAI
-  POLISH_API_KEY=sk-xxx POLISH_MODEL=gpt-4o-mini \\
-  POLISH_BASE_URL=https://api.openai.com/v1 \\
+  LLM_API_KEY=sk-xxx LLM_MODEL=gpt-4o-mini \\
+  LLM_BASE_URL=https://api.openai.com/v1 \\
   python polish_zh.py --input-dir AI审查后/
 
   # 预览模式
   python polish_zh.py --input EP001.srt --dry-run
 
 Setup:
-  环境变量 POLISH_API_KEY（必需）
-  可选 POLISH_MODEL（默认 deepseek-chat）
-  可选 POLISH_BASE_URL（默认 https://api.deepseek.com/v1）
+  环境变量 LLM_API_KEY（必需）
+  可选 LLM_MODEL（默认 deepseek-chat）
+  可选 LLM_BASE_URL（默认 https://api.deepseek.com/v1）
 """
 
 import argparse
@@ -297,9 +297,9 @@ def main():
     args = parser.parse_args()
 
     # API key
-    api_key = os.environ.get('POLISH_API_KEY', '')
+    api_key = os.environ.get('LLM_API_KEY', '') or os.environ.get('POLISH_API_KEY', '')
     if not api_key and not args.dry_run:
-        print('ERROR: POLISH_API_KEY not set.', file=sys.stderr)
+        print('ERROR: LLM_API_KEY not set (also tried POLISH_API_KEY).', file=sys.stderr)
         print('Set it via environment variable or pass --dry-run to preview.',
               file=sys.stderr)
         sys.exit(1)

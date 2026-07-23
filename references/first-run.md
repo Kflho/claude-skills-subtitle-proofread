@@ -464,6 +464,114 @@ else:
 
 ---
 
+## Step 3.7：LLM API 配置（翻译 + 润色，仅 --lang zh 项目）
+
+> ⚠️ 仅当项目语言为 `zh`（中文）时需要。日语项目（`--lang ja`）跳过此步骤。
+
+### 3.7.1 说明原理
+
+向用户说明：
+
+> 中文项目需要两处 LLM API：
+>
+> | 用途 | 脚本 | 说明 |
+> |------|------|------|
+> | **翻译** | `translate_srt.py`（独立工具） | 日语校对完成后，批量翻译日语→中文 |
+> | **润色** | `polish_zh.py`（Phase 4） | 去翻译腔、口语化 |
+>
+> 两者**共用一个 API key**，统一使用 `LLM_API_KEY` 环境变量。支持任何 OpenAI 兼容 API（DeepSeek、OpenAI、Gemini 等）。
+
+### 3.7.2 询问是否配置
+
+> 是否配置 LLM API key？（输入 y/n）
+>
+> - **y** → 引导获取 + 配置
+> - **n** → 跳过。翻译功能不可用；润色降级为 AI 助理自行润色（⚠️ 高 token 消耗）
+
+**如果选 n**：
+
+> 好的，跳过。翻译脚本 `translate_srt.py` 需要 key 才能运行。Phase 4 润色将降级为 AI 助理逐句处理，仅适合 ≤5 集样本项目。
+
+跳到 Step 4。
+
+### 3.7.3 引导获取 API Key
+
+**如果选 y**：
+
+> **获取 API Key：**
+>
+> 推荐 **DeepSeek**（便宜、有免费额度）：
+> 1. 打开 https://platform.deepseek.com/
+> 2. 注册/登录
+> 3. 在「API Keys」页面创建 key
+> 4. 复制 key（`sk-...`）
+>
+> 其他选择：OpenAI（https://platform.openai.com/）、Gemini（https://aistudio.google.com/）
+>
+> 拿到 key 后告诉我。
+
+等待用户提供 API key。
+
+### 3.7.4 配置环境变量
+
+收到 key 后：
+
+> Key 写入 CLAUDE.md（**不写明文，只写占位符**）：
+>
+> ```bash
+> # ── LLM API（翻译 + 润色共用）──
+> export LLM_API_KEY=''
+> export LLM_MODEL='deepseek-chat'
+> export LLM_BASE_URL='https://api.deepseek.com/v1'
+> ```
+>
+> 实际 key 建议设为系统环境变量或每次手动 `export`，避免写入会被 git 追踪的文件。
+
+询问用户是否需要自定义模型或端点：
+
+> 默认使用 DeepSeek（`deepseek-chat`）。需要换成其他模型吗？
+>
+> - 不换 → 直接用默认值
+> - 换 → 提供模型名和 base URL
+>
+> 示例：
+> - OpenAI: `LLM_MODEL='gpt-4o-mini'` + `LLM_BASE_URL='https://api.openai.com/v1'`
+> - Gemini: `LLM_MODEL='gemini-2.0-flash'` + `LLM_BASE_URL='https://generativelanguage.googleapis.com/v1beta'`
+
+### 3.7.5 验证
+
+```bash
+python -c "
+import os, requests, json
+key = os.environ.get('LLM_API_KEY', '')
+model = os.environ.get('LLM_MODEL', 'deepseek-chat')
+base = os.environ.get('LLM_BASE_URL', 'https://api.deepseek.com/v1')
+if not key:
+    print('⚠️ LLM_API_KEY 未设置，请在 CLAUDE.md 中配置后手动 export')
+else:
+    try:
+        r = requests.post(f'{base}/chat/completions',
+            headers={'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'},
+            json={'model': model, 'messages': [{'role':'user','content':'你好，请回复OK'}], 'max_tokens': 10},
+            timeout=15)
+        if r.status_code == 200:
+            print(f'✅ LLM API 配置成功 ({model})')
+        else:
+            print(f'❌ API 返回 {r.status_code}: {r.text[:200]}')
+    except Exception as e:
+        print(f'❌ 连接失败: {e}')
+"
+```
+
+期望输出 `✅ LLM API 配置成功 (deepseek-chat)`。
+
+**验证失败时**：
+- 401 → API key 错误
+- 超时 → 网络不通
+- 404 → base URL 拼写错误
+
+---
+
 ## Step 4：项目特征自动检测
 
 扫描目标字幕目录，自动检测：

@@ -106,16 +106,21 @@ def _save_glossary_borderline(project_dir, glossary_path, lang):
           f'in japanese_utils.py.', file=sys.stderr)
 
 
-def step_scan(project_dir, lang, force_rescan=False, target_dir=None):
-    """Layer 1: unified_scanner + build_glossary.
+def step_scan(project_dir, lang, force_rescan=False, target_dir=None,
+              video_dir=None, skip_vad=False, episodes=None):
+    """Layer 1: unified_scanner + build_glossary + VAD missing-sub detection.
 
-    If findings.json already exists and SRT files haven't changed since
-    last scan, skip re-scanning (idempotent). Use --force-rescan to override.
+    v5.0: When video_dir is provided, runs VAD-based detection of
+    speech segments without subtitle coverage (有人声无字幕).
+
+    Args:
+        episodes: optional list of episode IDs to scan (None = all)
     """
     target = target_dir or os.path.join(project_dir, 'AI审查后')
     findings = os.path.join(project_dir, 'temp', 'scans', 'findings.json')
     issues = os.path.join(project_dir, 'temp', 'scans', 'issues')
     ai_nouns = os.path.join(project_dir, 'temp', 'scans', 'ai_nouns.json')
+    vad_cache = os.path.join(project_dir, 'temp', 'scans')
     os.makedirs(os.path.dirname(findings), exist_ok=True)
 
     # ── Cache check: skip rescan if SRTs haven't changed ──
@@ -148,6 +153,16 @@ def step_scan(project_dir, lang, force_rescan=False, target_dir=None):
     ]
     if os.path.exists(ai_nouns):
         cmd.extend(['--ai-nouns', ai_nouns])
+    # v5.0: VAD missing subtitle detection
+    if video_dir and os.path.isdir(video_dir):
+        cmd.extend(['--video-dir', video_dir,
+                    '--vad-cache-dir', vad_cache])
+        if skip_vad:
+            cmd.append('--skip-vad')
+    # Episode filter (limit scan to specific episodes)
+    if episodes:
+        episode_arg = ','.join(episodes)
+        cmd.extend(['--episodes', episode_arg])
     ok = _run(cmd, project_dir, timeout=3600, desc='scan')
     if not ok:
         return False
@@ -243,6 +258,12 @@ def step_fix_episodes(project_dir, lang, resources,
         selected = episodes
     elif findings:
         selected = sorted(findings.get('per_episode_issues', {}).keys())
+        # v5.0: Also include episodes with missing_subtitles but no garbled cues
+        missing_subs = findings.get('missing_subtitles', {})
+        for ep in missing_subs:
+            if ep not in selected and missing_subs[ep]:
+                selected.append(ep)
+        selected = sorted(selected)
     else:
         # No findings — try to find all subtitle files in target
         target = target_dir or os.path.join(project_dir, 'AI审查后')
@@ -269,12 +290,16 @@ def step_fix_episodes(project_dir, lang, resources,
         print(f'[fix] First: {selected[0]}, Last: {selected[-1]}', file=sys.stderr)
 
     # --skip-if-clean: fast pre-check (Fixer.is_clean() is cheap — no audio/ffmpeg)
+    # v5.0: Don't skip episodes that have missing_subtitles even if garbled-clean
     if skip_if_clean:
         from fix.fix_orchestrator import Fixer
+        missing_subs = (findings or {}).get('missing_subtitles', {})
         clean_eps = []
         for ep in selected:
             try:
-                if Fixer(ep, project_dir, target_lang=lang, srt_dir=target_dir).is_clean():
+                fixer = Fixer(ep, project_dir, target_lang=lang, srt_dir=target_dir)
+                has_missing = bool(missing_subs.get(ep, []))
+                if fixer.is_clean() and not has_missing:
                     clean_eps.append(ep)
             except Exception:
                 pass
@@ -1091,6 +1116,10 @@ def _print_progress(project_dir, label='Progress'):
         eps_with = [ep for ep, v in per_ep.items() if v]
         print(f'  Episodes with issues: {len(eps_with)}/{len(per_ep)}', file=sys.stderr)
         print(f'  Garbled cues:        {s.get("garbled_count", "?")}', file=sys.stderr)
+        if s.get('missing_subtitle_gaps'):
+            print(f'  Missing subtitles:   {s["missing_subtitle_gaps"]} gaps '
+                  f'in {s.get("episodes_with_missing_subs", "?")} episodes',
+                  file=sys.stderr)
         if s.get('repeat_count'):
             print(f'  Repeat patterns:     {s["repeat_count"]}', file=sys.stderr)
     else:
@@ -1225,7 +1254,8 @@ Examples:
 
     if args.dry_run:
         print('\n[DRY RUN] — scan only, no files will be modified\n', file=sys.stderr)
-        step_scan(project_dir, resolved_lang, force_rescan=args.force_rescan, target_dir=target_dir)
+        step_scan(project_dir, resolved_lang, force_rescan=args.force_rescan,
+                  target_dir=target_dir, video_dir=video_dir, episodes=episodes)
         _print_progress(project_dir, 'Status: dry-run scan')
         return
 
@@ -1256,9 +1286,10 @@ Examples:
     # ═══════════════════════════════════════════════════════════════
     if not args.resume:
         print(f'\n{"─"*40}', file=sys.stderr)
-        print('  Phase 1/3: Character scan', file=sys.stderr)
+        print('  Phase 1/3: Character scan + VAD missing-sub detection', file=sys.stderr)
         print(f'{"─"*40}', file=sys.stderr)
-        step_scan(project_dir, resolved_lang, force_rescan=args.force_rescan, target_dir=target_dir)
+        step_scan(project_dir, resolved_lang, force_rescan=args.force_rescan,
+                  target_dir=target_dir, video_dir=video_dir, episodes=episodes)
 
     _print_progress(project_dir, 'Status: after scan')
 

@@ -2,39 +2,31 @@
 
 ## 铁律
 
-1. 修改 SRT 前必须 git commit 备份。
-2. 修改 skill 文件（SKILL.md、user/、scripts/ 等）前必须 git commit 备份。
-
-## Skill 迭代改进
-
-**目标**：每次 `/clear` 后加载 skill + CLAUDE.md，上来就能跑通，无需调试、搜脚本、手动传参。
-
-**流程** — 每次 pipeline 跑完后执行：
-
-1. **检查是否"上来就跑通"** — 本次运行中是否出现了以下任何问题？
-   - 参数缺失导致静默失败（如 `--video-dir` 未传）
-   - 报错信息不明确，需要读脚本才能定位
-   - SKILL.md 或 CLAUDE.md 缺少关键步骤/参数
-   - 需要手动搜文件、grep、读源码才能继续
-
-2. **如果出现任何问题** → 更新 SKILL.md（优先）或相关文档，消除问题根因：
-   - SKILL.md：补充步骤、参数说明、故障排查、输出解读
-   - CLAUDE.md：补充项目特定配置、命令模板
-   - 原则：**让下次的 Claude 看到 skill 就知道怎么做**，不需要上下文记忆
-
-3. **如果一次就跑通** → 记录确认，无需改动。
-
-4. **两端 git commit**：
+1. **修改 SRT 前必须 git commit 备份。** Pipeline 直接覆写 SRT 文件，不可逆。
+   每次跑 `run_all.py`（Phase 2+3）之前，先在**项目目录**执行：
    ```bash
-   cd "<skill-dir>" && git add -A && git commit -m "skill迭代: <改进内容>"
-   cd "<project-root>" && git add -A && git commit -m "备份：<运行说明>"
+   git add -A && git commit -m "备份：pipeline前 — $(date +%Y-%m-%d)"
+   ```
+   如果项目目录不是 git repo → 先 `git init` + 初始 commit（所有文件）。
+
+2. **修改 skill 文件前必须 git commit 备份。** 涉及 SKILL.md、`references/`、`dev/`、`scripts/` 的改动。
+   改动前在 **skill 目录** 执行：
+   ```bash
+   git add -A && git commit -m "skill备份：<改动前>"
    ```
 
-## 运行规则
+3. 以上两条是硬性要求，无论项目大小、改动规模，都不可省略。
+   项目目录和 skill 目录各一份 git 历史，分别管理。
 
-> 脚本在 skill 目录（`scripts/`），不在项目目录。
-> 工作流说明见 `SKILL.md`；CLAUDE.md 只存项目特定配置。
+## 开发者模式 — Claude 的行为要求
 
-- `--video-dir` 必须传，否则 Whisper 静默失败
-- `--lang` 自动检测（从 SRT 文字系统判断 ja/zh），无需手动传
-- `--apply-ai-review` 和 `--apply-checklist` 不能和 full run 一起用
+当 CLAUDE.md 或 skill 上下文中出现「开发者模式」标记时，
+Claude 在**每次破坏性操作**（修改 SRT、skill 文件、脚本）之前必须：
+
+1. 检查目标目录是否为 git repo（`git status`）
+2. 不是 → `git init` + `git add -A` + `git commit -m "初始化：项目基线"`
+3. 是 → `git add -A` + `git commit -m "备份：<操作说明>"`
+4. 改动完成后 → 再次 commit 备份
+
+> 这不是可选项。如果跳过 git 备份直接修改 SRT/skill 文件，就是违反了铁律。
+> Claude 必须主动提示、主动执行，不需要等待用户提醒。

@@ -245,16 +245,27 @@ def vad_delete_nonspeech(audio_path, cues, srt_path, target_lang='ja'):
 MISSING_SPEECH_MARKER = '⚠SPEECH'
 
 
-def find_missing_subtitle_gaps(speech_segs, cues, min_gap=3.0):
+def find_missing_subtitle_gaps(speech_segs, cues, min_gap=3.0, merge_gap=5.0,
+                              max_gap=45.0):
     """Find speech segments not covered by any subtitle cue.
 
     Only flags gaps BETWEEN two existing cues (not before first cue or after last).
     This avoids false positives from OP/ED music with vocal elements.
 
+    Nearby gaps within `merge_gap` seconds of each other are merged into a single
+    larger gap — producing one [???] placeholder per dialogue region, not one
+    per individual VAD fragment.
+
+    Gaps longer than `max_gap` are skipped — these are typically OP/ED songs,
+    long musical sequences, or eyecatch transitions where VAD misclassifies
+    singing/instrumental as speech.
+
     Args:
         speech_segs: [(start_s, end_s), ...] from WebRTC VAD
         cues: list of cue dicts (remaining after non-speech deletion)
         min_gap: minimum gap duration in seconds to create a placeholder
+        merge_gap: merge gaps separated by ≤ this many seconds
+        max_gap: skip gaps longer than this (prevents OP/ED false positives)
 
     Returns:
         [(start_s, end_s, duration), ...] gaps needing placeholder cues
@@ -278,7 +289,7 @@ def find_missing_subtitle_gaps(speech_segs, cues, min_gap=3.0):
     last_cue_e = merged[-1][1] if merged else 0
 
     # Find speech segments not covered by any merged interval
-    gaps = []
+    raw_gaps = []
     for ss, es in speech_segs:
         # Skip speech entirely outside the subtitle range
         if es <= first_cue_s or ss >= last_cue_e:
@@ -294,7 +305,7 @@ def find_missing_subtitle_gaps(speech_segs, cues, min_gap=3.0):
                 capped_end = min(cs, last_cue_e)
                 gap_dur = capped_end - uncovered_start
                 if gap_dur >= min_gap:
-                    gaps.append((uncovered_start, capped_end, gap_dur))
+                    raw_gaps.append((uncovered_start, capped_end, gap_dur))
             uncovered_start = max(uncovered_start, ce)
             if uncovered_start >= es:
                 break
@@ -302,9 +313,32 @@ def find_missing_subtitle_gaps(speech_segs, cues, min_gap=3.0):
         if uncovered_start < min(es, last_cue_e):
             gap_dur = min(es, last_cue_e) - uncovered_start
             if gap_dur >= min_gap:
-                gaps.append((uncovered_start, min(es, last_cue_e), gap_dur))
+                raw_gaps.append((uncovered_start, min(es, last_cue_e), gap_dur))
 
-    return gaps
+    # ── Merge nearby gaps to avoid placeholder spam ──
+    # Consecutive VAD fragments within the same inter-cue region
+    # should be a single [???] marker, not one per fragment.
+    if not raw_gaps:
+        return []
+
+    raw_gaps.sort(key=lambda g: g[0])
+    merged_gaps = [raw_gaps[0]]
+    for ss, es, dur in raw_gaps[1:]:
+        prev_ss, prev_es, prev_dur = merged_gaps[-1]
+        if ss <= prev_es + merge_gap:
+            # Merge into previous gap
+            merged_gaps[-1] = (prev_ss, max(prev_es, es),
+                              max(prev_es, es) - prev_ss)
+        else:
+            merged_gaps.append((ss, es, dur))
+
+    # ── Filter by max_gap: skip very long gaps (OP/ED music) ──
+    filtered = []
+    for ss, es, _ in merged_gaps:
+        dur = es - ss
+        if dur <= max_gap:
+            filtered.append((ss, es, dur))
+    return filtered
 
 
 def add_placeholder_cues(gaps, cues, srt_path):
