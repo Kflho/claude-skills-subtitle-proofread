@@ -361,37 +361,42 @@ Then re-run `--apply-ai-review` in the full pipeline to apply all fixes.
 **Token efficiency**: Candidates file is small (typically 3-10 groups for vocal OP/ED).
 Each group has only variant texts (short lyric lines), not full SRT content.
 
+**Format support**: `oped_fixer.py` 原生支持 SRT 和 ASS 格式（通过 `parse_subtitles()` 自动检测）。
+直接指向包含 `.srt` 或 `.ass` 文件的目录即可，无需手动转换。
+
 **Known limitations**:
-- SRT only（ASS 需先转换，见下方）
 - `--min-episodes` 默认 3，测试时可用 `--min-episodes 2`
 - 中文项目可用 `--lang zh` 手动覆盖（自动检测默认正确）
 
-### ASS → SRT 快速转换（OP/ED 审查用）
+---
+
+## Phase 4: AI Polish (--lang zh only, optional)
+
+**Trigger**: Pipeline 末尾交互提问 `是否对最终字幕进行 AI 润色？(y/n)`
+
+**Two paths**:
+
+### Path A: API 自动润色（推荐，适合 >5 集项目）
+
+需要 `POLISH_API_KEY` 环境变量。调用 `polish_zh.py`（支持 SRT/ASS），10句/批送 LLM 润色。
 
 ```bash
-# 从 ASS 提取 OP/ED 行生成临时 SRT（仅用于 oped_fixer 审查）
-python -c "
-import re, os
-os.makedirs('temp/oped_srt', exist_ok=True)
-for fname in os.listdir('中文字幕范例/'):
-    if not fname.endswith('.ass'): continue
-    with open(f'中文字幕范例/{fname}', 'r', encoding='utf-8') as f:
-        lines = [l for l in f if l.startswith('Dialogue:') and 'Opening' in l]
-    ep = re.search(r'(\d+)', fname).group(1)
-    with open(f'temp/oped_srt/EP{ep}.srt', 'w', encoding='utf-8') as out:
-        for i, line in enumerate(lines, 1):
-            p = line.split(',', 9)
-            start, end, text = p[1], p[2], re.sub(r'\{[^}]*\}', '', p[9]).replace('\\\\N', ' ').strip()
-            def tc(t):  # ASS centiseconds → SRT milliseconds
-                h,m,s = t.split(':'); sec,cs = s.split('.')
-                return f'{int(h):02d}:{int(m):02d}:{int(sec):02d},{int(cs)*10:03d}'
-            out.write(f'{i}\n{tc(start)} --> {tc(end)}\n{text}\n\n')
-    print(f'{fname} -> temp/oped_srt/EP{ep}.srt')
-"
-# 然后跑 oped_fixer
-python fix/oped_fixer.py temp/oped_srt/ -o temp/scans/oped_fixes.json \
-    --ai-review temp/scans/oped_ai_review.json --min-episodes 2
+export POLISH_API_KEY="sk-..."
+python scripts/polish_zh.py --input-dir AI审查后/ --output-dir 中文润色后/ \
+    --glossary reports/proper-nouns.md
 ```
+
+### Path B: AI 助理自行润色（无 API key，适合 ≤5 集样本）
+
+**流程**：
+1. 读取 `AI审查后/` 下的字幕文件（SRT 或 ASS，`parse_subtitles()` 自动检测）
+2. 逐文件读取所有对白文本（仅 Default 风格，跳过 OP/ED/Title 等非对白行）
+3. 批量润色：去翻译腔、去英文/俄文残留、口语化、修正标点
+4. 保留专有名词（参考 `reports/proper-nouns.md` 如有）
+5. 写回原格式（SRT→SRT，ASS→ASS，通过 `write_subtitles()` 自动检测）
+6. 验证：搜索残留外文（英文/俄文）确认清零
+
+> ⚠️ 仅适合 ≤5 集的样本项目。全集项目（>10集）强烈建议配置 `POLISH_API_KEY`。
 
 ---
 

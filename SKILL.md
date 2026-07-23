@@ -13,6 +13,12 @@ description: >
 
 **资源驱动**：有什么用什么。有视频+Whisper→修复乱码；有参考字幕→注入 AI 校对上下文。缺资源也能残血运行——跳过缺失步骤，剩余步骤照常。
 
+### ASS 格式项目
+
+本 skill 同时支持 **SRT** 和 **ASS** 两种格式。所有工具通过 `parse_subtitles()`/`write_subtitles()` 自动检测格式，无需手动转换。
+
+> **注意**：如果项目是 ASS 格式，`--input-dir` 指向包含 `.ass` 文件的目录即可。Pipeline 会像处理 SRT 一样处理 ASS，输出保持 ASS 格式。
+
 ## 首次使用？
 
 检查项目 `CLAUDE.md` 末尾是否有 `## SKILL INITIALIZED: true`。
@@ -217,8 +223,13 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 
 **触发**: Pipeline 末尾交互提问 `是否对最终字幕进行 AI 润色？(y/n)`
 
-- **y** + 已设 `POLISH_API_KEY` → 自动调用 `polish_zh.py`，输出到 `中文润色后/`
-- **y** + 无 key → ⚠️ 警告高耗费，AI 助理逐句润色（~7.5 万 cue）
+- **y** + 已设 `POLISH_API_KEY` → 自动调用 `polish_zh.py`（支持 SRT/ASS），输出到 `中文润色后/`
+- **y** + 无 key → AI 助理自行润色：
+  1. 读 `AI审查后/` 下所有字幕文件（SRT 或 ASS）
+  2. 逐文件、逐句润色对白文本（去翻译腔、口语化）
+  3. 保留专有名词（参考 `reports/proper-nouns.md` 如有）
+  4. 写回原目录或 `中文润色后/`
+  5. **仅适合 ≤5 集的样本项目**。全集项目（>10集）→ 建议配置 API key
 - **n** → 跳过，直接交付 `AI审查后/`
 
 ## 错误恢复

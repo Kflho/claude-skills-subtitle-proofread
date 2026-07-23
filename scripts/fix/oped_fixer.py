@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 import lib._path  # noqa: F401
 from lib.whisper_utils import (
     OP_BOUNDARY_SEC, ED_BOUNDARY_SEC,
-    parse_srt, write_srt,
+    parse_srt, parse_ass_cues, parse_subtitles, write_srt,
 )
 
 
@@ -317,18 +317,18 @@ class OpedFixer:
     # ── Step 1: Collect ──────────────────────────────────────────
 
     def collect(self):
-        """Scan all SRT files and collect OP/ED region cues."""
-        srt_files = sorted([
+        """Scan all subtitle files (SRT + ASS) and collect OP/ED region cues."""
+        sub_files = sorted([
             f for f in os.listdir(self.target_dir)
-            if f.endswith('.srt')
+            if f.endswith(('.srt', '.ass'))
         ])
-        if not srt_files:
-            print('[oped] No SRT files found.', file=sys.stderr)
+        if not sub_files:
+            print('[oped] No subtitle files found.', file=sys.stderr)
             return
 
-        for fname in srt_files:
+        for fname in sub_files:
             fpath = os.path.join(self.target_dir, fname)
-            cues = list(parse_srt(fpath, mark_garbled=False))
+            cues = list(parse_subtitles(fpath, mark_garbled=False))
             if not cues:
                 continue
 
@@ -354,14 +354,19 @@ class OpedFixer:
                 'max_end': max_end,
             }
 
-        print(f'[oped] Collected OP/ED cues from {len(self.episodes)} episodes',
+        fmt_counts = {}
+        for fname in self.episodes:
+            ext = os.path.splitext(fname)[1]
+            fmt_counts[ext] = fmt_counts.get(ext, 0) + 1
+        fmt_str = ', '.join(f'{v} {k}' for k, v in sorted(fmt_counts.items()))
+        print(f'[oped] Collected OP/ED cues from {len(self.episodes)} episodes ({fmt_str})',
               file=sys.stderr)
 
     def collect_reference(self):
         """Extract OP/ED cues from reference subtitle files (SRT or ASS).
 
         Reference files provide canonical text for OP/ED time positions.
-        Supports both SRT (via parse_srt) and ASS (simple Dialogue parser).
+        Uses parse_subtitles() for unified SRT+ASS parsing.
         Cues are bucketed by (region, start_s) with ±time_tolerance matching.
         """
         if not self.reference_dir or not os.path.isdir(self.reference_dir):
@@ -372,63 +377,24 @@ class OpedFixer:
         for fname in sorted(os.listdir(self.reference_dir)):
             fpath = os.path.join(self.reference_dir, fname)
             lower = fname.lower()
+            if not lower.endswith(('.srt', '.ass')):
+                continue
 
-            if lower.endswith('.srt'):
-                cues = list(parse_srt(fpath, mark_garbled=False))
-                if not cues:
-                    continue
-                max_end = max(c['end_s'] for c in cues)
-                ed_start = max(0, max_end - self.ed_boundary)
+            cues = list(parse_subtitles(fpath, mark_garbled=False))
+            if not cues:
+                continue
 
-                for c in cues:
-                    region = None
-                    if c['start_s'] < self.op_boundary:
-                        region = 'OP'
-                    elif c['start_s'] > ed_start:
-                        region = 'ED'
-                    if region:
-                        ref_cues.append((c['start_s'], region, c['text'].strip()))
+            max_end = max(c['end_s'] for c in cues)
+            ed_start = max(0, max_end - self.ed_boundary)
 
-            elif lower.endswith('.ass'):
-                # Simple ASS parser: extract Dialogue lines
-                with open(fpath, 'r', encoding='utf-8') as f:
-                    content = f.read()
-
-                # Get max end time from all Dialogue lines to compute ED boundary
-                max_end = 0.0
-                parsed = []
-                for line in content.split('\n'):
-                    if not line.startswith('Dialogue:'):
-                        continue
-                    parts = line.split(',', 9)
-                    if len(parts) < 10:
-                        continue
-                    start_str, end_str = parts[1].strip(), parts[2].strip()
-                    text = parts[9].strip()
-                    # Strip {...} override tags
-                    text = re.sub(r'\{[^}]*\}', '', text)
-                    # ASS \N → space
-                    text = text.replace('\\N', ' ').strip()
-                    if not text:
-                        continue
-
-                    start_s = self._ass_time_to_sec(start_str)
-                    end_s = self._ass_time_to_sec(end_str)
-                    parsed.append((start_s, end_s, text))
-
-                if not parsed:
-                    continue
-                max_end = max(p[1] for p in parsed)
-                ed_start = max(0, max_end - self.ed_boundary)
-
-                for start_s, end_s, text in parsed:
-                    region = None
-                    if start_s < self.op_boundary:
-                        region = 'OP'
-                    elif start_s > ed_start:
-                        region = 'ED'
-                    if region:
-                        ref_cues.append((start_s, region, text))
+            for c in cues:
+                region = None
+                if c['start_s'] < self.op_boundary:
+                    region = 'OP'
+                elif c['start_s'] > ed_start:
+                    region = 'ED'
+                if region:
+                    ref_cues.append((c['start_s'], region, c['text'].strip()))
 
         if not ref_cues:
             return
@@ -453,18 +419,6 @@ class OpedFixer:
             if r == region and abs(start_s - bucket_start) <= self.time_tolerance:
                 return (r, bucket_start)
         return None
-
-    @staticmethod
-    def _ass_time_to_sec(tc: str) -> float:
-        """Convert ASS timecode (H:MM:SS.cc) to seconds."""
-        tc = tc.strip()
-        parts = tc.split(':')
-        h = int(parts[0])
-        m = int(parts[1])
-        s_parts = parts[2].split('.')
-        sec = int(s_parts[0])
-        cs = int(s_parts[1]) if len(s_parts) > 1 else 0  # centiseconds
-        return h * 3600 + m * 60 + sec + cs / 100.0
 
     # ── Step 2: Cluster ──────────────────────────────────────────
 

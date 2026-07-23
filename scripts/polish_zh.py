@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """中文字幕 AI 润色 — 批量去翻译腔（OpenAI 兼容 API）。
 
-读取修复后的中文 SRT，逐批送 LLM 润色为自然口语，
+读取修复后的中文字幕（SRT 或 ASS），逐批送 LLM 润色为自然口语，
 同时保持专有名词（glossary）翻译一致。
 支持任何 OpenAI 兼容 API（DeepSeek、OpenAI、Gemini、本地模型）。
 
 Usage:
-  # 单文件
+  # 单文件（自动检测 SRT/ASS 格式）
   python polish_zh.py --input EP001.srt --output polished/EP001.srt
+  python polish_zh.py --input EP001.ass --output polished/EP001.ass
 
   # 批量目录（默认 DeepSeek）
   python polish_zh.py --input-dir AI审查后/ --output-dir 中文润色后/
@@ -37,7 +38,7 @@ import urllib.request
 
 import lib._path  # noqa: F401
 
-from lib.whisper_utils import parse_srt, write_srt
+from lib.whisper_utils import parse_subtitles, write_subtitles
 
 # ═══════════════════════════════════════════════════════════════
 # Config
@@ -181,8 +182,8 @@ def polish_batch(cues, glossary_str, api_key, model, base_url):
 
 def polish_srt(input_path, output_path, glossary_str,
                api_key, model, base_url, dry_run=False):
-    """Polish a single SRT file. Returns (total, polished, failed)."""
-    cues = parse_srt(input_path, mark_garbled=False)
+    """Polish a single subtitle file (SRT or ASS auto-detected). Returns (total, polished, failed)."""
+    cues = parse_subtitles(input_path, mark_garbled=False)
     total = len(cues)
     polished = 0
     failed = 0
@@ -226,7 +227,7 @@ def polish_srt(input_path, output_path, glossary_str,
 
     if not dry_run and polished > 0:
         os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
-        write_srt(output_path, result_cues)
+        write_subtitles(output_path, result_cues)
 
     return total, polished, failed
 
@@ -238,13 +239,13 @@ def polish_dir(input_dir, output_dir, glossary_str,
         print(f'ERROR: {input_dir} not found', file=sys.stderr)
         sys.exit(1)
 
-    srt_files = sorted(f for f in os.listdir(input_dir)
-                       if f.endswith('.srt') and not f.startswith('._'))
+    sub_files = sorted(f for f in os.listdir(input_dir)
+                       if f.endswith(('.srt', '.ass')) and not f.startswith('._'))
 
     os.makedirs(output_dir, exist_ok=True)
 
     grand_total = grand_polished = grand_failed = 0
-    for fname in srt_files:
+    for fname in sub_files:
         input_path = os.path.join(input_dir, fname)
         output_path = os.path.join(output_dir, fname)
         t, p, f = polish_srt(input_path, output_path, glossary_str,

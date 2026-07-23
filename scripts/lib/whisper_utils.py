@@ -387,6 +387,129 @@ def apply_fixes_to_srt(path, fixes):
 
 
 # ═══════════════════════════════════════════════════════════════
+# 4.5. ASS 格式支持
+# ═══════════════════════════════════════════════════════════════
+
+def parse_ass_cues(path, mark_garbled=True,
+                   op_boundary=OP_BOUNDARY_SEC, ed_boundary=ED_BOUNDARY_SEC,
+                   target_lang='ja'):
+    """解析 ASS 文件，返回与 parse_srt() 相同格式的 cue 列表。
+
+    每个 cue: {start, end, start_s, end_s, text, line, is_garbled?, garbled_type?}
+
+    start/end 保留 ASS 原生格式 (H:MM:SS.cc)，start_s/end_s 为秒数浮点。
+    line 为 0-based 行索引，用于写回时定位原始 Dialogue 行。
+    """
+    from lib.ass_utils import time_to_ms, strip_ass_tags
+
+    with open(path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+
+    cues = []
+    for i, line in enumerate(lines):
+        if not line.startswith('Dialogue:'):
+            continue
+        parts = line.split(',', 9)
+        if len(parts) < 10:
+            continue
+        start_str = parts[1].strip()
+        end_str = parts[2].strip()
+        text = parts[9].strip()
+        # 去掉 ASS 覆盖标签 {\\...}，保留纯文本
+        text = strip_ass_tags(text)
+        # \\N 换行 → 空格
+        text = text.replace('\\N', ' ').strip()
+        if not text:
+            continue
+
+        c = {
+            'start': start_str,
+            'end': end_str,
+            'text': text,
+            'line': i,  # 0-based 行索引，write_ass_cues() 用于定位
+            'start_s': time_to_ms(start_str) / 1000.0,
+            'end_s': time_to_ms(end_str) / 1000.0,
+        }
+        if mark_garbled:
+            classification = classify_garbled_text(c['text'], target_lang=target_lang)
+            c['is_garbled'] = (classification['type'] == 'garbled')
+            c['garbled_type'] = classification['type']
+        cues.append(c)
+
+    # OP/ED 豁免（与 parse_srt 一致）
+    if mark_garbled and cues:
+        max_end_s = max(c['end_s'] for c in cues)
+        ed_start = max(0, max_end_s - ed_boundary)
+        for c in cues:
+            if c.get('is_garbled') and (
+                c['start_s'] < op_boundary or c['start_s'] > ed_start
+            ):
+                c['is_garbled'] = False
+                c['garbled_type'] = 'clean'
+
+    return cues
+
+
+def write_ass_cues(path, cues):
+    """将 cue 文本修改写回 ASS 文件，保留所有格式和 ASS 覆盖标签。
+
+    通过 cue['line'] 定位原始 Dialogue 行，仅替换文本部分。
+    ASS 覆盖标签 ({\\...}) 从原始行中保留。
+    """
+    with open(path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+
+    # 构建 line_index → new_text 映射
+    changes = {}
+    for c in cues:
+        idx = c.get('line')
+        if idx is not None:
+            changes[idx] = c['text']
+
+    for idx, new_text in changes.items():
+        if idx >= len(lines) or not lines[idx].startswith('Dialogue:'):
+            continue
+        parts = lines[idx].split(',', 9)
+        if len(parts) < 10:
+            continue
+        old_text_field = parts[9]
+        # 保留 ASS 覆盖标签（如 {\\fad(100,100)}）
+        tag_match = re.match(r'(\{[^}]*\})', old_text_field)
+        tag = tag_match.group(1) if tag_match else ''
+        parts[9] = f'{tag}{new_text}\n'
+        lines[idx] = ','.join(parts)
+
+    with open(path, 'w', encoding='utf-8') as f:
+        f.writelines(lines)
+
+
+def parse_subtitles(path, mark_garbled=True,
+                    op_boundary=OP_BOUNDARY_SEC, ed_boundary=ED_BOUNDARY_SEC,
+                    target_lang='ja'):
+    """解析字幕文件（SRT 或 ASS），自动检测格式。
+
+    Returns:
+        与 parse_srt() 相同格式的 cue 列表
+    """
+    if path.lower().endswith('.ass'):
+        return parse_ass_cues(path, mark_garbled=mark_garbled,
+                              op_boundary=op_boundary, ed_boundary=ed_boundary,
+                              target_lang=target_lang)
+    else:
+        return parse_srt(path, mark_garbled=mark_garbled,
+                         op_boundary=op_boundary, ed_boundary=ed_boundary,
+                         target_lang=target_lang)
+
+
+def write_subtitles(path, cues):
+    """写回字幕文件（SRT 或 ASS），自动检测格式。"""
+    if path.lower().endswith('.ass'):
+        return write_ass_cues(path, cues)
+    else:
+        return write_srt(path, cues)
+
+
+# ═══════════════════════════════════════════════════════════════
 # 5. Whisper CLI
 # ═══════════════════════════════════════════════════════════════
 
