@@ -387,6 +387,24 @@ def _parse_json_response(response):
         except (json.JSONDecodeError, TypeError):
             continue
 
+    # Strategy 4: handle truncated JSON (missing closing bracket)
+    for s in strategies:
+        if s.rstrip().endswith('"') and '[' in s and ']' not in s[s.rfind('['):]:
+            try:
+                result = json.loads(s + ']')
+                if isinstance(result, list) and all(isinstance(x, str) for x in result):
+                    return result
+            except (json.JSONDecodeError, TypeError):
+                continue
+        # Also handle trailing comma before truncation
+        if s.rstrip().endswith(',') and '[' in s:
+            try:
+                result = json.loads(s.rstrip().rstrip(',') + ']')
+                if isinstance(result, list) and all(isinstance(x, str) for x in result):
+                    return result
+            except (json.JSONDecodeError, TypeError):
+                continue
+
     print(f'  [translate] Failed to parse JSON (len={len(response)}): {response[:500]}', file=sys.stderr)
     # Debug: check for common issues
     if not response.strip().startswith('['):
