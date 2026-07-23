@@ -62,6 +62,27 @@ zh 值为空 = AI 尚未审查或判定为普通词。
 
 > **注意**：`--mappings-output` 重新运行时自动保留已填入的 zh 翻译（merge 逻辑）。新增词条 zh 为空。
 
+**Step 2.5 — 映射完整性检查（翻译前必做）**：
+
+`translate_srt.py` 的预替换是**简单子串匹配**，不会自动处理汉字/假名转换。
+翻译前必须确认：日语源中实际出现的**每一种书写形式**都在 mappings 中有对应条目。
+
+```bash
+# 检查日语源中未在 mappings 中覆盖的词条
+python -c "
+import json, re, os
+with open('temp/noun_mappings.json', 'r', encoding='utf-8') as f:
+    mappings = json.load(f)
+# 扫描日语源中出现的汉字词，检查是否有映射
+# 特别关注：mapping 中某个概念只列了片假名，但源文件用汉字
+# 例如: 映射有 'トビラ'→'飞雄'，但源文件写的是 '扉'
+"
+```
+
+> ⚠️ **铁律**：如果映射表里一个专名只有片假名形式，但日语源可能用汉字，
+> 必须在映射表中补全所有书写形式。反面案例：`トビラ→飞雄` 有了，但
+> `扉→飞雄` 没有 → LLM 把 `扉` 翻译成「门」「一扇门」「飞鸟」等 6 种变体。
+
 **Step 3 — 翻译时使用**：
 
 ```bash
@@ -123,6 +144,48 @@ export LLM_BASE_URL="https://api.deepseek.com/v1"  # 可选
 > 1. **告知用户 key 为空，无法运行 translate_srt.py**
 > 2. **请用户设置 key 后重新运行**
 > 3. 仅当用户明确要求且 ≤5 集时，才考虑 AI 自行翻译（参考 AI 润色降级策略）
+
+### Step 4 — 翻译后验证（必须）
+
+`translate_srt.py` exit 0 **不等于翻译成功**。API 调用可能静默失败，batch 可能被跳过。
+**翻译后必须运行以下验证**，不靠 "script completed" 判断成功：
+
+```bash
+cd "<project>"
+
+# 1. 日语残留检查 — 零容忍
+python -c "
+import re
+for ep in ['001','002','003']:  # 替换为实际集号
+    fn = f'中文AI翻译验证/철완 아톰 (Astro Boy)1963 - {ep} EP. DVD 640x360 H264.srt'
+    with open(fn, encoding='utf-8') as f:
+        c = f.read()
+    jp = re.findall(r'[぀-ゟ゠-ヿ]+', c)
+    cues = len(re.findall(r'^\d+$', c, re.MULTILINE))
+    if jp:
+        print(f'❌ EP{ep}: {len(jp)} 处日语残留 → 需修复或标 [???]')
+        for j in jp[:5]:
+            idx = c.find(j)
+            print(f'   L{c[:idx].count(chr(10))+1}: [{j[:60]}]')
+    else:
+        print(f'✅ EP{ep}: {cues} cues, 0 日语残留')
+"
+
+# 2. 已知错误专名检查
+grep -n '扉\|飞鸟\|飞跳\|飞鱼\|天满' 中文AI翻译验证/*.srt && echo '❌ 发现错误专名' || echo '✅ 专名检查通过'
+```
+
+> 发现日语残留 → 能翻译的手工翻译，Whisper 噪声碎片标 `[???]`。
+> 发现错误专名 → 说明 noun_mappings 仍未覆盖所有变体，回到 Step 2.5 补全后重跑。
+
+### 常见问题排查
+
+| 症状 | 原因 | 修复 |
+|------|------|------|
+| 翻译后仍有 `扉` 等单汉字残留 | `load_mappings()` 旧版过滤 `len(k)>=2`，单字条目被丢弃 | 更新 skill 或手动替换 |
+| 某个 batch 完全未翻译 | LLM 返回了非标准 JSON 格式（对象数组、截断、缺括号） | 更新 skill（已加固解析器+重试） |
+| 专名翻译不一致 | mappings 未覆盖日语源实际使用的书写形式 | 补全 mappings 后重跑 |
+| 大量 `[???]` | 日语源 Whisper 质量太差 | 翻译前先跑 proofread pipeline 清理源文本 |
 
 ---
 

@@ -132,10 +132,20 @@ python "<scripts>/nouns/build_glossary.py" --findings temp/scans/findings.json \
   -o reports/proper-nouns.md --mappings-output temp/noun_mappings.json
 
 # 2. 🤖 AI 审查词表 → 编辑 temp/noun_mappings.json
+#    ⚠️ 确保每个专名的所有书写形式（汉字/片假名/平假名）都有映射！
+
+# 2.5. 🚨 映射完整性检查 — 翻译前必做
+#    确认日语源中实际出现的书写形式都在 mappings 中有对应条目
+#    反面案例：mapping 有「トビラ→飞雄」但没有「扉→飞雄」→ 翻译崩坏
 
 # 3. 翻译
 python "<scripts>/translate_srt.py" --input-dir "<日文源>" --output-dir "<输出>" \
   --mappings temp/noun_mappings.json
+
+# 4. 🚨 翻译后验证 — 必须执行（不靠 exit 0 判断成功）
+#    a. grep 日语残留（零容忍）
+#    b. grep 已知错误专名
+#    c. 发现残留 → 手工修复或标 [???]，错误专名 → 回到步骤 2.5 补全映射
 ```
 
 ## Pipeline
