@@ -348,11 +348,11 @@ def main():
     args = parser.parse_args()
 
     # Step 0: 繁→简（--lang zh 自动启用）
+    # NOTE: degloss (翻译腔去机械化) removed from zh pipeline — replaced
+    # by DeepSeek LLM batch polish (polish_zh.py) for full coverage.
     if args.lang == 'zh' or args.trad_to_simp:
         print('[trad→simp] 繁→简转换 ...')
         _run_trad_to_simp(args.target_dir, dry_run=args.dry_run)
-        print('[degloss] 翻译腔去机械化 ...')
-        _run_degloss(args.target_dir, dry_run=args.dry_run)
 
     # Load fixes from JSON or review checklist
     if args.review:

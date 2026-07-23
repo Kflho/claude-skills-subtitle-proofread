@@ -599,6 +599,29 @@ def step_ass_repair(project_dir, target_dir=None):
                 project_dir, desc='ass')
 
 
+def step_polish(project_dir, target_dir=None):
+    """Layer 6 (zh only): AI polish — DeepSeek 批量去翻译腔。
+
+    Reads Chinese SRT from AI审查后/, polishes via DeepSeek API,
+    writes to 中文润色后/.
+    """
+    target = target_dir or os.path.join(project_dir, 'AI审查后')
+    output_dir = os.path.join(project_dir, '中文润色后')
+    glossary = os.path.join(project_dir, 'reports', 'proper-nouns.md')
+
+    polish_script = os.path.join(_SCRIPT_DIR, 'polish_zh.py')
+    cmd = [
+        'python', polish_script,
+        '--input-dir', target,
+        '--output-dir', output_dir,
+    ]
+    if os.path.exists(glossary):
+        cmd.extend(['--glossary', glossary])
+
+    print(f'[polish] 润色 {target} → {output_dir}', file=sys.stderr)
+    return _run(cmd, project_dir, timeout=7200, desc='polish')
+
+
 def _append_to_glossary(project_dir, accepted_candidates, lang):
     """Append auto-classified proper nouns to the glossary — with validation.
 
@@ -1297,6 +1320,22 @@ Examples:
         print(f'\n{"="*55}', file=sys.stderr)
         print(f'  Pipeline complete — all phases passed.', file=sys.stderr)
         print(f'{"="*55}', file=sys.stderr)
+
+    # ── AI Polish (--lang zh only) ──
+    if not args.dry_run and resolved_lang == 'zh':
+        print(f'\n{"─"*40}', file=sys.stderr)
+        print(f'  中文字幕 AI 润色（去翻译腔）', file=sys.stderr)
+        print(f'{"─"*40}', file=sys.stderr)
+        print(f'  是否对最终字幕进行 AI 润色？(y/n) ', end='', file=sys.stderr)
+        sys.stderr.flush()
+        try:
+            answer = input().strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = 'n'
+        if answer in ('y', 'yes'):
+            step_polish(project_dir, target_dir=target_dir)
+        else:
+            print(f'  跳过 AI 润色。', file=sys.stderr)
 
 
 if __name__ == '__main__':
