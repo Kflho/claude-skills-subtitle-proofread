@@ -362,8 +362,18 @@ def _parse_json_response(response):
     for s in strategies:
         try:
             result = json.loads(s)
-            if isinstance(result, list) and all(isinstance(x, str) for x in result):
-                return result
+            if isinstance(result, list):
+                # Format 1: array of strings ["trans1", "trans2"]
+                if all(isinstance(x, str) for x in result):
+                    return result
+                # Format 2: array of objects [{"index":1, "translation":"..."}]
+                if all(isinstance(x, dict) for x in result):
+                    texts = []
+                    for obj in result:
+                        t = obj.get('translation') or obj.get('text') or obj.get('zh') or ''
+                        texts.append(str(t))
+                    if any(texts):
+                        return texts
         except (json.JSONDecodeError, TypeError):
             continue
 
@@ -377,7 +387,12 @@ def _parse_json_response(response):
         except (json.JSONDecodeError, TypeError):
             continue
 
-    print(f'  [translate] Failed to parse JSON: {response[:200]}', file=sys.stderr)
+    print(f'  [translate] Failed to parse JSON (len={len(response)}): {response[:500]}', file=sys.stderr)
+    # Debug: check for common issues
+    if not response.strip().startswith('['):
+        print(f'  [translate] Response does not start with "[", starts with: {repr(response[:50])}', file=sys.stderr)
+    if not response.strip().endswith(']'):
+        print(f'  [translate] Response does not end with "]", ends with: {repr(response[-50:])}', file=sys.stderr)
     return None
 
 
