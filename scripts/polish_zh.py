@@ -1,24 +1,30 @@
 #!/usr/bin/env python3
-"""中文字幕 AI 润色 — DeepSeek 批量去翻译腔。
+"""中文字幕 AI 润色 — 批量去翻译腔（OpenAI 兼容 API）。
 
-读取修复后的中文 SRT，逐批送 DeepSeek 润色为自然口语，
+读取修复后的中文 SRT，逐批送 LLM 润色为自然口语，
 同时保持专有名词（glossary）翻译一致。
+支持任何 OpenAI 兼容 API（DeepSeek、OpenAI、Gemini、本地模型）。
 
 Usage:
   # 单文件
   python polish_zh.py --input EP001.srt --output polished/EP001.srt
 
-  # 批量目录
+  # 批量目录（默认 DeepSeek）
   python polish_zh.py --input-dir AI审查后/ --output-dir 中文润色后/
       --glossary reports/proper-nouns.md
+
+  # 使用 OpenAI
+  POLISH_API_KEY=sk-xxx POLISH_MODEL=gpt-4o-mini \\
+  POLISH_BASE_URL=https://api.openai.com/v1 \\
+  python polish_zh.py --input-dir AI审查后/
 
   # 预览模式
   python polish_zh.py --input EP001.srt --dry-run
 
 Setup:
-  设置环境变量 DEEPSEEK_API_KEY（必需）
-  可选 DEEPSEEK_MODEL（默认 deepseek-chat）
-  可选 DEEPSEEK_BASE_URL（默认 https://api.deepseek.com/v1）
+  环境变量 POLISH_API_KEY（必需）
+  可选 POLISH_MODEL（默认 deepseek-chat）
+  可选 POLISH_BASE_URL（默认 https://api.deepseek.com/v1）
 """
 
 import argparse
@@ -290,9 +296,9 @@ def main():
     args = parser.parse_args()
 
     # API key
-    api_key = os.environ.get('DEEPSEEK_API_KEY', '')
+    api_key = os.environ.get('POLISH_API_KEY', '')
     if not api_key and not args.dry_run:
-        print('ERROR: DEEPSEEK_API_KEY not set.', file=sys.stderr)
+        print('ERROR: POLISH_API_KEY not set.', file=sys.stderr)
         print('Set it via environment variable or pass --dry-run to preview.',
               file=sys.stderr)
         sys.exit(1)
