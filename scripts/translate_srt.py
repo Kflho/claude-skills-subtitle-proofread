@@ -340,19 +340,43 @@ def _call_llm(messages, api_key, model, base_url):
 
 
 def _parse_json_response(response):
-    """Parse JSON array from LLM response, handling markdown code blocks."""
+    """Parse JSON array from LLM response, handling markdown code blocks
+    and common JSON formatting errors."""
     if not response:
         return None
-    try:
-        cleaned = response.strip()
-        if cleaned.startswith('```'):
-            cleaned = re.sub(r'^```\w*\n', '', cleaned)
-            cleaned = re.sub(r'\n```$', '', cleaned)
-        result = json.loads(cleaned)
-        if isinstance(result, list) and all(isinstance(s, str) for s in result):
-            return result
-    except (json.JSONDecodeError, TypeError):
-        pass
+
+    strategies = []
+
+    # Strategy 1: direct parse after stripping markdown fences
+    cleaned = response.strip()
+    if cleaned.startswith('```'):
+        cleaned = re.sub(r'^```\w*\n', '', cleaned)
+        cleaned = re.sub(r'\n```$', '', cleaned)
+    strategies.append(cleaned)
+
+    # Strategy 2: extract first JSON array via regex
+    m = re.search(r'\[.*\]', response, re.DOTALL)
+    if m:
+        strategies.append(m.group(0))
+
+    for s in strategies:
+        try:
+            result = json.loads(s)
+            if isinstance(result, list) and all(isinstance(x, str) for x in result):
+                return result
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+    # Strategy 3: try to fix trailing commas before ] or }
+    for s in strategies:
+        try:
+            fixed = re.sub(r',\s*([}\]])', r'\1', s)
+            result = json.loads(fixed)
+            if isinstance(result, list) and all(isinstance(x, str) for x in result):
+                return result
+        except (json.JSONDecodeError, TypeError):
+            continue
+
     print(f'  [translate] Failed to parse JSON: {response[:200]}', file=sys.stderr)
     return None
 
@@ -456,11 +480,23 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
                 if j < len(batch) and translated_text and translated_text != batch[j]['text']:
                     result_cues[i + j]['text'] = translated_text
                     translated += 1
-            # Keep track of translated texts for next batch's context
             translated_context = [c['text'] for c in result_cues[max(0, i-3):i+len(batch)]
                                   if c['text']]
         else:
-            failed += len(batch)
+            # Retry once — common failure is malformed JSON, not API error
+            print(f'\n    [retry] batch {i//BATCH_SIZE+1}', file=sys.stderr)
+            time.sleep(1)
+            result = _translate_batch(batch, api_key, model, base_url, glossary_str,
+                                      context_texts=translated_context)
+            if result:
+                for j, translated_text in enumerate(result):
+                    if j < len(batch) and translated_text and translated_text != batch[j]['text']:
+                        result_cues[i + j]['text'] = translated_text
+                        translated += 1
+                translated_context = [c['text'] for c in result_cues[max(0, i-3):i+len(batch)]
+                                      if c['text']]
+            else:
+                failed += len(batch)
 
         # Progress indicator
         done = min(i + BATCH_SIZE, total)
