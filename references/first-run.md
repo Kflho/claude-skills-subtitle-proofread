@@ -516,25 +516,26 @@ else:
 
 收到 key 后：
 
-> Key 写入 CLAUDE.md（**不写明文，只写占位符**）：
+> Key 不写入 CLAUDE.md（会被 git 追踪），而是写入 **Claude Code 的 `~/.claude/settings.json`**：
 >
-> ```bash
-> # ── LLM API（翻译 + 润色共用）──
-> export LLM_API_KEY=''
-> export LLM_MODEL='deepseek-chat'
-> export LLM_BASE_URL='https://api.deepseek.com/v1'
+> ```json
+> {
+>   "env": {
+>     "LLM_API_KEY": "sk-...",
+>     "LLM_MODEL": "deepseek-chat",
+>     "LLM_BASE_URL": "https://api.deepseek.com/v1"
+>   }
+> }
 > ```
 >
-> 实际 key 建议设为系统环境变量或每次手动 `export`，避免写入会被 git 追踪的文件。
-
-**写入 CLAUDE.md 后，立即提醒用户**：
-
-> ⚠️ **Key 已写入 CLAUDE.md 占位符，但当前 session 还不可用。**
-> 请现在就 export：
+> `settings.json` 的 `env` 字段会自动注入到所有 session，且不在项目目录内，不会被 git 提交。
+>
+> CLAUDE.md 只写占位符（文档用途）：
 > ```bash
-> export LLM_API_KEY="sk-..."
+> export LLM_API_KEY=''   # 实际 key 在 ~/.claude/settings.json
 > ```
-> 否则翻译功能在本次 session 中无法使用。
+
+写入 settings.json 后，当前 session 立即生效，无需手动 export。验证：
 
 ### 3.7.5 验证
 

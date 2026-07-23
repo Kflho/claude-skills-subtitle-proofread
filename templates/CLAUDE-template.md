@@ -65,7 +65,9 @@ export BAIDU_SECRET=''
 # 获取 key: https://platform.deepseek.com/（推荐，有免费额度）
 # 其他: https://platform.openai.com/ / https://aistudio.google.com/
 #
-# ⚠️ 实际 key 建议设为系统环境变量，不要明文写入此文件
+# ⚠️ 实际 key 不要写在这里（会被 git 追踪）。
+# 正确方式：写入 ~/.claude/settings.json 的 "env" 字段，自动注入所有 session：
+#   "env": { "LLM_API_KEY": "sk-...", "LLM_MODEL": "deepseek-chat", "LLM_BASE_URL": "https://api.deepseek.com/v1" }
 export LLM_API_KEY=''
 export LLM_MODEL='deepseek-chat'
 export LLM_BASE_URL='https://api.deepseek.com/v1'

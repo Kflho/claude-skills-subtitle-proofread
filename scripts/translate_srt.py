@@ -139,7 +139,8 @@ def load_mappings(path):
         raw = json.load(f)
 
     # 只保留 AI 已填入中文译名的条目
-    ja_to_zh = {k: v for k, v in raw.items() if v and len(k) >= 2}
+    # 注意：允许单字条目（如汉字专名「扉」），但跳过空值
+    ja_to_zh = {k: v for k, v in raw.items() if v}
     glossary_str = ', '.join(sorted(set(ja_to_zh.values()))) if ja_to_zh else ''
     return glossary_str, ja_to_zh
 
