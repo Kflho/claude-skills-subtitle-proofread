@@ -252,6 +252,7 @@ Phase 2: Triage
   → Baidu 翻译 (--lang zh): Whisper 输出 ja→zh（无凭证时降级 AI 翻译）
 
 Phase 3: Unify
+  ├─ Suspect noun search: segmentation-based detection of unrecognized names (new!)
   ├─ OP/ED fixer: cross-episode clustering → instrumental auto-clean / vocal AI review
   ├─ Noun variant detection → AI review all candidates (≤50, one pass)
   └─ Deliver: apply all fixes → [???] markers written to SRT for Aegisub review
@@ -270,6 +271,39 @@ Report: reports/问题解决报告.md（自动生成，按 Phase 分组）
 ## 暂停点 → Action
 
 Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处理再继续**。
+
+### 疑似专名搜索
+
+**触发**: `[suspect-nouns] N entries → report layer 3` 或 `[SUSPECT GROUPS]`
+
+**流程**：
+
+1. 读 `temp/scans/suspect_nouns.json`
+2. 检查 `groups`（同源异译聚类）：
+   - 同一日语词翻译为多种中文 → 可能是专名翻译不一致
+   - 确认 canonical 译名 → 更新 `noun_mappings.json`
+3. 检查 `singletons`（独立疑似词）：
+   - 分词发现的不在词表中的短词/片假名
+   - 逐条判断：专有名词 or 普通词？
+   - 专名 → 加入词表；普通词 → 忽略
+4. 更新 `noun_mappings.json` 后，重跑翻译可自动应用
+
+**独立使用**（可不依赖 pipeline）：
+
+```bash
+# 中文翻译中找疑似专名（需日文源做交叉参照）
+python "<scripts>/nouns/find_suspect_nouns.py" \
+  --input-dir "中文AI翻译验证/" \
+  --source-dir "日文ai修复版/" \
+  --mappings temp/noun_mappings.json \
+  --lang zh --mode translation
+
+# 日文源中找未识别专名
+python "<scripts>/nouns/find_suspect_nouns.py" \
+  --input-dir "日文ai修复版/" \
+  --glossary reports/proper-nouns.md \
+  --lang ja --mode source
+```
 
 ### AI 碎片补全
 
@@ -377,5 +411,7 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 | `LLM_API_KEY` (env) | LLM API key for translation + polish (optional, --lang zh). Separate from Claude Code's. |
 | `--mappings <JSON>` | translate_srt.py: path to noun_mappings.json (preferred over --glossary) |
 | `--mappings-output <JSON>` | build_glossary.py: also write machine-readable ja→zh dict |
+| `--mode source|translation` | find_suspect_nouns.py: source=find unrecognized names, translation=find inconsistent |
+| `--source-dir <DIR>` | find_suspect_nouns.py: Japanese source for cross-reference clustering |
 
 > `--apply-ai-review` 是后处理快速路径，不能和 full run 一起用。

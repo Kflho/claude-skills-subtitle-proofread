@@ -335,6 +335,30 @@ def step_nouns(project_dir, lang, target_dir=None):
         print('\n[nouns] No proper-nouns.md — skipping noun table check.', file=sys.stderr)
         print('[nouns] Run unified_scanner --build-glossary first to generate.', file=sys.stderr)
 
+    # Suspect noun search — proactively find potential proper nouns
+    # Uses word segmentation to flag terms not in glossary that look like names
+    suspect_script = os.path.join(_SCRIPT_DIR, 'nouns', 'find_suspect_nouns.py')
+    suspect_output = os.path.join(project_dir, 'temp', 'scans', 'suspect_nouns.json')
+    mappings = os.path.join(project_dir, 'temp', 'noun_mappings.json')
+    suspect_args = ['python', suspect_script, '--input-dir', target,
+                    '--lang', lang, '--mode', 'source', '--output', suspect_output]
+    if os.path.exists(glossary):
+        suspect_args.extend(['--glossary', glossary])
+    if os.path.exists(mappings):
+        suspect_args.extend(['--mappings', mappings])
+
+    # Translation mode: also cross-reference with Japanese source if available
+    source_dir = os.path.join(project_dir, '日文ai修复版')
+    if lang == 'zh' and os.path.isdir(source_dir):
+        suspect_args.extend(['--mode', 'translation', '--source-dir', source_dir])
+
+    _run(suspect_args, project_dir, desc='suspect-nouns')
+
+    # Wire suspect nouns to report layer '3'
+    report_path = os.path.join(project_dir, 'reports', '问题解决报告.md')
+    if os.path.exists(suspect_output):
+        _wire_suspect_nouns_to_report(suspect_output, report_path)
+
     return results
 
 
@@ -545,6 +569,56 @@ def step_polish(project_dir, target_dir=None):
 
     print(f'[polish] 润色 {target} → {output_dir}', file=sys.stderr)
     return _run(cmd, project_dir, timeout=7200, desc='polish')
+
+
+def _wire_suspect_nouns_to_report(suspect_json_path, report_path):
+    """Read suspect_nouns.json and write entries to report layer '3'.
+
+    Groups are reported as suspect clusters; singletons as individual candidates.
+    Each entry includes context so the AI reviewer can quickly assess.
+    """
+    import json as _json
+    try:
+        with open(suspect_json_path, 'r', encoding='utf-8') as f:
+            data = _json.load(f)
+    except Exception:
+        return
+
+    entries = []
+
+    # Groups → report as clusters with canonical form
+    for g in data.get('groups', []):
+        variants = g.get('variants', [])
+        source_ja = g.get('source_ja', g.get('suspected_canonical', '?'))
+        reason = g.get('reason', '')
+        for v in variants[:5]:  # cap per group
+            ctx_list = v.get('contexts', []) if isinstance(v, dict) else []
+            ctx_text = ctx_list[0].get('cue_text', '')[:40] if ctx_list else ''
+            entries.append({
+                'ep': v.get('ep', '') if isinstance(v, dict) else '',
+                'time': v.get('cue_start', '') if isinstance(v, dict) else '',
+                'original': v['text'] if isinstance(v, dict) else v,
+                'corrected': f'→ {g["suspected_canonical"]} (ja: {source_ja[:30]})',
+                'status': '⬜',
+                'note': f'{reason}; ctx: {ctx_text}',
+            })
+
+    # Singletons → report as individual suspects
+    for s in data.get('singletons', [])[:30]:
+        ctx = s.get('contexts', [{}])
+        ctx_text = ctx[0].get('cue_text', '')[:40] if ctx else ''
+        entries.append({
+            'ep': s.get('eps', [''])[0] if s.get('eps') else '',
+            'time': ctx[0].get('cue_start', '') if ctx else '',
+            'original': s['text'],
+            'corrected': '',
+            'status': '⬜',
+            'note': f'{s.get("reason", "")} (×{s.get("count", 0)}); ctx: {ctx_text}',
+        })
+
+    if entries:
+        _replace_layer(report_path, step='3', entries=entries)
+        print(f'[suspect-nouns] {len(entries)} entries → report layer 3', file=sys.stderr)
 
 
 def _append_to_glossary(project_dir, accepted_candidates, lang):
