@@ -642,6 +642,10 @@ class Fixer:
                         for f in auto_cut
                     ])
                 if ai_fragments:
+                    # NOTE: corrected 预填 Whisper 猜测（非 AI 审查结果）。
+                    # ⬜ 状态 + 非空 corrected = "Whisper有猜测，待AI确认"。
+                    # AI审查（--apply-ai-review）后会通过 update_entry_status
+                    # 完全覆盖此字段，预填值仅供审查时参考，不影响最终结果。
                     upsert_entries(self._report_path, step='2.5', entries=[
                         {'ep': self.episode, 'time': f.get('start', ''),
                          'original': f.get('original', '')[:120],
