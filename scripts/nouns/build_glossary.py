@@ -474,6 +474,71 @@ def format_glossary_markdown(glossary):
 
 
 # ═══════════════════════════════════════════════════════════════
+# JSON mappings output (machine-readable, for translate_srt.py)
+# ═══════════════════════════════════════════════════════════════
+
+def _write_mappings_json(glossary, mappings_path, md_path):
+    """Write ja→zh mappings as a simple JSON dict.
+
+    Extracts all unique terms from the glossary, writes to mappings_path.
+    If an existing mappings file exists, preserves any zh translations already
+    filled in by AI review (new terms added with empty zh value).
+
+    Format: {"ja_term": "zh_translation", ...}
+    """
+    # Collect all unique Japanese terms from glossary
+    new_terms = {}
+
+    for g in glossary.get('characters', []):
+        name = g.get('canonical', '')
+        if name and len(name) >= 2:
+            new_terms[name] = ''
+        for v in g.get('variants', []):
+            vname = v.get('word', '') if isinstance(v, dict) else v
+            if vname and len(vname) >= 2 and vname != name:
+                new_terms[vname] = ''
+
+    for k in glossary.get('kanji_compounds', []):
+        word = k.get('word', '')
+        if word and len(word) >= 2:
+            new_terms[word] = ''
+
+    for g in glossary.get('other_terms', []):
+        name = g.get('canonical', '')
+        if name and len(name) >= 2:
+            new_terms[name] = ''
+        for v in g.get('variants', []):
+            vname = v.get('word', '') if isinstance(v, dict) else v
+            if vname and len(vname) >= 2 and vname != name:
+                new_terms[vname] = ''
+
+    # Merge with existing mappings (preserve AI-filled translations)
+    if os.path.exists(mappings_path):
+        try:
+            with open(mappings_path, 'r', encoding='utf-8') as f:
+                existing = json.load(f)
+            preserved = 0
+            for term, zh in existing.items():
+                if zh and term in new_terms:
+                    new_terms[term] = zh
+                    preserved += 1
+            if preserved:
+                print(f'[mappings] Preserved {preserved} AI-filled translations '
+                      f'from existing {mappings_path}', file=sys.stderr)
+        except Exception as e:
+            print(f'WARNING: Could not read existing mappings: {e}', file=sys.stderr)
+
+    # Write
+    os.makedirs(os.path.dirname(mappings_path) or '.', exist_ok=True)
+    with open(mappings_path, 'w', encoding='utf-8') as f:
+        json.dump(new_terms, f, ensure_ascii=False, indent=2)
+
+    filled = sum(1 for v in new_terms.values() if v)
+    print(f'→ {mappings_path} ({len(new_terms)} terms, {filled} with zh translation)',
+          file=sys.stderr)
+
+
+# ═══════════════════════════════════════════════════════════════
 # CLI
 # ═══════════════════════════════════════════════════════════════
 
@@ -493,6 +558,10 @@ def main():
                         help='Path to ai_nouns.json from WebSearch enrichment')
     parser.add_argument('--no-merge', action='store_true',
                         help='Fully regenerate glossary, discarding manual/AI entries')
+    parser.add_argument('--mappings-output',
+                        help='Optional JSON output path for ja→zh noun mappings '
+                             '(format: {"ja_term": "", ...}, zh values empty '
+                             'until AI review fills them in)')
     args = parser.parse_args()
 
     # Load term frequencies
@@ -544,6 +613,12 @@ def main():
         f.write(md)
 
     print(f'→ {args.output}', file=sys.stderr)
+
+    # ── Optional: write machine-readable ja→zh JSON ──
+    if args.mappings_output:
+        _write_mappings_json(glossary, args.mappings_output, args.output)
+
+    return glossary
 
 
 if __name__ == '__main__':

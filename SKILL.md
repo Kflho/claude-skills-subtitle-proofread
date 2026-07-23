@@ -163,6 +163,76 @@ python "<scripts-dir>/run_all.py" \
 > Baidu 翻译为**可选**：未配置时自动降级，日语原文保留在 AI fragments 中由 AI 自行翻译。
 > AI 润色为**可选**：Pipeline 末尾交互提问。需要 `LLM_API_KEY` 环境变量。无 key 时降级为 AI 助理自行润色（⚠️ 高 token 消耗，7.5 万 cue）。
 
+## 名词库准备（翻译前置）
+
+翻译项目**必须先准备名词库**，否则专名翻译不一致。校对项目可跳过（校对管线有自己的专名流程）。
+
+### 数据流
+
+```
+unified_scanner.py → findings.json (term_frequencies)
+build_glossary.py  → reports/proper-nouns.md (人类审查用)
+                   → temp/noun_mappings.json (脚本用, ja→zh)
+        ↓
+  🤖 AI 审查词表
+        ↓
+translate_srt.py --mappings temp/noun_mappings.json
+```
+
+### 步骤
+
+**Step 1 — 扫描 + 生成词表**：
+
+```bash
+cd "<project>"
+python "<scripts>/scan/unified_scanner.py" \
+  --target-dir "<日文源字幕>" \
+  --output-findings temp/scans/findings_ja.json \
+  --output-issues temp/scans/issues_ja/ \
+  --build-glossary --glossary-output reports/proper-nouns.md \
+  --project-lang ja
+
+python "<scripts>/nouns/build_glossary.py" \
+  --findings temp/scans/findings_ja.json \
+  -o reports/proper-nouns.md \
+  --mappings-output temp/noun_mappings.json
+```
+
+输出：
+- `reports/proper-nouns.md` — 人类可读的专名表（Markdown）
+- `temp/noun_mappings.json` — 机器可读的 ja→zh 映射（JSON），zh 值初始为空
+
+**Step 2 — 🤖 AI 审查词表**：
+
+1. 读 `reports/proper-nouns.md`（全文）
+2. 逐条判断：专有名词 or 普通词？
+3. **专有名词** → 确定中文译名 → 写入 `temp/noun_mappings.json`
+4. **普通词** → 加入 `COMMON_KANJI` / `COMMON_KATAKANA` 黑名单
+5. 重跑 `build_glossary.py`（自动保留已填入的 zh 翻译）
+
+`noun_mappings.json` 格式极简，AI 直接编辑即可：
+```json
+{
+  "アトム": "阿童木",
+  "お茶の水": "御茶水",
+  "プルート": "普鲁托",
+  "ハカセ": ""
+}
+```
+zh 值为空 = AI 尚未审查或判定为普通词。
+
+> **注意**：`--mappings-output` 重新运行时自动保留已填入的 zh 翻译（merge 逻辑）。新增词条 zh 为空。
+
+**Step 3 — 翻译时使用**：
+
+```bash
+python "<scripts>/translate_srt.py" \
+  --input-dir "<日文源>" --output-dir "<中文输出>" \
+  --mappings temp/noun_mappings.json
+```
+
+`--mappings` 优先于 `--glossary`（后者保留向后兼容）。
+
 ## Pipeline
 
 ```
@@ -305,5 +375,7 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 | `--resume` | Resume after AI noun review (Phase 3 only) |
 | `--force-rescan` | Re-scan even if cache fresh |
 | `LLM_API_KEY` (env) | LLM API key for translation + polish (optional, --lang zh). Separate from Claude Code's. |
+| `--mappings <JSON>` | translate_srt.py: path to noun_mappings.json (preferred over --glossary) |
+| `--mappings-output <JSON>` | build_glossary.py: also write machine-readable ja→zh dict |
 
 > `--apply-ai-review` 是后处理快速路径，不能和 full run 一起用。

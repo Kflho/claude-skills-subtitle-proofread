@@ -125,6 +125,25 @@ def load_glossary(path):
     return glossary_str, ja_to_zh
 
 
+def load_mappings(path):
+    """从 JSON 文件加载 ja→zh 映射（供 translate_srt.py 使用）。
+
+    格式: {"ja_term": "zh_translation", ...}
+    zh 值为空的条目会被过滤掉（AI 尚未审查）。
+    返回 (glossary_str, ja_to_zh_dict)，与 load_glossary() 签名一致。
+    """
+    if not path or not os.path.exists(path):
+        return '', {}
+
+    with open(path, 'r', encoding='utf-8') as f:
+        raw = json.load(f)
+
+    # 只保留 AI 已填入中文译名的条目
+    ja_to_zh = {k: v for k, v in raw.items() if v and len(k) >= 2}
+    glossary_str = ', '.join(sorted(set(ja_to_zh.values()))) if ja_to_zh else ''
+    return glossary_str, ja_to_zh
+
+
 # ═══════════════════════════════════════════════════════════════
 # OP/ED detection + pre-translation
 # ═══════════════════════════════════════════════════════════════
@@ -532,7 +551,8 @@ def main():
     parser.add_argument('--input-dir', help='Directory of SRT/ASS files to translate')
     parser.add_argument('--output-dir', default='中文翻译后',
                         help='Output directory (default: 中文翻译后/)')
-    parser.add_argument('--glossary', help='Path to proper-nouns.md (ja→zh mapping)')
+    parser.add_argument('--glossary', help='Path to proper-nouns.md (ja→zh mapping, legacy)')
+    parser.add_argument('--mappings', help='Path to noun_mappings.json (ja→zh, preferred)')
     parser.add_argument('--model', default=DEFAULT_MODEL,
                         help=f'LLM model (default: {DEFAULT_MODEL})')
     parser.add_argument('--base-url', default=DEFAULT_BASE_URL,
@@ -555,10 +575,14 @@ def main():
     model = os.environ.get('LLM_MODEL', '') or os.environ.get('POLISH_MODEL', '') or args.model
     base_url = os.environ.get('LLM_BASE_URL', '') or os.environ.get('POLISH_BASE_URL', '') or args.base_url
 
-    # Load glossary
+    # Load glossary/mappings (--mappings preferred, --glossary as fallback)
     glossary_str = ''
     ja_to_zh = {}
-    if args.glossary:
+    if args.mappings:
+        glossary_str, ja_to_zh = load_mappings(args.mappings)
+        if ja_to_zh:
+            print(f'  [mappings] {len(ja_to_zh)} ja→zh mappings loaded', file=sys.stderr)
+    elif args.glossary:
         glossary_str, ja_to_zh = load_glossary(args.glossary)
         if ja_to_zh:
             print(f'  [glossary] {len(ja_to_zh)} ja→zh mappings loaded', file=sys.stderr)
