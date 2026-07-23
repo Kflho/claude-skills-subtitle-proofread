@@ -527,6 +527,17 @@ else:
 >
 > 实际 key 建议设为系统环境变量或每次手动 `export`，避免写入会被 git 追踪的文件。
 
+**写入 CLAUDE.md 后，立即提醒用户**：
+
+> ⚠️ **Key 已写入 CLAUDE.md 占位符，但当前 session 还不可用。**
+> 请现在就 export：
+> ```bash
+> export LLM_API_KEY="sk-..."
+> ```
+> 否则翻译功能在本次 session 中无法使用。
+
+### 3.7.5 验证
+
 询问用户是否需要自定义模型或端点：
 
 > 默认使用 DeepSeek（`deepseek-chat`）。需要换成其他模型吗？
@@ -538,7 +549,7 @@ else:
 > - OpenAI: `LLM_MODEL='gpt-4o-mini'` + `LLM_BASE_URL='https://api.openai.com/v1'`
 > - Gemini: `LLM_MODEL='gemini-2.0-flash'` + `LLM_BASE_URL='https://generativelanguage.googleapis.com/v1beta'`
 
-### 3.7.5 验证
+### 3.7.6 验证
 
 ```bash
 python -c "
