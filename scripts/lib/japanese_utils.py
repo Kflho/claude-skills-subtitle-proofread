@@ -77,6 +77,8 @@ COMMON_KATAKANA = frozenset({
     'イヤッハー',  # exclamation, not a proper noun
     # ── auto_clean_glossary (1 katakana words) ──
     'カタカタカタ',  # sound effect / onomatopoeia
+    # ── auto_clean_glossary (1 katakana words) ──
+    'ワンワンワンワンワンワンワンワンワン',  # sound effect / onomatopoeia
 })
 
 # Common kanji compounds — expanded from build_glossary.py's _COMMON_KANJI.
@@ -193,6 +195,8 @@ COMMON_KANJI = frozenset({
     '好了',  # stop word
     '对吧',  # stop word
     '等等',  # stop word
+    # ── auto_clean_glossary (1 words, lang=ja) ──
+    '氷見',  # verb stem: ends with "見"
 })
 
 # Non-word patterns: dashes, repeated chars, breathing/filler sounds.

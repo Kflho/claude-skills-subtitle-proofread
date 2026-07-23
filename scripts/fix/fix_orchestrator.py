@@ -254,7 +254,7 @@ class Fixer:
             if not os.path.isdir(vdir):
                 continue
             for fname in sorted(os.listdir(vdir)):
-                if ep_num in fname and fname.lower().endswith(exts):
+                if search_token in fname and fname.lower().endswith(exts):
                     self._video_path = os.path.join(vdir, fname)
                     self._video_dir = vdir
                     # Extract episode title from filename
