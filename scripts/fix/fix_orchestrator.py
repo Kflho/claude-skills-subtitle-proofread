@@ -392,13 +392,15 @@ class Fixer:
             report.applied = len(fixes)
 
         # SRT is the source of truth — no report write needed for fixes.
-        # Unfixable items → save to temp JSON for step_deliver() pick-up.
+        # Unfixable items → [???] markers in SRT for Aegisub review.
         if unfixable:
-            pending_path = os.path.join(self._temp_dir,
-                                        f'{self.episode}_pending_human.json')
-            os.makedirs(self._temp_dir, exist_ok=True)
-            with open(pending_path, 'w', encoding='utf-8') as fp:
-                json.dump(unfixable, fp, ensure_ascii=False, indent=2)
+            for item in unfixable:
+                ts = item.get('time', '')
+                for cue in current_cues:
+                    if cue.get('start', '') == ts:
+                        cue['text'] = '[???]'
+                        break
+            write_srt(self._srt_path, current_cues)
 
         report.failed = len(unfixable)
         report.details = [f'{d["verdict"]}: {d.get("whisper","")[:60]}' for d in diffs
@@ -429,7 +431,7 @@ class Fixer:
            - ⚠SPEECH placeholders: Whisper success → transcribed text;
              Whisper failure → [???] marker
         7. Safety scan: any residual ⚠SPEECH → [???]
-        8. Update report: Layer 2 ✅ for fixed, Layer 6 ⬜ for unfixable
+        8. Update report: Layer 2 ✅ for fixed, Layer 2.5 ⬜ for AI fragments
 
         Returns FixReport.
         """
@@ -925,8 +927,7 @@ class Fixer:
             #   rest      → AI fragment (Whisper text stays in SRT as placeholder,
             #                ai_fragments JSON for AI review, report step 2.5 ⬜)
             #   [???] never appears here — it only emerges after AI review fails
-            #   (apply_ai_fragments escalates unfilled items → pending_human.json
-            #    → step_deliver generates human checklist with [???] markers)
+            #   (apply_ai_fragments writes [???] markers directly to SRT)
             auto_keep = []
             ai_fragments = []
 
@@ -1005,8 +1006,7 @@ class Fixer:
                     # NOTE: corrected 预填 Whisper 猜测（非 AI 审查结果）。
                     # ⬜ 状态 + 非空 corrected = "Whisper有猜测，待AI确认"。
                     # AI审查（--apply-ai-review）后会通过 apply_ai_fragments
-                    # 完全覆盖此字段。AI 无法填充的 → escalate → pending_human.json
-                    # → step_deliver 生成 human checklist（[???] 只出现在那里）。
+                    # 完全覆盖此字段。AI 无法填充的 → [???] 标记写入 SRT。
                     upsert_entries(self._report_path, step='2.5', entries=[
                         {'ep': self.episode,
                          'time': f['start'],
@@ -1042,7 +1042,7 @@ class Fixer:
         2. Whisper ASR → triage (auto-keep / AI fragments / auto-cut)
         3. Missing subtitle fill (VAD gaps → Whisper → new cues)
         4. AI fragments include reference_text for Claude to translate+correct
-        5. For still unfixable → review (generate checklist)
+        5. Unfixable items → [???] markers in SRT (review in Aegisub)
 
         Returns combined FixReport.
         """
@@ -1080,9 +1080,8 @@ class Fixer:
             miss_result = self.fix_missing_subtitles()
             report.merge(miss_result)
 
-        # Human review checklist is generated later by run_all.py:step_deliver().
-        # Don't generate it here — that would create a duplicate flat-file
-        # checklist alongside the per-ep-folder one.
+        # [???] markers are written directly to SRT by apply_ai_fragments().
+        # No separate human review checklist generation needed.
 
         print(f'\n[{self.episode}] Auto-fix complete: '
               f'{report.applied} applied, {report.failed} → manual review',
@@ -1471,7 +1470,8 @@ class Fixer:
 
         Reads temp/scans/ai_fragments_{EP}.json, applies every fragment
         with a non-empty 'correction' field to SRT.  Skipped fragments
-        (correction left blank) are escalated via VAD check.
+        (correction left blank) are VAD-checked: noise → auto-cut,
+        speech → [???] marker written directly to SRT for Aegisub review.
 
         Returns count of applied corrections.
         """
@@ -1656,26 +1656,25 @@ class Fixer:
                 write_srt(self._srt_path, cues)
 
         if escalated:
-            pending_path = os.path.join(self._temp_dir,
-                                        f'{self.episode}_pending_human.json')
-            os.makedirs(self._temp_dir, exist_ok=True)
-            with open(pending_path, 'w', encoding='utf-8') as f:
-                json.dump(escalated, f, ensure_ascii=False, indent=2)
-            # Report: move from L2.5 to L6 for human review
+            # ── Write [???] markers directly to SRT ──
+            # Human reviews these in Aegisub (Search → Find → "[???]").
+            # No more checklist.md / video clip extraction — the SRT is the
+            # single source of truth and Aegisub is the review tool.
+            for entry in escalated:
+                ts = entry['time']
+                target_idx = self._find_cue_index(cues, ts)
+                if target_idx is not None:
+                    cues[target_idx]['text'] = '[???]'
+            write_srt(self._srt_path, cues)
+            # Report: mark as [???] in L2.5
             try:
                 for entry in escalated:
-                    ts = entry['time']
                     update_entry_status(self._report_path, step='2.5',
-                                        ep=self.episode, time=ts,
-                                        corrected='', status='🗑️')
-                    upsert_entries(self._report_path, step='6', entries=[{
-                        'ep': self.episode, 'time': ts,
-                        'original': entry.get('original', '')[:120],
-                        'corrected': '', 'status': '⬜',
-                    }])
+                                        ep=self.episode, time=entry['time'],
+                                        corrected='[???]', status='⬜')
             except Exception:
                 pass
-            print(f'[apply-ai] {len(escalated)} escalated to human, '
+            print(f'[apply-ai] {len(escalated)} → [???] markers (review in Aegisub), '
                   f'{auto_cut} auto-cut', file=sys.stderr)
 
         # Cleanup: remove the temp JSON

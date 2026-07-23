@@ -135,15 +135,14 @@ ffmpeg -y -i "视频.mkv" -ss {start} -to {end} -vn -ac 1 -ar 16000 temp/frag_{N
 
 **Apply**:
 ```bash
-python run_all.py --apply-ai-review --video-dir "<VIDEO_DIR>"
+python run_all.py --apply-ai-review
 ```
-> ⚠️ 必须带 `--video-dir`，否则无法为人工审查项提取视频片段。
 
 **After apply — VAD escalation**:
 AI 无法修复的 fragment 进入 VAD 检查：
-- **原文 mj < 2**（纯拉丁噪声）→ 直接 auto-cut，**不升级人工**
+- **原文 mj < 2**（纯拉丁噪声）→ 直接 auto-cut，**不升级**
 - 无语音 → auto-cut
-- 有语音 → 人工审查 checklist
+- 有语音 → `[???]` 标记写入 SRT → 在 Aegisub 中审查（Search → Find → `[???]`）
 
 ---
 

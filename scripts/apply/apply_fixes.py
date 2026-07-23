@@ -357,8 +357,7 @@ def main():
     # Load fixes from JSON or review checklist
     if args.review:
         print(f'[review] --review is deprecated.', file=sys.stderr)
-        print(f'  For unified checklists: python scripts/run_all.py --lang {args.lang} --apply-checklist', file=sys.stderr)
-        print(f'  For per-ep checklists:  python scripts/fix/fix_orchestrator.py <EP> --step apply --checklist <path>', file=sys.stderr)
+        print(f'  [???] markers are written directly to SRT. Review in Aegisub.', file=sys.stderr)
         sys.exit(1)
     elif args.fixes:
         with open(args.fixes, 'r', encoding='utf-8') as f:

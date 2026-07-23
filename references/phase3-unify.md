@@ -72,17 +72,15 @@ python "<scripts>/apply/apply_fixes.py" --target-dir AI审查后/ \
 
 ## 交付
 
-### 生成审查清单
+### [???] 标记审查
 
-`run_all.py:step_deliver()` 收集所有 ⬜ 条目 → 按集分组 → `reports/manual-review/EPxxx/checklist.md`
-
-### 应用人工审查
+无法自动修复的条目由 `apply_ai_fragments()` 写入 `[???]` 标记到 SRT。
+在 Aegisub 中打开字幕文件 → Search → Find → `[???]` → 逐条审查修复。
 
 ```bash
-python run_all.py --apply-checklist
+# 统计当前 [???] 标记数量
+grep -c '\[???\]' AI审查后/*.srt
 ```
-
-> ⚠️ 不要通过 `apply_fixes.py --review` 应用 unified checklist — 它使用旧格式解析器，无法解析。
 
 ## 工具命令
 

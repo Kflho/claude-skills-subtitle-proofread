@@ -13,7 +13,7 @@ eval_text = Whisper 输出（或原文本如果 Whisper 失败）
 ③ 其余（有日文 + 拉丁污染）             → AI fragment 补全
 ```
 
-AI 无法修复的 → VAD 检查 → 无语音则 auto-cut / 有语音则人工审查。
+AI 无法修复的 → VAD 检查 → 无语音则 auto-cut / 有语音则写入 `[???]` 标记（Aegisub 审查）。
 
 ## 一键全流程
 
@@ -28,7 +28,7 @@ python "<scripts>/run_all.py" \
 
 常用变体：`--limit N`（前N集）、`-e EP001-EP010`（指定范围）、`--dry-run`、`--force-rescan`。
 
-> ⚠️ `--apply-ai-review` 和 `--apply-checklist` 是后处理快速路径，不能和 full run 一起用。
+> ⚠️ `--apply-ai-review` 是后处理快速路径，不能和 full run 一起用。
 
 ## Whisper 管线
 
@@ -51,8 +51,6 @@ cd "<project>" && python "<scripts>/fix/fix_orchestrator.py" EP005 --step whispe
 # 检查单集是否干净
 cd "<project>" && python "<scripts>/fix/fix_orchestrator.py" EP005 --step check
 
-# 生成审查清单 + 视频片段
-cd "<project>" && python "<scripts>/fix/fix_orchestrator.py" EP005 --step review
 ```
 
 ### Tier 升级阈值
@@ -81,10 +79,10 @@ cd "<project>" && python "<scripts>/fix/fix_orchestrator.py" EP005 --step review
 # 1. 读 ai_fragments_{EP}.json
 # 2. 填每个 fragment 的 correction 字段
 # 3. 应用
-python run_all.py --apply-ai-review --video-dir "<VIDEO_DIR>"
+python run_all.py --apply-ai-review
 ```
 
-> ⚠️ 必须带 `--video-dir`，否则无法为人工审查项提取视频片段。
+> AI 无法填充的 fragment → VAD 检查 → `[???]` 标记写入 SRT → Aegisub 审查。
 
 ## OP/ED 修复
 

@@ -240,12 +240,12 @@ def _filter_by_start(episodes, start_from):
 def step_fix_episodes(project_dir, lang, resources,
                       skip_whisper=False, episodes=None, limit=0, start_from=None,
                       skip_if_clean=True, target_dir=None):
-    """Phase 2: Unified error-fix via Fixer (reference → Whisper → human).
+    """Phase 2: Unified error-fix via Fixer (reference → Whisper → AI fragments).
 
     Each episode goes through the cascading priority:
     1. Reference text injection (if 参考字幕/ exists — injected as context into AI fragments)
     2. Whisper audio transcription (if video + Whisper available)
-    3. Human review checklist generation (for unfixable items)
+    3. AI fragment completion → unfixable items get [???] markers in SRT
 
     Graceful degradation: if video or Whisper is missing, skip that step and
     continue with what's available. Phase 2 can run with reference only, Whisper
@@ -866,103 +866,71 @@ def _write_degraded_report(project_dir, garbled_cues, findings_path, review_dir,
 
 def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True,
                  video_dir=None, target_dir=None):
-    """Generate human review checklists + video clips.
+    """Final delivery step — degraded-mode report + cleanup.
 
-    Reads *_pending_human.json temp files (written by fix_by_reference()
-    or _apply_ai_checklists() escalate step) and generates per-episode
-    checklist.md + .mp4 clips.
+    v5.1: Human review checklist + video clip extraction has been removed.
+    [???] markers are written directly to SRT by apply_ai_fragments().
+    Humans review in Aegisub (Search → Find → "[???]").
+
+    This function now only handles the degraded-mode report (残血运行:
+    garbled cues without Whisper → report for manual/AI processing).
     """
     review_dir = os.path.join(project_dir, 'reports', 'manual-review')
     scan_dir = os.path.join(project_dir, 'temp', 'scans')
 
-    from fix.fix_orchestrator import Fixer
+    # ── Degraded mode: unresolved garbled cues from Phase 1 scan ──
+    findings_path = os.path.join(scan_dir, 'findings.json')
+    garbled = []
+    if os.path.exists(findings_path):
+        fdata = load_json(findings_path)
+        if fdata:
+            garbled = fdata.get('garbled_cues', [])
+            # Filter to only those still in the current target
+            if garbled and target_dir:
+                target_files = set()
+                if os.path.isdir(target_dir):
+                    target_files = {f for f in os.listdir(target_dir)
+                                    if f.endswith(('.ass', '.srt'))}
+                garbled = [g for g in garbled if g.get('file', '') in target_files]
 
-    # Collect pending human-review items from temp JSON files
-    import glob as _glob
-    all_items = []
-    for pf in sorted(_glob.glob(os.path.join(scan_dir, '*_pending_human.json'))):
-        data = load_json(pf)
-        if data:
-            all_items.extend(data)
-        try:
-            os.remove(pf)
-        except OSError:
-            pass
-
-    if not all_items:
-        # Check for unresolved garbled cues from Phase 1 scan (degraded mode)
-        findings_path = os.path.join(scan_dir, 'findings.json')
-        garbled = []
-        if os.path.exists(findings_path):
-            fdata = load_json(findings_path)
-            if fdata:
-                garbled = fdata.get('garbled_cues', [])
-                # Filter to only those still in the current target
-                if garbled and target_dir:
-                    target_files = set()
-                    if os.path.isdir(target_dir):
-                        target_files = {f for f in os.listdir(target_dir)
-                                        if f.endswith(('.ass', '.srt'))}
-                    garbled = [g for g in garbled if g.get('file', '') in target_files]
-
-        if garbled and not (os.environ.get('WHISPER_CLI') or os.environ.get('WHISPER_MODEL')):
-            # Degraded mode: generate human-review report from scan findings
-            _write_degraded_report(project_dir, garbled, findings_path, review_dir, scan_dir)
-            print(f'[deliver] Degraded mode: {len(garbled)} unresolved garbled cues '
-                  f'→ reports/问题解决报告.md (manual/AI review needed)',
-                  file=sys.stderr)
-            return True
-
-        # Check if there are ai_review.md files pending
-        ai_pending = False
-        if os.path.isdir(review_dir):
-            for name in os.listdir(review_dir):
-                if os.path.exists(os.path.join(review_dir, name, 'ai_review.md')):
-                    ai_pending = True
-                    break
-        if ai_pending:
-            print('[deliver] No human-review items — AI review still pending.',
-                  file=sys.stderr)
-            print('[deliver]   Run --apply-ai-review first.', file=sys.stderr)
-        else:
-            if garbled:
-                print(f'[deliver] {len(garbled)} garbled cues remain — '
-                      f'run with Whisper or manually review.', file=sys.stderr)
-            else:
-                print('[deliver] No pending human review items — all clean.',
-                      file=sys.stderr)
+    if garbled and not (os.environ.get('WHISPER_CLI') or os.environ.get('WHISPER_MODEL')):
+        # Degraded mode: generate human-review report from scan findings
+        _write_degraded_report(project_dir, garbled, findings_path, review_dir, scan_dir)
+        print(f'[deliver] Degraded mode: {len(garbled)} unresolved garbled cues '
+              f'→ reports/问题解决报告.md (manual/AI review needed)',
+              file=sys.stderr)
         return True
 
-    # Group by episode
-    by_ep = {}
-    for e in all_items:
-        ep = e.get('ep', '?')
-        by_ep.setdefault(ep, []).append(e)
+    # ── Final status ──
+    # Count remaining [???] markers across all SRT files
+    target = target_dir or os.path.join(project_dir, 'AI审查后')
+    marker_count = 0
+    if os.path.isdir(target):
+        for fname in sorted(os.listdir(target)):
+            if not fname.endswith(('.srt', '.ass')):
+                continue
+            fpath = os.path.join(target, fname)
+            try:
+                with open(fpath, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                count = content.count('[???]')
+                if count > 0:
+                    marker_count += count
+                    print(f'[deliver] {fname}: {count} [???] markers → review in Aegisub',
+                          file=sys.stderr)
+            except Exception:
+                pass
 
-    total_entries = 0
-    total_clips = 0
-
-    for ep in sorted(by_ep.keys()):
-        ep_dir = os.path.join(review_dir, ep)
-        print(f'\n[deliver] {ep}: {len(by_ep[ep])} pending → {ep_dir}',
+    if marker_count > 0:
+        print(f'\n[deliver] {marker_count} [???] markers total — '
+              f'open in Aegisub, Search → Find → "[???]" to review.',
               file=sys.stderr)
-
-        fixer = Fixer(ep, project_dir, target_lang=lang, video_dir=video_dir, srt_dir=target_dir)
-        checklist_path = fixer.review_from_items(by_ep[ep], output_dir=ep_dir)
-
-        if checklist_path:
-            clips = [f for f in os.listdir(ep_dir) if f.endswith('.mp4')]
-            total_clips += len(clips)
-            total_entries += len(by_ep[ep])
-            print(f'[deliver]   {checklist_path} ({len(clips)} clips)',
-                  file=sys.stderr)
-
-    print(f'\n[deliver] {total_entries} pending items across {len(by_ep)} episodes',
-          file=sys.stderr)
-    print(f'[deliver] {total_clips} video clips extracted', file=sys.stderr)
-    print(f'[deliver] After filling corrections, run:', file=sys.stderr)
-    print(f'  python scripts/run_all.py --lang {lang} --apply-checklist',
-          file=sys.stderr)
+    elif garbled:
+        print(f'[deliver] {len(garbled)} garbled cues remain — '
+              f'run with Whisper or manually review.', file=sys.stderr)
+    else:
+        print('[deliver] All clean — no [???] markers, no garbled cues.',
+              file=sys.stderr)
     return True
 
 
@@ -1004,56 +972,6 @@ def _apply_ai_checklists(project_dir, lang, target_dir=None):
 
     return total_applied > 0
 
-
-def step_apply_checklist(project_dir, lang, video_dir=None, target_dir=None):
-    """Apply filled per-episode review checklists → SRT + report.
-
-    Scans reports/manual-review/{EP}/checklist.md for each episode folder,
-    applies corrections via Fixer.apply() with VAD alignment.
-    """
-    review_dir = os.path.join(project_dir, 'reports', 'manual-review')
-    if not os.path.isdir(review_dir):
-        print('[apply-checklist] No manual-review/ directory.', file=sys.stderr)
-        return False
-
-    from fix.fix_orchestrator import Fixer
-
-    # Find per-episode folders with a checklist
-    ep_dirs = []
-    for name in sorted(os.listdir(review_dir)):
-        ep_dir = os.path.join(review_dir, name)
-        if os.path.isdir(ep_dir) and re.match(r'EP\d{3}$', name):
-            chk = os.path.join(ep_dir, 'checklist.md')
-            if os.path.exists(chk):
-                ep_dirs.append((name, chk))
-
-    if not ep_dirs:
-        print('[apply-checklist] No per-episode checklist.md files found.',
-              file=sys.stderr)
-        return False
-
-    total_applied = 0
-    for ep, checklist_path in ep_dirs:
-        fixer = Fixer(ep, project_dir, target_lang=lang, video_dir=video_dir, srt_dir=target_dir)
-        applied = fixer.apply(checklist_path)
-        total_applied += applied
-        print(f'[apply-checklist] {ep}: {applied} corrections applied', file=sys.stderr)
-
-        # Cleanup: remove applied checklist + empty folder
-        ep_dir = os.path.dirname(checklist_path)
-        try:
-            os.remove(checklist_path)
-            remaining = os.listdir(ep_dir)
-            if not remaining:
-                os.rmdir(ep_dir)
-                print(f'[apply-checklist]   {ep}: folder removed (all done)',
-                      file=sys.stderr)
-        except OSError:
-            pass
-
-    print(f'\n[apply-checklist] Total: {total_applied} corrections across '
-          f'{len(ep_dirs)} episodes', file=sys.stderr)
-    return total_applied > 0
 
 
 # ── AI Review flagging ──
@@ -1129,21 +1047,7 @@ def _print_progress(project_dir, label='Progress'):
     import glob as _glob
     scan_dir = os.path.join(project_dir, 'temp', 'scans')
     pending_ai = len(_glob.glob(os.path.join(scan_dir, '*_pending_ai.json')))
-    pending_human = len(_glob.glob(os.path.join(scan_dir, '*_pending_human.json')))
-
-    review_dir = os.path.join(project_dir, 'reports', 'manual-review')
-    review_count = 0
-    if os.path.isdir(review_dir):
-        for name in os.listdir(review_dir):
-            ep_dir = os.path.join(review_dir, name)
-            if os.path.isdir(ep_dir) and re.match(r'EP\d{3}$', name):
-                contents = os.listdir(ep_dir)
-                if any(c.endswith('.md') or c.endswith('.mp4') for c in contents):
-                    review_count += 1
-
     print(f'  AI review pending:    {pending_ai} episode(s)', file=sys.stderr)
-    print(f'  Human review pending: {pending_human} episode(s)', file=sys.stderr)
-    print(f'  Review folders:       {review_count} episode(s)', file=sys.stderr)
 
 
 # ── Main ──
@@ -1176,8 +1080,6 @@ Examples:
                         help='Resume after AI review (skip scan, re-run nouns+apply)')
     parser.add_argument('--apply-ai-review', action='store_true',
                         help='Apply AI review fixes only (fast — no scan, no audio)')
-    parser.add_argument('--apply-checklist', action='store_true',
-                        help='Apply filled human-review checklists (--step deliver only)')
     parser.add_argument('--no-skip-if-clean', action='store_true',
                         help='Process all episodes even if SRT has no garbled cues')
     parser.add_argument('--force-rescan', action='store_true',
@@ -1225,7 +1127,7 @@ Examples:
     # During full run, L2.5 items stay in L2.5 for AI review before escalation.
     is_full_run = (args.limit == 0 and not args.episodes and not args.start_from
                    and not args.resume
-                   and not args.apply_ai_review and not args.apply_checklist)
+                   and not args.apply_ai_review)
 
     fmt = detect_format(project_dir)
     print(f'{"="*55}', file=sys.stderr)
@@ -1268,17 +1170,9 @@ Examples:
         step_apply_all(project_dir, resolved_lang, target_dir=target_dir)
         # Apply per-episode AI review checklists (L2.5 fragments)
         _apply_ai_checklists(project_dir, resolved_lang, target_dir=target_dir)
-        # Regenerate human checklists with escalated L2.5 items
-        step_deliver(project_dir, resolved_lang, is_full_run=False, video_dir=video_dir, target_dir=target_dir)
+        # [???] markers are written directly to SRT by apply_ai_fragments()
+        # — no separate deliver step needed. Review in Aegisub.
         step_clean(project_dir, target_dir=target_dir)
-        return
-
-    # ── Fast path: checklist apply only ──
-    if args.apply_checklist:
-        print(f'\n{"─"*40}', file=sys.stderr)
-        print('  Apply human review checklist (fast)', file=sys.stderr)
-        print(f'{"─"*40}', file=sys.stderr)
-        step_apply_checklist(project_dir, resolved_lang, video_dir=video_dir, target_dir=target_dir)
         return
 
     # ═══════════════════════════════════════════════════════════════

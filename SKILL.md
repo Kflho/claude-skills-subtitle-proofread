@@ -3,13 +3,13 @@ name: subtitle-proofread
 description: >
   Subtitle proofreading — 3-phase pipeline (scan → triage → deliver). Use when the
   user wants to proofread, scan, or fix subtitles (SRT/ASS), run Whisper ASR
-  correction, unify proper nouns, apply batch fixes, or generate human-review
-  checklists. Covers: 字幕, subtitle, SRT, ASS, proofread, 校对, Whisper, 专有名词, captions.
+  correction, unify proper nouns, or apply batch fixes. Unfixable items get [???]
+  markers for Aegisub review. Covers: 字幕, subtitle, SRT, ASS, proofread, 校对, Whisper, 专有名词, captions.
 ---
 
 # Subtitle Proofread
 
-3-phase pipeline：扫描（乱码 + VAD无字幕检测）→ Whisper 修复 + 缺字幕补全 → 专名统一 + 交付。
+3-phase pipeline：扫描（乱码 + VAD无字幕检测）→ Whisper 修复 + 缺字幕补全 → 专名统一 + 交付。无法自动修复的条目写入 `[???]` 标记，在 Aegisub 中审查。
 
 **资源驱动**：有什么用什么。有视频+Whisper→修复乱码+补全缺字幕；有参考字幕→注入 AI 校对上下文。缺资源也能残血运行——跳过缺失步骤，剩余步骤照常。
 
@@ -184,7 +184,7 @@ Phase 2: Triage
 Phase 3: Unify
   ├─ OP/ED fixer: cross-episode clustering → instrumental auto-clean / vocal AI review
   ├─ Noun variant detection → auto-classify → AI judgment (iterative, ≤20 entries)
-  └─ Deliver: apply all fixes + human checklist + video clips
+  └─ Deliver: apply all fixes → [???] markers written to SRT for Aegisub review
 
 Phase 4: Polish (--lang zh only, optional)
   └─ 交互提问 → LLM 批量润色（10句/批，OpenAI 兼容 API）
@@ -239,14 +239,6 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 2. 填每个 candidate 的 `canonical`（`__INSTRUMENTAL__` = 器乐）
 3. 运行：`python run_all.py --apply-ai-review --video-dir "<VIDEO_DIR>"`
 
-### 人工审查
-
-**触发**: `Human review pending: N`（N > 0）或 checklist 文件存在
-
-1. 读 `reports/manual-review/{EP}/checklist.md`
-2. 每项填 `修正:` 字段
-3. 运行：`python run_all.py --apply-checklist`
-
 ### AI 润色（--lang zh）
 
 **触发**: Pipeline 末尾交互提问 `是否对最终字幕进行 AI 润色？(y/n)`
@@ -298,4 +290,4 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 | `--force-rescan` | Re-scan even if cache fresh |
 | `LLM_API_KEY` (env) | LLM API key for translation + polish (optional, --lang zh). Separate from Claude Code's. |
 
-> `--apply-ai-review` 和 `--apply-checklist` 是后处理快速路径，不能和 full run 一起用。
+> `--apply-ai-review` 是后处理快速路径，不能和 full run 一起用。
