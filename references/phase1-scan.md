@@ -28,11 +28,11 @@ cd "<project>" && python "<scripts>/scan/unified_scanner.py" \
 python "<scripts>/nouns/build_glossary.py" --findings temp/scans/findings.json \
   -o reports/proper-nouns.md --lang ja
 
-# 自动清理
-python "<scripts>/nouns/auto_clean_glossary.py" --glossary reports/proper-nouns.md --apply --yes
+# AI 审查词表（替代自动清理）
+# AI 读 proper-nouns.md 全文 → 逐条判断 → 编辑 utils 文件 → 重跑 build_glossary
 ```
 
-词典过滤策略（三级）：
+词典过滤策略（二级，AI 直管）：
 
 | 层级 | 机制 | 说明 |
 |------|------|------|

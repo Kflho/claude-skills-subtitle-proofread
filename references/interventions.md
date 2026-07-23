@@ -148,121 +148,74 @@ AI 无法修复的 fragment 进入 VAD 检查：
 
 ## Phase 3: Proper Noun Unification
 
-### Glossary Auto-Clean (automatic)
+### Glossary AI Review (🤖 Phase 1 末尾，一次性)
 
-Runs automatically at the end of Phase 1 scan — no manual trigger needed.
-`auto_clean_glossary.py --apply --yes` prunes common words from the glossary
-and rebuilds it with updated COMMON_KANJI/COMMON_KATAKANA filters.
+**Trigger**: Phase 1 scan prints `[scan] 🤖 AI Glossary Review — N entries`
 
-**What it catches**:
-- Katakana: onomatopoeia, laughter, daily words, fragments
-- Kanji: verb stems, time/number fragments, modifier fragments, pronoun fragments
-- JMdict entries (common dictionary words that aren't proper nouns)
-- Keeps: real names, places, honorifics, known Astro Boy terms (see `_ANIME_WHITELIST`)
-
----
-
-### Glossary AI Review (🤖 triggered, low-token)
-
-**Trigger**: Phase 1 scan prints `[scan] 🤖 Glossary AI Review candidates`
-
-The pipeline saves low-frequency entries (≤5 occurrences) that survived
-auto_clean to `temp/scans/glossary_borderline.json`. These are borderline
-cases — auto_clean couldn't determine if they're proper nouns or not.
-
-**Token efficiency**: Candidates are printed inline to stderr during the run.
-Claude sees them directly — no file read needed. Typical count: 5-20 entries.
+名词库通常只有 30-100 条。AI 直接读全文一次性审查，无须启发式预筛选。
 
 **Flow**:
-1. Pipeline prints candidates inline (see them in the scan output)
-2. Judge each: proper noun or common word?
-3. Common word → add to the language-specific utils file:
-   - ja: `lib/japanese_utils.py` COMMON_KANJI or COMMON_KATAKANA
-   - zh: `lib/chinese_utils.py` COMMON_KANJI
-4. Proper noun → leave as-is (or add to PROPER_NOUNS_WHITELIST for jieba false positives)
-5. Next `--force-rescan` will rebuild with updated filters
+1. 读 `reports/proper-nouns.md`（全文，小文件）
+2. 逐条判断：专有名词 or 普通词？
+3. **专有名词** → 加入 `PROPER_NOUNS_WHITELIST`（防 JMdict/jieba 误杀）
+4. **普通词** → 加入 `COMMON_KANJI` / `COMMON_KATAKANA` 黑名单
+5. 编辑对应语言的 utils 文件：
+   - ja: `lib/japanese_utils.py`
+   - zh: `lib/chinese_utils.py`
+6. 重跑 `build_glossary.py` 生成干净的 glossary：
+   ```bash
+   python nouns/build_glossary.py --findings temp/scans/findings.json \
+     -o reports/proper-nouns.md --lang <ja|zh>
+   ```
 
 **Judgment rules**:
-- Katakana: real character name? or onomatopoeia/daily word?
-- Kanji: surname/place/org? or verb fragment/common compound?
-- Reference: 鉄腕アトム (1963) character knowledge, Japanese name patterns
-
-**Do NOT read `reports/proper-nouns.md`** — it's 200+ lines. The candidates
-are already printed inline by the pipeline.
+- 片假名：角色名？还是拟声词/日常词/碎片？
+- 汉字：姓氏/地名/组织？还是动词词干/常见复合词？
+- 参考：鉄腕アトム (1963) 角色知识、日语命名规律
 
 ---
 
-### Noun Variant Detection + Auto-Classify (automatic)
+### Noun Variant Detection (automatic)
 
-Runs automatically in Phase 3. `noun_checker.py` scans SRTs for proper noun
-spelling variants, then `auto_classify.py` uses Jamdict + rules to pre-classify
-candidates into:
-- **Accepted** → applied automatically (report section: 专名自动应用)
-- **Rejected** → logged only
-- **Needs AI** → triggers Proper Noun AI Judgment below
+`noun_checker.py` 扫描 SRT，对照 glossary 检测专名拼写变体。所有未知候选项
+直送 AI 审查，无启发式预分类。
 
 ---
 
-### Proper Noun AI Judgment (🤖 triggered, iterative)
+### Proper Noun AI Judgment (🤖 Phase 3，一次性)
 
-**Trigger**: Pipeline output `AI REVIEW NEEDED: N proper noun candidates`
-(auto_classify handled the rest; these are the borderline cases)
+**Trigger**: Pipeline 输出 `AI REVIEW NEEDED: N`
 
-**Data**: `temp/scans/ai_review_candidates.json` (small file, typically <20 entries)
+**Data**: `temp/scans/ai_review_candidates.json`（≤50条，按频率排序）
 
-**⚠️ 这是迭代过程——可能需要多轮。12→6→3→0 是正常收敛。**
+候选项通常 ≤50 条，AI 一次性审查。通常 1-2 轮收敛。
 
-**Flow（每轮）**:
-1. Read `ai_review_candidates.json` — ONLY this small file, NOT the full glossary
+**Flow**:
+1. Read `ai_review_candidates.json`
 2. Judge each candidate: proper noun? yes/no
-3. **Yes** → 提供规范形式，写入 `ai_review_fixes.json`
-   - **对 --lang zh 项目**：还需确定中文译名。优先使用已知权威译名；不确定时用 WebSearch 搜索 `「{日语专名} 铁臂阿童木 译名」` 或 `「{日语专名} Astro Boy character name」` 找公认译名
-   - 找到权威译名 → 填入 `replacement` 字段
-   - 搜索无结果 → 根据角色特征自行翻译，标注 `[AI译]`
-4. **No** → 加入对应语言的 COMMON_KANJI：
-   - ja: 编辑 `lib/japanese_utils.py`（片假名候选 → COMMON_KATAKANA）
-   - zh: 编辑 `lib/chinese_utils.py` COMMON_KANJI
-   - 在 `frozenset({` 的最后一个条目后追加：`'候補詞',  # 注释`
-5. Write `ai_review_fixes.json`（仅包含 Yes 的候補）：
+3. **Yes** → 提供规范形式，写入 `ai_review_fixes.json`：
    ```json
    [{"action":"replace_global","original":"候補","replacement":"規範形"}, ...]
    ```
-   如果全部 No → 写入 `[]`
+   - **对 --lang zh 项目**：还需确定中文译名。优先搜索权威译名；无结果时自行翻译，标注 `[AI译]`
+4. **No** → 加入对应语言的 COMMON_KANJI/KATAKANA 黑名单
+   - ja: 编辑 `lib/japanese_utils.py`
+   - zh: 编辑 `lib/chinese_utils.py`
+5. 如果全部 No → `ai_review_fixes.json` 写入 `[]`
 6. Re-run: `python run_all.py --resume`
-7. **检查输出**：如果仍有 `AI REVIEW NEEDED: N`（N > 0）→ 回到 Step 1
-8. 循环直到 `Needs AI: 0` 或 `auto_classify handled all`
-9. **收敛后 → 用户确认 + 补充**：向用户展示最终词表（`reports/proper-nouns.md`），列出将被应用的专名条目。逐项询问：
+7. **收敛后 → 用户确认 + 补充**：向用户展示最终词表（`reports/proper-nouns.md`），逐项询问：
    - **是否采用当前词表？** 确认所有条目无误
    - **有无补充？** 例如：
      - 脚本未检测到的专名（冷门角色、地名、组织名、关键道具）
-     - 别名/变体（同一角色的不同称呼、昵称、简称、笔画差异）
+     - 别名/变体（同一角色的不同称呼、昵称、简称）
      - 译名偏好（如希望"お茶の水博士"译为"茶水博士"而非"御茶之水博士"）
-   - 用户补充后 → 手动更新 `proper-nouns.md` 或写入 `ai_review_fixes.json`，再跑 `--resume` 应用
-   - 用户确认无补充后 → 进入交付步骤
+   - 用户补充后 → 更新 `proper-nouns.md` 或写入 `ai_review_fixes.json`，再跑 `--resume`
+   - 用户确认无补充 → 进入交付
 
 **为什么必须加 COMMON_KANJI**：
 `--resume` 重跑 Phase 3 时 noun_checker 重新扫描全部 SRT。
 只写 `ai_review_fixes.json` 不够——下一轮会再次检测到同一个候选。
 必须把拒绝词加入 COMMON_KANJI 才能从根源消除。
-
-**示例（EP001 试运行，3 轮收敛）**：
-```
-Round 1: AI REVIEW NEEDED: 12
-  → 判断 12 个全是动词碎片 → 加入 COMMON_KANJI → --resume
-Round 2: AI REVIEW NEEDED: 6
-  → 判断 6 个都是语法碎片 → 加入 COMMON_KANJI → --resume
-Round 3: AI REVIEW NEEDED: 3
-  → 判断 3 个都是动词词干 → 加入 COMMON_KANJI → --resume
-Round 4: [AI review] 6607 candidates → auto_classify handled all. Nothing needs AI review.
-  → ✅ 收敛完成
-  → 📋 向用户展示最终 proper-nouns.md，询问是否采用。用户确认 → 继续交付
-```
-
-**If auto_classify handled everything (Needs AI: 0) → skip this step.**
-
-**Token efficiency**: `ai_review_candidates.json` is typically 5-20 entries.
-Never read `reports/proper-nouns.md` directly — it's 200+ lines and auto_clean
-already handles it automatically.
 
 ---
 

@@ -17,8 +17,8 @@ scripts/
 │   └── compare_srt.py             ← 时间码对齐 + 文本相似度比对
 ├── nouns/
 │   ├── noun_checker.py            ← 专名一致性 + 跨集 OP/ED 统一
-│   ├── auto_classify.py           ← 专名自动分类（Jamdict + 规则）
-│   ├── auto_clean_glossary.py     ← 自动清理专名词表
+│   ├── auto_classify.py           ← 专名分类（独立工具，pipeline 不调用）
+│   ├── auto_clean_glossary.py     ← 专名词表清理（独立工具，pipeline 不调用）
 │   └── build_glossary.py          ← 术语表自动生成
 ├── apply/apply_fixes.py           ← 批量修复：繁→简 + 翻译腔 + fixes
 ├── ass/ass_repair.py              ← ASS 格式修补（SRT 项目跳过）
@@ -60,7 +60,7 @@ run_all.py (唯一入口)
   │           │     └─ 复用 Phase 1 VAD 缓存 (避免重复提取音频)
   │           ├─ fix_missing_subtitles() (v5.0) → gap 音频 → Whisper → 插入新 cue
   │           └─ review_ai()           AI 短碎片清单 → [???] 标记写入 SRT
-  ├─→ step_nouns()                    Phase 3: noun_checker + auto_classify
+  ├─→ step_nouns()                    Phase 3: noun_checker → AI review
   ├─→ step_apply_all()                Phase 3: apply_fixes（收集所有 fixes 一次应用）
   ├─→ step_ass_repair()               ASS only → SRT 项目跳过
   └─→ step_deliver()                  残血模式报告 + [???] 标记统计
@@ -82,7 +82,7 @@ Fixer.run_auto() (Phase 2)
   │  ├── 专名模式 → Phase 3 ⬜
   │  └── 长乱码 → 人工 ⬜
   ▼
-noun_checker + auto_classify (Phase 3)
+noun_checker → AI review (Phase 3)
   │  读 proper-nouns.md 专名表 → 匹配/发现变体
   │  ACCEPT/REJECT/NEEDS_AI
   ▼

@@ -169,9 +169,9 @@ python "<scripts-dir>/run_all.py" \
 Phase 1: Scan
   → unified_scanner: garbled chars, repeat patterns, term frequency
   → VAD 有人声无字幕检测（需 --video-dir，无视频自动跳过）
-  → build_glossary + auto_clean → proper-nouns.md
-  → glossary AI review: borderline entries printed inline (🤖, ≤20 entries)
-  → Output: findings.json + proper-nouns.md (cleaned)
+  → build_glossary → proper-nouns.md
+  → glossary AI review: AI reads full glossary, manages whitelist/blacklist directly (🤖)
+  → Output: findings.json + proper-nouns.md
   → Does NOT write to 问题解决报告（scan is read-only）
 
 Phase 2: Triage
@@ -183,7 +183,7 @@ Phase 2: Triage
 
 Phase 3: Unify
   ├─ OP/ED fixer: cross-episode clustering → instrumental auto-clean / vocal AI review
-  ├─ Noun variant detection → auto-classify → AI judgment (iterative, ≤20 entries)
+  ├─ Noun variant detection → AI review all candidates (≤50, one pass)
   └─ Deliver: apply all fixes → [???] markers written to SRT for Aegisub review
 
 Phase 4: Polish (--lang zh only, optional)
@@ -217,19 +217,35 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 
 ### 专有名词审查
 
-**触发**: `AI REVIEW NEEDED: N`（N > 0）
+分两步，各只做一次（AI 直审全文，无启发式预筛选）：
 
-1. 读 `temp/scans/ai_review_candidates.json`（小文件，≤20条）
-2. 判断每条是专名还是普通词
-3. 专名 → 写 `ai_review_fixes.json`；普通词 → 加入对应语言 utils 的 COMMON_KANJI（ja: `japanese_utils.py`，zh: `chinese_utils.py`）
-4. 运行：`python run_all.py --resume`
-5. **迭代**直到 `Needs AI: 0`（12→6→3→0 是正常收敛）
-6. **收敛后 → 用户确认 + 补充**：向用户展示最终专有名词表（`reports/proper-nouns.md`），询问：
+**Step 1 — Glossary 审查**（Phase 1 末尾）：
+
+触发：`[scan] 🤖 AI Glossary Review — N entries`
+
+1. 读 `reports/proper-nouns.md`（全文，通常 30-100 条）
+2. 逐条判断：专有名词 or 普通词？
+3. 专名 → 加入 `PROPER_NOUNS_WHITELIST`（防后续误杀）
+4. 普通词 → 加入 `COMMON_KANJI` / `COMMON_KATAKANA` 黑名单
+5. 编辑对应语言的 utils 文件（ja: `japanese_utils.py`，zh: `chinese_utils.py`）
+6. 重跑 `build_glossary.py` 生成干净的 glossary
+
+**Step 2 — Candidate 审查**（Phase 3）：
+
+触发：`AI REVIEW NEEDED: N`
+
+1. 读 `temp/scans/ai_review_candidates.json`（≤50条）
+2. 逐条判断：专有名词 or 普通词？
+3. 专名 → 写 `ai_review_fixes.json`（`replace_global` 格式）+ 加入 `PROPER_NOUNS_WHITELIST`
+4. 普通词 → 加入 `COMMON_KANJI` / `COMMON_KATAKANA` 黑名单
+5. 运行：`python run_all.py --resume`
+6. 通常 1-2 轮收敛
+7. **收敛后 → 用户确认 + 补充**：向用户展示最终专有名词表（`reports/proper-nouns.md`），询问：
    - 是否采用当前词表？
    - 有无补充？（脚本未检测到的专名、别名/变体、译名偏好）
    - 用户补充后更新词表，`--resume` 应用；无补充 → 进入交付
 
-> 详细规则 → [references/interventions.md](references/interventions.md)
+> 在线搜索专名（WebSearch）和用户确认规则均保留。详细规则 → [references/interventions.md](references/interventions.md)
 
 ### OP/ED 审查
 

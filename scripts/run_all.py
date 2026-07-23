@@ -58,52 +58,39 @@ def _run(cmd_parts, cwd, timeout=600, desc=''):
 
 # ── Pipeline steps ──
 
-def _save_glossary_borderline(project_dir, glossary_path, lang):
-    """Save low-frequency kept entries from auto_clean for AI review.
+def _print_glossary_ai_review_notice(project_dir, glossary_path, lang):
+    """Notify AI to review the full glossary — no heuristic pre-filtering.
 
-    After auto_clean prunes the glossary, some non-proper-nouns may survive
-    because they don't match any reject pattern. AI reviews only these
-    borderline entries (frequency ≤ 5) — NOT the full glossary.
+    The glossary is small (typically 30-100 entries for a TV series).
+    AI reads the full file, judges each entry in one pass, and directly
+    edits the utils file to manage whitelist/blacklist:
+      - Proper noun → PROPER_NOUNS_WHITELIST (prevent false rejection)
+      - Common word → COMMON_KANJI / COMMON_KATAKANA (reject next time)
+    Then re-run build_glossary to regenerate the clean glossary.
     """
+    # Count entries
     try:
-        from nouns.auto_clean_glossary import scan_glossary
-        result = scan_glossary(glossary_path, lang=lang)
-    except Exception as e:
-        print(f'[scan] Borderline scan failed: {e}', file=sys.stderr)
-        return
+        with open(glossary_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        entry_count = len([l for l in content.split('\n')
+                          if l.startswith('| ') and ' | ' in l and not l.startswith('| -')])
+    except Exception:
+        entry_count = '?'
 
-    kept = result.get('kept', [])
-    if not kept:
-        return
+    utils_file = 'japanese_utils.py' if lang == 'ja' else ('chinese_utils.py' if lang == 'zh' else 'english_utils.py')
 
-    # Filter: only low-frequency entries that aren't in the anime whitelist
-    from nouns.auto_clean_glossary import _ANIME_WHITELIST
-    borderline = [
-        {'word': w, 'freq': f, 'section': s}
-        for w, f, s in kept
-        if f <= 5 and w not in _ANIME_WHITELIST
-    ]
-
-    if not borderline:
-        return
-
-    # Save to small JSON — AI reads this instead of 200+ line glossary
-    out_path = os.path.join(project_dir, 'temp', 'scans', 'glossary_borderline.json')
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    with open(out_path, 'w', encoding='utf-8') as f:
-        json.dump(borderline, f, ensure_ascii=False, indent=2)
-
-    print(f'\n[scan] {len(borderline)} borderline glossary entries → {out_path}',
+    print(f'\n[scan] 🤖 AI Glossary Review — {entry_count} entries in {glossary_path}',
           file=sys.stderr)
-
-    # Print the entries directly so Claude sees them without reading the file
-    print(f'[scan] 🤖 Glossary AI Review candidates (low-freq, ≤5 occurrences):',
+    print(f'[scan]    Read the full glossary (small file, ~{entry_count} entries).',
           file=sys.stderr)
-    for entry in borderline:
-        print(f'  {entry["word"]} ({entry["freq"]}x) [{entry["section"]}]',
-              file=sys.stderr)
-    print(f'[scan] Judge each: proper noun? If not, add to COMMON_KANJI/KATAKANA '
-          f'in japanese_utils.py.', file=sys.stderr)
+    print(f'[scan]    For each entry, judge: proper noun or common word?',
+          file=sys.stderr)
+    print(f'[scan]    → Proper noun → add to PROPER_NOUNS_WHITELIST in {utils_file}',
+          file=sys.stderr)
+    print(f'[scan]    → Common word  → add to COMMON_KANJI/KATAKANA in {utils_file}',
+          file=sys.stderr)
+    print(f'[scan]    Then re-run: build_glossary.py to regenerate clean glossary.',
+          file=sys.stderr)
 
 
 def step_scan(project_dir, lang, force_rescan=False, target_dir=None,
@@ -167,38 +154,13 @@ def step_scan(project_dir, lang, force_rescan=False, target_dir=None,
     if not ok:
         return False
 
-    # ── Auto-clean glossary (remove common words that slipped through) ──
+    # ── AI glossary review ──
+    # The glossary is small (typically 30-100 entries). Instead of heuristic
+    # auto-clean scripts, AI reviews the full glossary directly — one pass,
+    # reasonable token cost, no complex rules to maintain.
     glossary_path = os.path.join(project_dir, 'reports', 'proper-nouns.md')
     if os.path.exists(glossary_path):
-        auto_clean = os.path.join(_SCRIPT_DIR, 'nouns', 'auto_clean_glossary.py')
-        print('\n[scan] Auto-cleaning glossary...', file=sys.stderr)
-        clean_ok = _run([
-            'python', auto_clean,
-            '--glossary', glossary_path,
-            '--lang', lang,
-            '--apply', '--yes',
-        ], project_dir, desc='auto_clean')
-        if clean_ok:
-            # Rebuild glossary with updated COMMON_KANJI/KATAKANA filters
-            build_glossary = os.path.join(_SCRIPT_DIR, 'nouns', 'build_glossary.py')
-            cmd_rebuild = [
-                'python', build_glossary,
-                '--findings', findings,
-                '-o', glossary_path,
-                '--lang', lang,
-            ]
-            if os.path.exists(ai_nouns):
-                cmd_rebuild.extend(['--ai-nouns', ai_nouns])
-            _run(cmd_rebuild, project_dir, desc='glossary_rebuild')
-
-            # ── Save borderline entries for AI review ──
-            # After auto_clean, entries that survived may still include
-            # non-proper-nouns. Save low-frequency kept entries so AI can
-            # review them without reading the full 200+ line glossary.
-            _save_glossary_borderline(project_dir, glossary_path, lang)
-        else:
-            print('[scan] auto_clean failed — glossary may contain common words',
-                  file=sys.stderr)
+        _print_glossary_ai_review_notice(project_dir, glossary_path, lang)
 
     return True
 
@@ -415,7 +377,7 @@ def _step_noun_classify(project_dir, lang, checker, target, glossary):
     agg_data = {
         'total_unknown': len(all_unknowns),
         'results': all_unknowns,
-        'fixes': [],  # placeholder — actual fixes come from auto_classify
+        'fixes': [],  # placeholder — actual fixes come from AI review
     }
     with open(agg_path, 'w', encoding='utf-8') as f:
         json.dump(agg_data, f, ensure_ascii=False, indent=2)
@@ -434,107 +396,45 @@ def _step_noun_classify(project_dir, lang, checker, target, glossary):
         for c, n in cands.most_common(50)
     ]
 
-    # Save candidates JSON for auto_classify subprocess
-    cand_path = os.path.join(project_dir, 'temp', 'scans', 'noun_candidates.json')
-    os.makedirs(os.path.dirname(cand_path), exist_ok=True)
-    with open(cand_path, 'w', encoding='utf-8') as f:
-        json.dump(candidates_for_classify, f, ensure_ascii=False, indent=2)
-
-    # Also run via subprocess for logging (non-essential — failure ignored)
-    classified_path = os.path.join(project_dir, 'temp', 'scans', 'noun_classified.json')
-    _run([
-        'python', os.path.join(_SCRIPT_DIR, 'nouns', 'auto_classify.py'),
-        '--candidates', cand_path,
-        '--lang', lang,
-        '--output', classified_path,
-    ], project_dir, desc='auto_classify')
-
+    # All candidates → AI review (no heuristic pre-classification)
     return _apply_classified_results(project_dir, candidates_for_classify, unknowns, cands, lang)
 
 
 def _apply_classified_results(project_dir, candidates, unknowns, cands, lang):
-    """Run auto_classify inline and distribute results to fixes/glossary/AI review."""
+    """Send all unknown noun candidates to AI for review — no heuristic pre-filter.
+
+    The candidate list is small (≤50, capped by noun_checker). AI reviews all
+    candidates in one pass — much simpler than maintaining heuristic classification
+    rules (JMdict lookups, verb-stem patterns, sound-effect regexes, etc.).
+    AI directly manages the whitelist/blacklist in the language utils file.
+    """
     results = {'total_unknown': len(unknowns)}
 
+    # All candidates → AI review (capped at 50 most frequent)
+    top_candidates = [{'candidate': c, 'count': n}
+                      for c, n in cands.most_common(50)]
+    results['ai_review_count'] = len(top_candidates)
+    results['ai_candidates'] = top_candidates
+
+    ai_path = os.path.join(project_dir, 'temp', 'scans', 'ai_review_candidates.json')
+    os.makedirs(os.path.dirname(ai_path), exist_ok=True)
+    with open(ai_path, 'w', encoding='utf-8') as f:
+        json.dump(top_candidates, f, ensure_ascii=False, indent=2)
+    results['ai_review_file'] = ai_path
+
+    print(f'\n[noun] {len(top_candidates)} candidates → AI review ({ai_path})',
+          file=sys.stderr)
+
+    # ── Write L3.5 report entries ──
     try:
-        from nouns.auto_classify import classify_batch
-        classified = classify_batch(candidates, lang=lang)
-    except ImportError:
-        # Fallback: if auto_classify not available, all go to AI
-        results['ai_review_count'] = len(unknowns)
-        results['ai_candidates'] = [{'candidate': c, 'count': n}
-                                    for c, n in cands.most_common(20)]
-        ai_path = os.path.join(project_dir, 'temp', 'scans', 'ai_review_candidates.json')
-        with open(ai_path, 'w', encoding='utf-8') as f:
-            json.dump(results['ai_candidates'], f, ensure_ascii=False, indent=2)
-        results['ai_review_file'] = ai_path
-
-        # ── Write L3.5 report entries (fallback) ──
-        try:
-            report_path = os.path.join(project_dir, 'reports', '问题解决报告.md')
-            _upsert_report(report_path, step='3.5', entries=[
-                {'ep': '', 'time': '', 'original': c['candidate'],
-                 'corrected': '', 'status': '⬜'}
-                for c in results['ai_candidates']
-            ])
-        except Exception as e:
-            print(f'[noun] L3.5 report write failed (fallback): {e}', file=sys.stderr)
-
-        return results
-
-    # Accepted → add to fixes
-    if classified['accepted']:
-        accepted_fixes = [
-            {'action': 'replace_global',
-             'original': c['candidate'], 'replacement': c['candidate'],
-             'note': f'auto_classify: {c["reason"]}'}
-            for c in classified['accepted']
-        ]
-        fixes_path = os.path.join(project_dir, 'temp', 'scans', 'noun_accepted_fixes.json')
-        # Wrap in dict with 'fixes' key so step_apply_all can read it
-        with open(fixes_path, 'w', encoding='utf-8') as f:
-            json.dump({'fixes': accepted_fixes}, f, ensure_ascii=False, indent=2)
-        results['auto_accepted'] = len(classified['accepted'])
-        _append_to_glossary(project_dir, classified['accepted'], lang)
-
-        # ── Write L3 report entries (replace: auto_classify is a full snapshot) ──
-        try:
-            report_path = os.path.join(project_dir, 'reports', '问题解决报告.md')
-            _replace_layer(report_path, step='3', entries=[
-                {'ep': '', 'time': '', 'original': c['candidate'],
-                 'corrected': c['candidate'], 'status': '✅'}
-                for c in classified['accepted']
-            ])
-        except Exception as e:
-            print(f'[noun] L3 report write failed: {e}', file=sys.stderr)
-
-    # Rejected → log only
-    if classified['rejected']:
-        results['auto_rejected'] = len(classified['rejected'])
-
-    # Needs AI → save for AI review
-    if classified['needs_ai']:
-        results['ai_review_count'] = len(classified['needs_ai'])
-        results['ai_candidates'] = [
-            {'candidate': c['candidate'], 'count': c.get('count', 1),
-             'reason': c.get('reason', '')}
-            for c in classified['needs_ai']
-        ]
-        ai_path = os.path.join(project_dir, 'temp', 'scans', 'ai_review_candidates.json')
-        with open(ai_path, 'w', encoding='utf-8') as f:
-            json.dump(results['ai_candidates'], f, ensure_ascii=False, indent=2)
-        results['ai_review_file'] = ai_path
-
-        # ── Write L3.5 report entries (replace: auto_classify is a full snapshot) ──
-        try:
-            report_path = os.path.join(project_dir, 'reports', '问题解决报告.md')
-            _replace_layer(report_path, step='3.5', entries=[
-                {'ep': '', 'time': '', 'original': c['candidate'],
-                 'corrected': '', 'status': '⬜'}
-                for c in classified['needs_ai']
-            ])
-        except Exception as e:
-            print(f'[noun] L3.5 report write failed: {e}', file=sys.stderr)
+        report_path = os.path.join(project_dir, 'reports', '问题解决报告.md')
+        _replace_layer(report_path, step='3.5', entries=[
+            {'ep': '', 'time': '', 'original': c['candidate'],
+             'corrected': '', 'status': '⬜'}
+            for c in top_candidates
+        ])
+    except Exception as e:
+        print(f'[noun] L3.5 report write failed: {e}', file=sys.stderr)
 
     return results
 
@@ -977,16 +877,17 @@ def _apply_ai_checklists(project_dir, lang, target_dir=None):
 # ── AI Review flagging ──
 
 def print_ai_review_notice(noun_results, project_dir, lang):
-    """Print AI review instructions if candidates found after auto_classify."""
+    """Print AI review instructions for noun candidates — no heuristic pre-filter.
+
+    All unknown candidates from noun_checker go directly to AI review.
+    The list is capped at 50 (by noun_checker frequency ranking).
+    """
     count = noun_results.get('ai_review_count', 0)
     total = noun_results.get('total_unknown', 0)
-    auto_ok = noun_results.get('auto_accepted', 0)
-    auto_rej = noun_results.get('auto_rejected', 0)
 
     if count == 0:
         if total > 0:
-            print(f'\n[AI review] {total} candidates → auto_classify handled all '
-                  f'({auto_ok} accepted, {auto_rej} rejected). '
+            print(f'\n[AI review] {total} candidates filtered (all matched). '
                   f'Nothing needs AI review.', file=sys.stderr)
         else:
             print('\n[AI review] All proper nouns matched — nothing to review.',
@@ -998,22 +899,20 @@ def print_ai_review_notice(noun_results, project_dir, lang):
 
     print(f'\n{"="*60}', file=sys.stderr)
     print(f'  AI REVIEW NEEDED: {count} proper noun candidates '
-          f'(out of {total} total, {auto_ok} auto-accepted, {auto_rej} auto-rejected)',
-          file=sys.stderr)
+          f'(out of {total} total unknown)', file=sys.stderr)
     print(f'{"="*60}', file=sys.stderr)
     print(f'\n  Candidates saved to: {ai_file}', file=sys.stderr)
     print(f'\n  Candidates:', file=sys.stderr)
     for c in candidates:
-        print(f'    {c["candidate"]} ({c["count"]}x) — {c.get("reason", "")}',
-              file=sys.stderr)
+        print(f'    {c["candidate"]} ({c["count"]}x)', file=sys.stderr)
 
-    print(f'\n  AI任务（只审候选项，不读名词表全文）：', file=sys.stderr)
+    utils_file = 'japanese_utils.py' if lang == 'ja' else ('chinese_utils.py' if lang == 'zh' else 'english_utils.py')
+    print(f'\n  AI任务（一次性审查所有候选项，≤50条）：', file=sys.stderr)
     print(f'  1. 判断每个候选项是否为专有名词', file=sys.stderr)
-    print(f'  2. 是 → 给出规范形式', file=sys.stderr)
-    print(f'  3. 否 → 标记排除', file=sys.stderr)
-    print(f'  4. 输出到: temp/scans/ai_review_fixes.json', file=sys.stderr)
-    print(f'     Format: [{{"action":"replace_global","original":"...","replacement":"..."}},...]',
-          file=sys.stderr)
+    print(f'  2. 专有名词 → 给出规范形式，写入 ai_review_fixes.json', file=sys.stderr)
+    print(f'     Format: [{{"action":"replace_global","original":"...","replacement":"..."}},...]', file=sys.stderr)
+    print(f'  3. 常见词 → 加入 {utils_file} 的 COMMON_KANJI/KATAKANA 黑名单', file=sys.stderr)
+    print(f'  4. 专名白名单 → 加入 PROPER_NOUNS_WHITELIST（防误杀）', file=sys.stderr)
     print(f'  5. Re-run: python run_all.py --lang {lang} --resume', file=sys.stderr)
     print(f'', file=sys.stderr)
 

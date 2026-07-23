@@ -4,11 +4,13 @@
 
 ## 专名词表维护
 
+AI 直审全文，无启发式预筛选。名词库通常 30-100 条，一次性审查。
+
 ```
-build_glossary.py      → JMdict/jieba 过滤 → proper-nouns.md
-auto_clean_glossary.py → 启发式清理 → 更新 COMMON_KANJI/KATAKANA
+build_glossary.py      → 词频统计 → proper-nouns.md
+AI glossary review      → 读全文 → 管理 PROPER_NOUNS_WHITELIST / COMMON_KANJI/KATAKANA
 noun_checker.py        → 扫描 SRT 发现变体
-auto_classify.py       → ACCEPT/REJECT/NEEDS_AI
+AI candidate review    → 所有候选项直送 AI（≤50条）
 ```
 
 ### 命令
@@ -18,17 +20,13 @@ auto_classify.py       → ACCEPT/REJECT/NEEDS_AI
 python "<scripts>/nouns/build_glossary.py" --findings temp/scans/findings.json \
   -o reports/proper-nouns.md --lang ja
 
-# 自动清理
-python "<scripts>/nouns/auto_clean_glossary.py" --glossary reports/proper-nouns.md --apply --yes
-
 # 扫描变体
 python "<scripts>/nouns/noun_checker.py" AI审查后/ --lang ja \
   --noun-table reports/proper-nouns.md -o temp/scans/nouns/
-
-# 自动分类
-python "<scripts>/nouns/auto_classify.py" --candidates temp/scans/noun_candidates.json \
-  --lang ja --output temp/scans/noun_classified.json
 ```
+
+> `auto_clean_glossary.py` 和 `auto_classify.py` 仍可用作独立工具，但 pipeline 不再调用。
+> AI 直接审查全文，开销合理且判断更准确。
 
 ## 应用修复
 
