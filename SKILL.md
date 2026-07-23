@@ -174,34 +174,15 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 
 **触发**: `[ai-review] N pending`（N > 0）或 `Layer 2.5: N entries (N⬜)`
 
-**流程**（先自动后手动）：
-
-```bash
-# Step 1: 自动采纳 Whisper 猜测（唯一可靠的自动化）
-python scripts/fix/ai_review_batch.py --project-dir .
-```
-
-Whisper 匹配到了但因长度异常被拦截 → 直接采纳。其余保持原样。
-
-**Step 2: AI 逐条审查剩余**
+**流程**：
 
 1. 读 `temp/scans/ai_fragments_EP*.json`
-2. 对每个 `correction` 为空的 fragment，读 `context_before/after` 和 `whisper_context`
-3. 逐条判断，填 `correction`：
+2. 对每个 fragment，参考 `original`（原文）、`whisper_attempt`（Whisper 猜测）、`context_before/after`（上下文），判断 `correction`：
    - 能从上下文推断 → 写日语修正
-   - 纯噪声无法推断 → `__DELETE__`
-4. 写回 JSON
-
-**Step 3: 应用修复**
-
-```bash
-python run_all.py --apply-ai-review --video-dir "<VIDEO_DIR>"
-```
-
-**Step 4: 验证** — 检查报告 Layer 2.5 全部 ✅
-
-> **设计原则**：只自动采纳 Whisper 已确认的猜测（非空 whisper_attempt）。
-> 英文碎片清理、mj 判断等启发式规则不做 — 283 条不多，AI 逐条看上下文更准。
+   - 纯噪声 → `__DELETE__`
+3. 写回 JSON
+4. 运行：`python run_all.py --apply-ai-review --video-dir "<VIDEO_DIR>"`
+5. 验证：报告 Layer 2.5 全部 ✅
 
 ### 专有名词审查
 
