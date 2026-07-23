@@ -148,7 +148,7 @@ def step_scan(project_dir, lang, force_rescan=False, target_dir=None):
     ]
     if os.path.exists(ai_nouns):
         cmd.extend(['--ai-nouns', ai_nouns])
-    ok = _run(cmd, project_dir, desc='scan')
+    ok = _run(cmd, project_dir, timeout=3600, desc='scan')
     if not ok:
         return False
 
