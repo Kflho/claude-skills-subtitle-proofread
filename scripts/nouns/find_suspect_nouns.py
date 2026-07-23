@@ -614,6 +614,218 @@ def _merge_related_groups(groups):
 
 
 # ═══════════════════════════════════════════════════════════════
+# Search by corrections (user-provided error examples)
+# ═══════════════════════════════════════════════════════════════
+
+def search_corrections(input_dir, corrections, source_dir=None, lang='zh',
+                       output_path=None, apply_fixes=False, limit=None):
+    """Batch search for user-provided error patterns across all episodes.
+
+    Args:
+        input_dir: Directory of SRT files to scan
+        corrections: List of correction dicts, each with:
+            - wrong: list of incorrect Chinese terms
+            - correct: the correct Chinese term
+            - source_ja: (optional) Japanese source term for confirmation
+        source_dir: Japanese source SRT directory for cross-reference
+        lang: Language for tokenization
+        output_path: Where to write the hits JSON
+        apply_fixes: If True, actually modify SRT files
+        limit: Max files to scan
+
+    Returns:
+        dict with per-correction hit lists
+    """
+    srt_files = sorted([
+        f for f in os.listdir(input_dir)
+        if f.endswith(('.srt', '.ass'))
+    ])
+    if limit:
+        srt_files = srt_files[:limit]
+
+    segment_fn = _segment_zh if lang == 'zh' else _segment_ja
+
+    # Build source file index if cross-referencing
+    source_by_ep = {}
+    if source_dir and os.path.isdir(source_dir):
+        source_files = sorted([f for f in os.listdir(source_dir)
+                               if f.endswith('.srt')])
+        for f in source_files:
+            ep = extract_ep_number(f)
+            if ep:
+                source_by_ep[ep] = os.path.join(source_dir, f)
+
+    # Build wrong-term → correction lookup
+    wrong_to_correction = {}
+    for corr in corrections:
+        for w in corr.get('wrong', []):
+            if w not in wrong_to_correction:
+                wrong_to_correction[w] = []
+            wrong_to_correction[w].append(corr)
+
+    # Per-correction results
+    results = []
+    for corr in corrections:
+        results.append({
+            'correction': corr,
+            'hits': [],
+            'total_hits': 0,
+            'eps_affected': set(),
+        })
+
+    all_wrong_terms = set(wrong_to_correction.keys())
+
+    # Scan all files
+    for filename in srt_files:
+        filepath = os.path.join(input_dir, filename)
+        ep = extract_ep_number(filename) or filename
+        try:
+            cues = parse_subtitles(filepath)
+        except Exception as e:
+            print(f'  [WARN] {filename}: parse error ({e})', file=sys.stderr)
+            continue
+
+        # Load source cues if available
+        source_cues = None
+        if ep in source_by_ep:
+            try:
+                source_cues = parse_subtitles(source_by_ep[ep])
+            except Exception:
+                pass
+
+        for ci, cue in enumerate(cues):
+            text = cue.get('text', '')
+            if not text:
+                continue
+
+            tokens = segment_fn(text)
+            matched_tokens = [t for t in tokens if t in all_wrong_terms]
+
+            if not matched_tokens:
+                continue
+
+            # Get aligned source text if available
+            source_text = ''
+            source_ja_matched = ''
+            if source_cues and ci < len(source_cues):
+                source_text = source_cues[ci].get('text', '')
+
+            for token in matched_tokens:
+                for corr_info in wrong_to_correction.get(token, []):
+                    corr_idx = corrections.index(corr_info)
+                    correct = corr_info.get('correct', '')
+                    source_ja_target = corr_info.get('source_ja', '')
+
+                    # Cross-reference with source if available
+                    source_confirmed = False
+                    if source_text and source_ja_target:
+                        ja_tokens = _segment_ja(source_text)
+                        for ja_term in ja_tokens:
+                            ja_norm = _norm_ja_reading(ja_term)
+                            target_norm = _norm_ja_reading(source_ja_target)
+                            if (ja_norm == target_norm or
+                                (len(ja_norm) >= 2 and len(target_norm) >= 2 and
+                                 (ja_norm in target_norm or target_norm in ja_norm))):
+                                source_confirmed = True
+                                source_ja_matched = ja_term
+                                break
+
+                    # Build suggested fix
+                    suggested_text = text.replace(token, correct)
+
+                    hit = {
+                        'ep': ep,
+                        'cue_index': ci,
+                        'cue_start': cue.get('start', ''),
+                        'original_text': text,
+                        'matched_token': token,
+                        'suggested_text': suggested_text,
+                        'source_ja_text': source_text[:80] if source_text else '',
+                        'source_ja_matched': source_ja_matched,
+                        'source_confirmed': source_confirmed,
+                    }
+                    results[corr_idx]['hits'].append(hit)
+                    results[corr_idx]['total_hits'] += 1
+                    results[corr_idx]['eps_affected'].add(ep)
+
+    # Convert sets to sorted lists
+    for r in results:
+        r['eps_affected'] = sorted(r['eps_affected'])
+        r['n_eps'] = len(r['eps_affected'])
+
+    # ── Apply fixes if requested ──
+    if apply_fixes:
+        _apply_correction_fixes(input_dir, results)
+
+    # Write output
+    if output_path:
+        os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(results, f, ensure_ascii=False, indent=2)
+        print(f'→ {output_path}', file=sys.stderr)
+
+    # Summary
+    for r in results:
+        corr = r['correction']
+        print(f'  {corr["correct"]} ← {corr["wrong"][:5]}: '
+              f'{r["total_hits"]} hits in {r["n_eps"]} episodes',
+              file=sys.stderr)
+
+    return results
+
+
+def _apply_correction_fixes(input_dir, results):
+    """Apply correction replacements to SRT files in-place.
+
+    Backs up original files to <filename>.bak before modifying.
+    """
+    from lib.whisper_utils import write_subtitles
+
+    # Collect all fixes per file
+    file_fixes = defaultdict(list)  # {filepath: [(cue_index, old_text, new_text)]}
+
+    for r in results:
+        for hit in r['hits']:
+            ep = hit['ep']
+            # Find the file
+            for f in os.listdir(input_dir):
+                if extract_ep_number(f) == ep:
+                    filepath = os.path.join(input_dir, f)
+                    file_fixes[filepath].append(
+                        (hit['cue_index'], hit['original_text'],
+                         hit['suggested_text'])
+                    )
+                    break
+
+    for filepath, fixes in file_fixes.items():
+        try:
+            cues = parse_subtitles(filepath)
+        except Exception:
+            continue
+
+        # Apply fixes by cue index
+        fix_map = {ci: (old, new) for ci, old, new in fixes}
+        applied = 0
+        for i, cue in enumerate(cues):
+            if i in fix_map:
+                old, new = fix_map[i]
+                if cue.get('text', '') == old:
+                    cue['text'] = new
+                    applied += 1
+
+        if applied > 0:
+            # Backup original
+            bak_path = filepath + '.bak'
+            if not os.path.exists(bak_path):
+                import shutil
+                shutil.copy2(filepath, bak_path)
+
+            write_subtitles(cues, filepath)
+            print(f'  [apply] {os.path.basename(filepath)}: '
+                  f'{applied} fixes applied', file=sys.stderr)
+
+
+# ═══════════════════════════════════════════════════════════════
 # CLI
 # ═══════════════════════════════════════════════════════════════
 
@@ -625,14 +837,20 @@ def main():
                         help='Directory of SRT files to scan')
     parser.add_argument('--lang', default='ja', choices=['ja', 'zh'],
                         help='Language for tokenization (default: ja)')
-    parser.add_argument('--mode', default='source', choices=['source', 'translation'],
-                        help='source=find unrecognized names, translation=find inconsistent')
+    parser.add_argument('--mode', default='source',
+                        choices=['source', 'translation', 'search'],
+                        help='source=find unrecognized names, translation=find inconsistent, '
+                             'search=batch find user-provided error patterns')
     parser.add_argument('--glossary', help='Path to proper-nouns.md (known terms)')
     parser.add_argument('--mappings', help='Path to noun_mappings.json (known ja→zh)')
     parser.add_argument('--source-dir',
-                        help='(translation mode) Japanese source SRTs for cross-reference')
+                        help='Japanese source SRTs for cross-reference')
+    parser.add_argument('--corrections',
+                        help='(search mode) JSON file with correction patterns')
+    parser.add_argument('--apply-corrections', action='store_true',
+                        help='(search mode) Actually apply fixes to SRT files')
     parser.add_argument('--output', default='temp/scans/suspect_nouns.json',
-                        help='Output JSON path (default: temp/scans/suspect_nouns.json)')
+                        help='Output JSON path')
     parser.add_argument('--limit', type=int, default=0,
                         help='Max files to scan (for testing)')
     args = parser.parse_args()
@@ -641,6 +859,31 @@ def main():
         print(f'ERROR: input-dir not found: {args.input_dir}', file=sys.stderr)
         sys.exit(1)
 
+    # ── Search mode: user-provided corrections ──
+    if args.mode == 'search':
+        if not args.corrections:
+            print('ERROR: --mode search requires --corrections <JSON>',
+                  file=sys.stderr)
+            sys.exit(1)
+        with open(args.corrections, 'r', encoding='utf-8') as f:
+            corr_data = json.load(f)
+        corrections = corr_data.get('corrections', [])
+        if not corrections:
+            print('ERROR: no "corrections" array found in JSON', file=sys.stderr)
+            sys.exit(1)
+
+        search_corrections(
+            input_dir=args.input_dir,
+            corrections=corrections,
+            source_dir=args.source_dir,
+            lang=args.lang,
+            output_path=args.output,
+            apply_fixes=args.apply_corrections,
+            limit=args.limit or None,
+        )
+        return
+
+    # ── Auto-discovery mode (source / translation) ──
     result = find_suspect_nouns(
         input_dir=args.input_dir,
         lang=args.lang,
