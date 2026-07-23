@@ -941,13 +941,14 @@ def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True,
     return True
 
 
-def _apply_ai_checklists(project_dir, lang):
+def _apply_ai_checklists(project_dir, lang, target_dir=None):
     """Apply filled AI fragment corrections — shared by --apply-ai-review fast path.
 
     Scans temp/scans/ai_fragments_EP*.json, applies corrections via
     Fixer.apply_ai_fragments() which handles VAD alignment + escalation
     to human review for unfilled entries.
     """
+    srt_dir = target_dir or os.path.join(project_dir, 'AI审查后')
     scan_dir = os.path.join(project_dir, 'temp', 'scans')
     if not os.path.isdir(scan_dir):
         print('[apply-ai-review] No temp/scans/ directory.', file=sys.stderr)
@@ -967,7 +968,7 @@ def _apply_ai_checklists(project_dir, lang):
 
     total_applied = 0
     for ep, json_path in json_files:
-        fixer = Fixer(ep, project_dir, target_lang=lang, srt_dir=target_dir)
+        fixer = Fixer(ep, project_dir, target_lang=lang, srt_dir=srt_dir)
         applied = fixer.apply_ai_fragments(json_path)
         total_applied += applied
         print(f'[apply-ai-review] {ep}: {applied} corrections applied',
@@ -1236,7 +1237,7 @@ Examples:
         # Apply JSON-based AI fixes (proper nouns, oped)
         step_apply_all(project_dir, resolved_lang, target_dir=target_dir)
         # Apply per-episode AI review checklists (L2.5 fragments)
-        _apply_ai_checklists(project_dir, resolved_lang)
+        _apply_ai_checklists(project_dir, resolved_lang, target_dir=target_dir)
         # Regenerate human checklists with escalated L2.5 items
         step_deliver(project_dir, resolved_lang, is_full_run=False, video_dir=video_dir, target_dir=target_dir)
         step_clean(project_dir, target_dir=target_dir)
