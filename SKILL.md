@@ -33,60 +33,13 @@ description: >
 
 ## 运行
 
-### 1. 导出环境变量
+### 环境设置
 
-从项目 CLAUDE.md「密钥与路径」段逐条 `export`。**不要跳过** — 缺 env var 会导致 Whisper 静默跳过。
+首次使用 → [references/setup.md](references/setup.md)（环境变量、Python 依赖、API 密钥、git 备份铁律）
 
-```bash
-export PYTHONIOENCODING=utf-8   # 防 Windows GBK 乱码
-```
+已验证过的项目跳过，直接从 CLAUDE.md export 环境变量即可。
 
-### 2. 验证关键路径
-
-```bash
-test -f "$WHISPER_CLI" && echo "[OK] whisper-cli" || echo "[MISSING] whisper-cli"
-test -f "$WHISPER_MODEL" && echo "[OK] model" || echo "[MISSING] model"
-test -d "<VIDEO_DIR>" && echo "[OK] video" || echo "[MISSING] video"
-```
-
-有 `[MISSING]` → 告知用户。Whisper 缺失可残血运行（跳过音频修复）。
-
-### 2.5. 验证 Python 依赖
-
-```bash
-python --version           # 需要 Python 3.12+
-# 日语项目 — jamdict（JMdict 词典，专名分类）+ Janome（形态素解析，词汇提取）
-python -c "from jamdict import Jamdict; Jamdict(); print('[OK] jamdict')" 2>/dev/null \
-  || { echo "[INSTALL] jamdict..."; pip install jamdict; }
-python -c "from janome.tokenizer import Tokenizer; Tokenizer().tokenize('テスト'); print('[OK] janome')" 2>/dev/null \
-  || { echo "[INSTALL] janome..."; pip install janome; }
-# 中文项目 — jieba（分词 + 词典过滤，对标 jamdict）
-python -c "import jieba; jieba.initialize(); print('[OK] jieba', len(jieba.dt.FREQ), 'words')" 2>/dev/null \
-  || { echo "[INSTALL] jieba..."; pip install jieba; }
-```
-
-`[OK]` → 继续。`[INSTALL]` → 自动安装后继续。安装失败 → 残血运行（退回规则分类）。
-
-- **jamdict** 不可用 → Phase 3 退回规则分类
-- **Janome** 不可用 → Phase 1 退回 n-gram 切分（~40% 碎片率）
-- **jieba** 不可用 → Phase 1 退回 n-gram 切分，Phase 3 退回规则分类
-
-### 2.6. LLM API 密钥（翻译 + 润色，--lang zh 可选）
-
-```bash
-# OpenAI 兼容 API — 翻译脚本 + 润色脚本共用
-# 支持 DeepSeek、OpenAI、Gemini 等任何 /chat/completions 端点
-export LLM_API_KEY="sk-..."
-# 可选：覆盖默认模型和端点
-export LLM_MODEL="deepseek-chat"                    # 默认
-export LLM_BASE_URL="https://api.deepseek.com/v1"   # 默认
-```
-
-> ⚠️ 不要复用 Claude Code 的 key。创建独立的 API key。
-> 未设置时降级：翻译功能不可用（需先配 key）；Pipeline 末尾润色交互提问时选 `y` → AI 助理逐句润色（⚠️ 高 token 消耗，7.5 万 cue）。
-> 选 `n` → 跳过润色，直接交付。
-
-### 3. 运行
+### 跑 pipeline
 
 **⚠️ 破坏性改动前必须 git 备份。** Pipeline 的 Phase 2/3 会直接修改 SRT 文件（原地覆写），
 没有撤销按钮。跑 pipeline 前：
@@ -249,35 +202,11 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 
 ### 专有名词审查
 
-分两步，各只做一次（AI 直审全文，无启发式预筛选）：
+**Step 1** — `[scan] 🤖 AI Glossary Review — N entries`：读 `reports/proper-nouns.md` → 逐条判专名/普通词 → 编辑 utils 白名单/黑名单 → 重跑 build_glossary
 
-**Step 1 — Glossary 审查**（Phase 1 末尾）：
+**Step 2** — `AI REVIEW NEEDED: N`：读 `ai_review_candidates.json` → 判专名/普通词 → 写 `ai_review_fixes.json` → `--resume`
 
-触发：`[scan] 🤖 AI Glossary Review — N entries`
-
-1. 读 `reports/proper-nouns.md`（全文，通常 30-100 条）
-2. 逐条判断：专有名词 or 普通词？
-3. 专名 → 加入 `PROPER_NOUNS_WHITELIST`（防后续误杀）
-4. 普通词 → 加入 `COMMON_KANJI` / `COMMON_KATAKANA` 黑名单
-5. 编辑对应语言的 utils 文件（ja: `japanese_utils.py`，zh: `chinese_utils.py`）
-6. 重跑 `build_glossary.py` 生成干净的 glossary
-
-**Step 2 — Candidate 审查**（Phase 3）：
-
-触发：`AI REVIEW NEEDED: N`
-
-1. 读 `temp/scans/ai_review_candidates.json`（≤50条）
-2. 逐条判断：专有名词 or 普通词？
-3. 专名 → 写 `ai_review_fixes.json`（`replace_global` 格式）+ 加入 `PROPER_NOUNS_WHITELIST`
-4. 普通词 → 加入 `COMMON_KANJI` / `COMMON_KATAKANA` 黑名单
-5. 运行：`python run_all.py --resume`
-6. 通常 1-2 轮收敛
-7. **收敛后 → 用户确认 + 补充**：向用户展示最终专有名词表（`reports/proper-nouns.md`），询问：
-   - 是否采用当前词表？
-   - 有无补充？（脚本未检测到的专名、别名/变体、译名偏好）
-   - 用户补充后更新词表，`--resume` 应用；无补充 → 进入交付
-
-> 在线搜索专名（WebSearch）和用户确认规则均保留。详细规则 → [references/interventions.md](references/interventions.md)
+→ 详细规则见 [references/interventions.md](references/interventions.md)
 
 ### OP/ED 审查
 
