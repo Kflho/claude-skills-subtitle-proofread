@@ -115,6 +115,7 @@ python "<scripts-dir>/run_all.py" \
 > `--lang zh` 时使用 jieba 分词 + 词典查询对标 jamdict。jieba 不可用时退回 n-gram + 启发式规则。
 > Baidu 翻译为**可选**：未配置时自动降级，日语原文保留在 AI fragments 中由 AI 自行翻译。
 > AI 润色为**可选**：Pipeline 末尾交互提问。需要 `LLM_API_KEY` 环境变量。无 key 时降级为 AI 助理自行润色（⚠️ 高 token 消耗，7.5 万 cue）。
+> ⚠️ **translate_srt.py 必须要有 LLM_API_KEY**：无 key 时脚本无法运行。不要静默降级为 AI 自行翻译——量级太大（193 集 × 200 条 = 不可行）。正确做法：告知用户 key 为空，请用户设置后重试。详见 [references/translation.md](references/translation.md)。
 
 ## 名词库准备 + 翻译
 
@@ -232,6 +233,7 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 | 参考字幕乱码（西里尔/中文变 `?`） | v2 已自动检测编码（UTF-8/CP1251/KOI8-R/Shift-JIS/GBK） |
 | `[translate] Baidu credentials not found` | 正常降级。配置 `BAIDU_APPID` + `BAIDU_SECRET` 或接受 AI 自行翻译 |
 | `[polish] LLM_API_KEY not set` | 正常降级。设置环境变量或选 `n` 跳过润色。不要复用 Claude Code 内部 key |
+| `[translate_srt] LLM_API_KEY not set` | **不要降级为 AI 自行翻译。**告知用户 key 为空，请用户设置后重跑。≤5 集且用户明确同意时才可手工翻译 |
 
 ## AI 介入点
 
@@ -258,7 +260,7 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 | `--skip-whisper` | Skip audio processing (残血模式) |
 | `--resume` | Resume after AI noun review (Phase 3 only) |
 | `--force-rescan` | Re-scan even if cache fresh |
-| `LLM_API_KEY` (env) | LLM API key for translation + polish (optional, --lang zh). Separate from Claude Code's. |
+| `LLM_API_KEY` (env) | LLM API key for polish (optional) + translate_srt.py (**required**). Separate from Claude Code's. |
 | `--mappings <JSON>` | translate_srt.py: path to noun_mappings.json (preferred over --glossary) |
 
 > `--apply-ai-review` 是后处理快速路径，不能和 full run 一起用。

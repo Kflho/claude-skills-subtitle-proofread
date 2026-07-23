@@ -820,7 +820,7 @@ def _apply_correction_fixes(input_dir, results):
                 import shutil
                 shutil.copy2(filepath, bak_path)
 
-            write_subtitles(cues, filepath)
+            write_subtitles(filepath, cues)
             print(f'  [apply] {os.path.basename(filepath)}: '
                   f'{applied} fixes applied', file=sys.stderr)
 

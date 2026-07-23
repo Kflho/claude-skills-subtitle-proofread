@@ -117,6 +117,13 @@ export LLM_MODEL="deepseek-chat"     # 可选
 export LLM_BASE_URL="https://api.deepseek.com/v1"  # 可选
 ```
 
+> ⚠️ **LLM_API_KEY 缺失时**：`translate_srt.py` 无法运行。
+> 不要静默降级为 AI 自行翻译——每集 200+ 条字幕，3 集就消耗 10 万+ token，
+> 193 集完全不可行。正确做法：
+> 1. **告知用户 key 为空，无法运行 translate_srt.py**
+> 2. **请用户设置 key 后重新运行**
+> 3. 仅当用户明确要求且 ≤5 集时，才考虑 AI 自行翻译（参考 AI 润色降级策略）
+
 ---
 
 ## find_suspect_nouns.py — 疑似专名搜索
