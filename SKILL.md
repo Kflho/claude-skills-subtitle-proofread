@@ -174,54 +174,34 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 
 **触发**: `[ai-review] N pending`（N > 0）或 `Layer 2.5: N entries (N⬜)`
 
-**流程**（先自动后手动，逐层降级）：
+**流程**（先自动后手动）：
 
 ```bash
-# Step 1: 自动批量处理（三级分类，无 API 调用）
+# Step 1: 自动采纳 Whisper 猜测（唯一可靠的自动化）
 python scripts/fix/ai_review_batch.py --project-dir .
 ```
 
-脚本自动三级分类：
-| 级别 | 条件 | 动作 | 典型场景 |
-|------|------|------|---------|
-| ① whisper_accept | `whisper_attempt` 非空 | 直接采纳 | `"moon"→Whisper猜测"バカ"` |
-| ② context_match | whisper_context 附近有匹配 | 从上下文提取 | Whisper 全集转录某段匹配 |
-| ③ smart_classify | 以上都不满足 | mj<3→删, 有日语+英文→清洗 | `"me海だったら彼方すっ"`→清洗 |
+Whisper 匹配到了但因长度异常被拦截 → 直接采纳。其余保持原样。
 
-**Step 2: 检查剩余 ⬜**
+**Step 2: AI 逐条审查剩余**
 
-```bash
-# 查看还剩多少待处理
-python scripts/fix/ai_review_batch.py --project-dir . --dry-run
-```
+1. 读 `temp/scans/ai_fragments_EP*.json`
+2. 对每个 `correction` 为空的 fragment，读 `context_before/after` 和 `whisper_context`
+3. 逐条判断，填 `correction`：
+   - 能从上下文推断 → 写日语修正
+   - 纯噪声无法推断 → `__DELETE__`
+4. 写回 JSON
 
-- 0 条 → 直接跳到 Step 4
-- 仍有剩余 → Step 3
-
-**Step 3: AI 助理逐条审查**（自动处理不了的硬骨头）
-
-1. 读 `temp/scans/unfixable_fragments.json`（Step 1 自动导出）
-2. 按 episode 分组，逐批读取 fragment 的 `context_before/after` 和 `whisper_context`
-3. 判读每条原文 → 填入 `correction`：
-   - 能从上下文推断 → 写日语修正文本
-   - 纯噪声无法推断 → 写 `__DELETE__`
-4. 写回 JSON 后继续 Step 4
-
-**Step 4: 应用修复**
+**Step 3: 应用修复**
 
 ```bash
 python run_all.py --apply-ai-review --video-dir "<VIDEO_DIR>"
 ```
 
-**Step 5: 验证**
+**Step 4: 验证** — 检查报告 Layer 2.5 全部 ✅
 
-检查报告 `reports/问题解决报告.md`：
-- Layer 2.5 全部 ✅ → 完成
-- 仍有 ⬜ → 回到 Step 3
-
-> **设计原则**：优先用脚本自动处理（零成本、秒级），处理不了的再让 AI 介入（高成本、需上下文理解）。不要跳过 Step 1 直接让 AI 逐条审 283 条。
-> 
-> `ai_review_batch.py` 的 smart_classify 只做低风险操作：纯噪声删除（mj<3）、英文碎片清理。不修改日语内容本身。复杂修正留给 AI。
+> **设计原则**：只自动采纳 Whisper 已确认的猜测（非空 whisper_attempt）。
+> 英文碎片清理、mj 判断等启发式规则不做 — 283 条不多，AI 逐条看上下文更准。
 
 ### 专有名词审查
 
