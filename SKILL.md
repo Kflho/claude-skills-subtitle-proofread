@@ -63,6 +63,18 @@ python -c "import jieba; jieba.initialize(); print('[OK] jieba', len(jieba.dt.FR
 - **Janome** 不可用 → Phase 1 退回 n-gram 切分（~40% 碎片率）
 - **jieba** 不可用 → Phase 1 退回 n-gram 切分，Phase 3 退回规则分类
 
+### 2.6. AI 润色密钥（--lang zh 可选）
+
+```bash
+# DeepSeek API（批量润色中文字幕，10句/批，$3.38/193集）
+# 注册: https://platform.deepseek.com → API Keys → 创建新 key
+export DEEPSEEK_API_KEY="sk-..."
+```
+
+> ⚠️ 不要复用 Claude Code 的内部 key。在 DeepSeek 控制台单独创建一个用于润色脚本。
+> 未设置时降级：Pipeline 末尾交互提问时选 `y` → AI 助理逐句润色（~7.5 万 cue，高 token 消耗）。
+> 选 `n` → 跳过润色，直接交付。
+
 ### 3. 运行
 
 ```bash
@@ -104,9 +116,11 @@ python "<scripts-dir>/run_all.py" \
 | 词典过滤 | ✅ (jamdict/JMdict) | ✅ (jieba/498K 词) | ❌ |
 | 专名分类 | ✅ (jamdict) | ✅ (jieba + 规则) | ❌ |
 | Glossary 清洗 | ✅ (JMdict + 规则) | ✅ (jieba 词典 + 规则) | ❌ |
+| AI 润色（去翻译腔） | ❌ (日语原文无需) | ✅ (DeepSeek 批量润色) | ❌ |
 
 > `--lang zh` 时使用 jieba 分词 + 词典查询对标 jamdict。jieba 不可用时退回 n-gram + 启发式规则。
 > Baidu 翻译为**可选**：未配置时自动降级，日语原文保留在 AI fragments 中由 AI 自行翻译。
+> AI 润色为**可选**：Pipeline 末尾交互提问。需要 `DEEPSEEK_API_KEY` 环境变量。无 key 时降级为 AI 助理自行润色（⚠️ 高 token 消耗，7.5 万 cue）。
 
 ## Pipeline
 
@@ -137,6 +151,11 @@ Phase 3: Unify
   ├─ OP/ED fixer: cross-episode clustering → instrumental auto-clean / vocal AI review
   ├─ Noun variant detection → auto-classify → AI judgment (iterative, ≤20 entries)
   └─ Deliver: apply all fixes + human checklist + video clips
+
+Phase 4: Polish (--lang zh only, optional)
+  └─ 交互提问 → DeepSeek 批量润色（10句/批，$3.38/193集）
+       ├─ 有 DEEPSEEK_API_KEY → polish_zh.py 自动润色
+       └─ 无 key → AI 助理自行润色（⚠️ 高耗费，7.5万 cue）
 
 Report: reports/问题解决报告.md（自动生成，按 Phase 分组）
 ```
@@ -186,6 +205,14 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 2. 每项填 `修正:` 字段
 3. 运行：`python run_all.py --apply-checklist`
 
+### AI 润色（--lang zh）
+
+**触发**: Pipeline 末尾交互提问 `是否对最终字幕进行 AI 润色？(y/n)`
+
+- **y** + 已设 `DEEPSEEK_API_KEY` → 自动调用 `polish_zh.py`，输出到 `中文润色后/`
+- **y** + 无 key → ⚠️ 警告高耗费，AI 助理逐句润色（~7.5 万 cue）
+- **n** → 跳过，直接交付 `AI审查后/`
+
 ## 错误恢复
 
 | 输出 | 操作 |
@@ -195,6 +222,7 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 | 某步骤失败但已写中间文件 | 清空 `temp/` + `reports/`，加 `--force-rescan` 重跑 |
 | 参考字幕乱码（西里尔/中文变 `?`） | v2 已自动检测编码（UTF-8/CP1251/KOI8-R/Shift-JIS/GBK） |
 | `[translate] Baidu credentials not found` | 正常降级。配置 `BAIDU_APPID` + `BAIDU_SECRET` 或接受 AI 自行翻译 |
+| `[polish] DEEPSEEK_API_KEY not set` | 正常降级。设置环境变量或选 `n` 跳过润色。不要复用 Claude Code 内部 key |
 
 ## AI 介入点
 
@@ -220,5 +248,6 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 | `--skip-whisper` | Skip audio processing (残血模式) |
 | `--resume` | Resume after AI noun review (Phase 3 only) |
 | `--force-rescan` | Re-scan even if cache fresh |
+| `DEEPSEEK_API_KEY` (env) | Chinese AI polish (optional). Separate key from Claude Code's. |
 
 > `--apply-ai-review` 和 `--apply-checklist` 是后处理快速路径，不能和 full run 一起用。
