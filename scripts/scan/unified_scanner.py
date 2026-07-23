@@ -85,18 +85,27 @@ def _segment_text_zh(text, term_freq):
 # ── Janome initialization (lazy, once) ──
 _janome_initialized = False
 _janome_available = False
+_tokenizer = None  # module-level singleton — Tokenizer() is expensive!
+# Quick check: does text contain any CJK characters worth tokenizing?
+_HAS_CJK_RE = None
 
 
 def _ensure_janome():
-    """Lazy-init Janome for Japanese morphological analysis."""
-    global _janome_initialized, _janome_available
+    """Lazy-init Janome for Japanese morphological analysis.
+
+    Creates Tokenizer ONCE — creating a new Tokenizer() per cue
+    re-loads the system dictionary from disk each time, which is
+    catastrophically slow for 193 episodes × ~200 cues.
+    """
+    global _janome_initialized, _janome_available, _tokenizer
     if _janome_initialized:
         return _janome_available
     _janome_initialized = True
     try:
         from janome.tokenizer import Tokenizer
+        _tokenizer = Tokenizer()
         # no-op test tokenization to verify the dictionary loaded
-        Tokenizer().tokenize('テスト')
+        _tokenizer.tokenize('テスト')
         _janome_available = True
     except (ImportError, Exception) as e:
         print(f'[unified_scanner] Janome unavailable ({e}) — '
@@ -111,11 +120,19 @@ def _segment_text_ja(text, term_freq):
     Uses POS-filtered morphological analysis — keeps only nouns
     (固有名詞 and 一般) with katakana or kanji, ≥2 characters.
     Falls back to n-gram sliding window if Janome is unavailable.
+
+    Perf: Tokenizer is a module-level singleton (created once).
+    Text without any CJK chars short-circuits before tokenization.
     """
+    global _HAS_CJK_RE
+    if _HAS_CJK_RE is None:
+        _HAS_CJK_RE = __import__('re').compile(r'[一-鿿゠-ヿ]')
+    if not _HAS_CJK_RE.search(text):
+        return  # No CJK → nothing to extract for glossary
+
     if _ensure_janome():
+        global _tokenizer
         import re as _re
-        from janome.tokenizer import Tokenizer
-        _tokenizer = Tokenizer()
         for token in _tokenizer.tokenize(text):
             surface = token.surface
             if len(surface) < 2:
