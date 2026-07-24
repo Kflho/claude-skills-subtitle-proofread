@@ -177,45 +177,36 @@ AI 无法修复的 fragment 进入 VAD 检查：
 
 ### Noun Variant Detection (automatic)
 
-`noun_checker.py` 扫描 SRT，对照 glossary 检测专名拼写变体。所有未知候选项
-直送 AI 审查，无启发式预分类。
+`noun_checker.py` 和 `find_suspect_nouns.py --mode translation` 扫描 SRT，
+全量发现潜在专名。无启发式预分类，所有候选直送 AI 审查。
 
 ---
 
-### Proper Noun AI Judgment (🤖 Phase 3，一次性)
+### Proper Noun AI Judgment (🤖 Phase 3)
 
-**Trigger**: Pipeline 输出 `AI REVIEW NEEDED: N`
+**Trigger**: Pipeline 输出 `[review] N candidate(s)` 或 `AI REVIEW NEEDED: N`
 
-**Data**: `temp/scans/ai_review_candidates.json`（≤50条，按频率排序）
+**Data**: `temp/scans/candidates.json`（统一格式，全量无上限）
 
-候选项通常 ≤50 条，AI 一次性审查。通常 1-2 轮收敛。
+**candidate 类型**：
+
+| type | 含义 | AI 操作 |
+|------|------|---------|
+| `inconsistency` | 已知专名译法不一致（映射表有规范译名，但实际出现其他译法） | 编辑 SRT，替换错误译名 → 规范译名 |
+| `unknown_suspect` | 未识别专名（不在映射表中） | 判断是否专名 → 是：补 `noun_mappings.json` + 统一 SRT → 否：跳过 |
 
 **Flow**:
-1. Read `ai_review_candidates.json`
-2. Judge each candidate: proper noun? yes/no
-3. **Yes** → 提供规范形式，写入 `ai_review_fixes.json`：
-   ```json
-   [{"action":"replace_global","original":"候補","replacement":"規範形"}, ...]
-   ```
-   - **对 --lang zh 项目**：还需确定中文译名。优先搜索权威译名；无结果时自行翻译，标注 `[AI译]`
-4. **No** → 加入对应语言的 COMMON_KANJI/KATAKANA 黑名单
-   - ja: 编辑 `lib/japanese_utils.py`
-   - zh: 编辑 `lib/chinese_utils.py`
-5. 如果全部 No → `ai_review_fixes.json` 写入 `[]`
-6. Re-run: `python run_all.py --resume`
-7. **收敛后 → 用户确认 + 补充**：向用户展示最终词表（`reports/proper-nouns.md`），逐项询问：
-   - **是否采用当前词表？** 确认所有条目无误
-   - **有无补充？** 例如：
-     - 脚本未检测到的专名（冷门角色、地名、组织名、关键道具）
-     - 别名/变体（同一角色的不同称呼、昵称、简称）
-     - 译名偏好（如希望"お茶の水博士"译为"茶水博士"而非"御茶之水博士"）
-   - 用户补充后 → 更新 `proper-nouns.md` 或写入 `ai_review_fixes.json`，再跑 `--resume`
-   - 用户确认无补充 → 进入交付
+1. Read `temp/scans/candidates.json`
+2. 逐条 candidate：
+   - **inconsistency** → 找到 `zh_wrong` 的所有 `sample_locations` → 编辑 SRT 逐条替换为 `zh_canonical`
+   - **unknown_suspect** → 读 `sample_contexts` 判断是否为专名：
+     - 是专名 → 确定中文译名 → 补充 `noun_mappings.json` + 编辑 SRT 统一该译名
+     - 否 → 跳过
+3. 重复运行直到 candidates 归零
 
-**为什么必须加 COMMON_KANJI**：
-`--resume` 重跑 Phase 3 时 noun_checker 重新扫描全部 SRT。
-只写 `ai_review_fixes.json` 不够——下一轮会再次检测到同一个候选。
-必须把拒绝词加入 COMMON_KANJI 才能从根源消除。
+**检查点推进**：
+- `auto_translate.py`：反复运行同一命令，自动检测 candidates 是否归零
+- `run_all.py --resume`：重跑 Phase 3，重新扫描 → 已修复的不一致不再出现
 
 ---
 

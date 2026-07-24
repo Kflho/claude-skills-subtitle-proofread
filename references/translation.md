@@ -189,6 +189,48 @@ grep -n '扉\|飞鸟\|飞跳\|飞鱼\|天满' 中文AI翻译验证/*.srt && echo
 
 ---
 
+## auto_translate.py — 翻译+校对一体化（推荐）
+
+翻译和专名校对整合为单一命令，检查点驱动自动推进。
+
+```bash
+cd "<project>"
+
+# 完整流程（翻译 + 专名校对）
+python "<scripts>/auto_translate.py" \
+  --source-dir "<日文源>" \
+  --target-dir "<中文输出>" \
+  --mappings temp/noun_mappings.json
+
+# 仅校对已有翻译（无日文源也可，自动降解）
+python "<scripts>/auto_translate.py" \
+  --target-dir "<中文翻译>" \
+  --mappings temp/noun_mappings.json
+```
+
+**两阶段推进**（反复运行同一命令）：
+
+| 阶段 | 条件 | 行为 |
+|------|------|------|
+| translate | target-dir 无 SRT 文件 | 调用 `translate_srt.py` |
+| review | target-dir 有文件 | 调用 `find_suspect_nouns.py --mode translation` → 输出 `temp/scans/candidates.json` |
+| done | candidates 数组为空 | 退出 |
+
+**candidates.json 格式**：统一的 AI 审查格式，每条 candidate 包含：
+- `type`: `inconsistency`（已知专名译法不一致）或 `unknown_suspect`（未识别专名）
+- `zh_appearances`: 中文翻译中的所有出现形式（含 sample_locations）
+- `sample_contexts`: 上下文例句，供 AI 判断译名
+
+**AI 审查流程**：
+1. 读 `temp/scans/candidates.json`
+2. `inconsistency` → 编辑 SRT，替换 `zh_wrong` → `zh_canonical`
+3. `unknown_suspect` → 判断是否专名 → 是：补 `noun_mappings.json` + 统一 SRT → 否：跳过
+4. 重新运行 → candidates 归零 → 完成
+
+> 和 `run_all.py` Phase 3 共用同一审查引擎（`find_suspect_nouns.py --mode translation`），结果质量一致。
+
+---
+
 ## find_suspect_nouns.py — 疑似专名搜索
 
 可复用工具，支持三种模式。
@@ -204,17 +246,25 @@ python "<scripts>/nouns/find_suspect_nouns.py" \
 
 输出 `temp/scans/suspect_nouns.json`：不在词表中的疑似专名列表。
 
-### translation 模式 — 中文翻译中找不一致
+### translation 模式 — 中文翻译中找不一致（升级版）
 
 ```bash
 python "<scripts>/nouns/find_suspect_nouns.py" \
   --input-dir "中文AI翻译验证/" \
   --source-dir "日文ai修复版/" \
   --mappings temp/noun_mappings.json \
-  --lang zh --mode translation
+  --lang zh --mode translation \
+  --output-format candidates
 ```
 
-自动聚类同源异译（如 `小飞`/`扉`/`扉不扉` 都来自日语 `トビ`）。
+**升级特性（v2）**：
+- **全量扫描**：所有集数、所有候选，无 50 条 cap，无 20 集限制
+- **jieba 预注册**：映射表中的中文专名预先注入 jieba 词典，避免被错误拆分
+- **short-reading 阈值**：日文读音归一化 substring 匹配要求 ≥4 字符，减少误聚类
+- **统一 candidates 格式**：`--output-format candidates` 输出 AI 可直接审查的 JSON
+- **降级模式**：无 `--source-dir` 时自动切换为中文侧启发式扫描
+
+自动聚类同源异译（如 `小飞`/`扉`/`扉不扉` 都来自日语 `トビ`），每条附带精确的文件+行号定位。
 
 ### search 模式 — 用户提供错例批量查找
 
@@ -278,6 +328,8 @@ python "<scripts>/nouns/find_suspect_nouns.py" \
 | `--corrections` | search | 错例 JSON 文件 |
 | `--apply-corrections` | search | 实际修复 SRT 文件 |
 | `--limit N` | 全部 | 限制扫描文件数（测试用） |
+| `--max-singletons N` | source | 最多返回 N 条 singleton（0=无限，默认 50） |
+| `--output-format candidates\|legacy` | 全部 | 输出格式：candidates（统一 AI 审查）或 legacy（旧 groups+singletons） |
 
 ---
 

@@ -10,8 +10,49 @@ AI 直审全文，无启发式预筛选。名词库通常 30-100 条，一次性
 build_glossary.py      → 词频统计 → proper-nouns.md
 AI glossary review      → 读全文 → 管理 PROPER_NOUNS_WHITELIST / COMMON_KANJI/KATAKANA
 noun_checker.py        → 扫描 SRT 发现变体
-AI candidate review    → 所有候选项直送 AI（≤50条）
+find_suspect_nouns.py  → 全量扫描（无上限）→ candidates.json（统一 AI 审查格式）
+AI candidate review    → 所有候选项直送 AI，逐条判断
 ```
+
+### 统一专名审查（v2）
+
+`find_suspect_nouns.py --mode translation --output-format candidates` 输出统一的 `candidates.json`：
+
+```json
+{
+  "candidates": [
+    {
+      "id": 1,
+      "type": "inconsistency",
+      "ja_source": "アトム",
+      "zh_canonical_in_mappings": "阿童木",
+      "zh_appearances": [
+        {"text": "阿童木", "count": 1212, "sample_locations": [...]},
+        {"text": "阿托姆", "count": 4, "sample_locations": [
+          {"file": "EP060.srt", "cue_index": 307, "timestamp": "00:16:22", "text": "跟着阿托姆走吧"}
+        ]}
+      ],
+      "sample_contexts": [{"file": "EP060.srt", "zh_text": "跟着阿托姆走吧"}]
+    },
+    {
+      "id": 2,
+      "type": "unknown_suspect",
+      "zh_term": "哈卡塞",
+      "frequency": 55,
+      "in_mappings": false,
+      "sample_contexts": [...]
+    }
+  ],
+  "stats": {"total": 150, "inconsistency": 20, "unknown_suspect": 130}
+}
+```
+
+**v2 关键改进**：
+- **全量扫描**：所有集数、所有候选，无 50 条 cap，无 20 集限制
+- **jieba 预注册**：映射表中的中文专名注入 jieba 词典，避免拆分（如「阿托姆」→「阿」+「托姆」）
+- **short-reading 阈值**：日语读音 substring 匹配要求 ≥4 字符，减少误聚类
+- **降级模式**：无日文源时自动切换为中文侧启发式扫描
+- **向后兼容**：`--output-format legacy` 输出旧 groups+singletons 格式，`run_all.py` 的 `_wire_suspect_nouns_to_report()` 自动检测并适配两种格式
 
 ### 命令
 

@@ -167,9 +167,9 @@ Phase 2: Triage
   → Baidu 翻译 (--lang zh): Whisper 输出 ja→zh（无凭证时降级 AI 翻译）
 
 Phase 3: Unify
-  ├─ Suspect noun search: segmentation-based detection of unrecognized names (new!)
+  ├─ Suspect noun search: full-scan (no cap), jieba pre-primed with known names
   ├─ OP/ED fixer: cross-episode clustering → instrumental auto-clean / vocal AI review
-  ├─ Noun variant detection → AI review all candidates (≤50, one pass)
+  ├─ Noun variant detection → unified candidates.json (全量，AI 逐条审查)
   └─ Deliver: apply all fixes → [???] markers written to SRT for Aegisub review
 
 Phase 4: Polish (--lang zh only, optional)
@@ -189,13 +189,15 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 
 ### 疑似专名搜索
 
-**触发**: `[suspect-nouns] N entries → report layer 3` 或 `[SUSPECT GROUPS]`
+**触发**: `[review] N candidate(s)` 或 `[suspect-nouns] N entries → report layer 3`
 
-1. 读 `temp/scans/suspect_nouns.json`
-2. 逐条判断：专有名词 or 普通词？
-3. 专名 → 确认译名 → 更新 `noun_mappings.json`；普通词 → 忽略
+1. 读 `temp/scans/candidates.json`（统一格式）
+2. 每条 candidate 有 `type` 字段：
+   - `inconsistency` → 已知专名译法不一致（如「阿托姆」→ 应为「阿童木」），按 `zh_canonical_in_mappings` 编辑 SRT
+   - `unknown_suspect` → 未识别专名，判断是否专名 → 是：补 `noun_mappings.json` + 统一 SRT → 否：跳过
+3. 修完重新运行 → candidates 归零 → 完成
 
-→ 详细用法见 [references/translation.md](references/translation.md)
+→ 详细用法见 [references/translation.md](references/translation.md) 和 [references/phase3-unify.md](references/phase3-unify.md)
 
 ### AI 碎片补全
 
@@ -275,3 +277,32 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 
 > `--apply-ai-review` 是后处理快速路径，不能和 full run 一起用。
 > 翻译工具完整参数见 [references/translation.md](references/translation.md)。
+
+### 专名统一审查（独立工具）
+
+翻译完成后（或已有翻译文件），用 `auto_translate.py` 做专名校对：
+
+```bash
+cd "<project-root>"
+
+# 有日文源 → 交叉比对（最佳）
+python "<scripts-dir>/auto_translate.py" \
+  --source-dir "<日文源>" \
+  --target-dir "<中文翻译>" \
+  --mappings temp/noun_mappings.json
+
+# 无日文源 → 中文侧扫描（降级）
+python "<scripts-dir>/auto_translate.py" \
+  --target-dir "<中文翻译>" \
+  --mappings temp/noun_mappings.json
+```
+
+**两阶段，检查点驱动**（反复运行同一命令自动推进）：
+
+1. **translate** — 如果 target-dir 没有 SRT 文件 → 调用 `translate_srt.py` 翻译
+2. **review** — 调用 `find_suspect_nouns.py --mode translation`（全量扫描，无 cap）→ 输出 `temp/scans/candidates.json`
+3. AI 审查 `candidates.json` → 编辑 SRT + 补全 `noun_mappings.json` → 重新运行
+4. candidates 归零 → 完成
+
+> 和 `run_all.py` Phase 3 共用同一审查引擎，结果质量一致。
+> 详细用法见 [references/translation.md](references/translation.md)。
