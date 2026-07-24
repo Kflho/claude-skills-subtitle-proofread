@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "All Fixes — aggregated fix actions from all sources",
+  "description": "Consolidated fixes from oped_fixer, noun_check, and AI review before bulk apply.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["action", "file"],
+    "properties": {
+      "action": {
+        "type": "string",
+        "enum": ["replace_text", "replace_global", "replace_global_regex", "delete_line"]
+      },
+      "file":        { "type": "string" },
+      "start":       { "type": "string" },
+      "line":        { "type": "integer" },
+      "original":    { "type": "string" },
+      "replacement": { "type": "string" },
+      "pattern":     { "type": "string" },
+      "note":        { "type": "string" }
+    }
+  }
+}

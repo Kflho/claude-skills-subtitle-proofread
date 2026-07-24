@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Findings — Phase 1 scan output",
+  "description": "Output of unified_scanner.py: garbled cues, missing subtitles, statistics.",
+  "type": "object",
+  "required": ["garbled_cues", "missing_subtitles", "summary"],
+  "properties": {
+    "garbled_cues": {
+      "type": "array",
+      "description": "Cues classified as garbled (foreign characters in wrong-language context).",
+      "items": {
+        "type": "object",
+        "required": ["file", "line", "timecode", "text"],
+        "properties": {
+          "file":     { "type": "string" },
+          "line":     { "type": "integer" },
+          "timecode": { "type": "string" },
+          "text":     { "type": "string" },
+          "has_kana": { "type": "boolean" },
+          "has_kanji": { "type": "boolean" }
+        }
+      }
+    },
+    "missing_subtitles": {
+      "type": "object",
+      "description": "Episode → list of VAD-detected speech gaps with no subtitle coverage.",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["start_s", "end_s", "duration"],
+          "properties": {
+            "start_s":  { "type": "number" },
+            "end_s":    { "type": "number" },
+            "duration": { "type": "number" }
+          }
+        }
+      }
+    },
+    "per_episode_issues": {
+      "type": "object",
+      "description": "Episode → list of all detected issues (garbled + missing)."
+    },
+    "repeats": { "type": "array" },
+    "term_frequencies": { "type": "object" },
+    "gap_statistics": { "type": "object" },
+    "summary": {
+      "type": "object",
+      "required": ["files_scanned", "total_cues", "garbled_count", "episodes_with_issues"],
+      "properties": {
+        "files_scanned":          { "type": "integer" },
+        "total_cues":             { "type": "integer" },
+        "garbled_count":          { "type": "integer" },
+        "repeat_count":           { "type": "integer" },
+        "term_count":             { "type": "integer" },
+        "episodes_with_issues":   { "type": "integer" },
+        "vad_episodes_scanned":   { "type": "integer" },
+        "missing_subtitle_gaps":  { "type": "integer" },
+        "episodes_with_missing_subs": { "type": "integer" }
+      }
+    }
+  }
+}

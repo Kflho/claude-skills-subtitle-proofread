@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Suspect Nouns — proactive proper noun search output",
+  "description": "Output of find_suspect_nouns.py: grouped and singleton suspected proper nouns.",
+  "type": "object",
+  "required": ["groups", "singletons"],
+  "properties": {
+    "groups": {
+      "type": "array",
+      "description": "Clusters of related variants suspected to be the same proper noun.",
+      "items": {
+        "type": "object",
+        "required": ["suspected_canonical", "variants"],
+        "properties": {
+          "suspected_canonical": { "type": "string" },
+          "reason": { "type": "string" },
+          "source_ja": { "type": "string" },
+          "variants": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["text"],
+              "properties": {
+                "text":       { "type": "string" },
+                "ep":         { "type": "string" },
+                "cue_start":  { "type": "string" },
+                "contexts":   { "type": "array" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "singletons": {
+      "type": "array",
+      "description": "Single-instance suspects (not part of any group).",
+      "items": {
+        "type": "object",
+        "required": ["text", "count"],
+        "properties": {
+          "text":     { "type": "string" },
+          "count":    { "type": "integer" },
+          "eps":      { "type": "array", "items": { "type": "string" } },
+          "reason":   { "type": "string" },
+          "contexts": { "type": "array" }
+        }
+      }
+    }
+  }
+}

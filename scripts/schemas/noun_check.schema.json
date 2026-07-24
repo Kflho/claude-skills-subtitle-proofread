@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Noun Check — proper noun table comparison output",
+  "description": "Output of noun_checker.py: unknown/mismatched proper nouns across all episodes.",
+  "type": "object",
+  "required": ["total_unknown", "results"],
+  "properties": {
+    "total_unknown": {
+      "type": "integer",
+      "description": "Count of unknown/mismatched noun candidates."
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["candidate", "status"],
+        "properties": {
+          "candidate":   { "type": "string" },
+          "position":    { "type": ["integer", "string"] },
+          "type":        { "type": "string" },
+          "status":      { "type": "string", "enum": ["unknown", "mismatch", "matched"] },
+          "matched":     { "type": ["string", "null"] },
+          "suggestion":  { "type": ["string", "null"] },
+          "similarity":  { "type": "number" },
+          "context":     { "type": "string" },
+          "cue_start":   { "type": "string" },
+          "cue_end":     { "type": "string" },
+          "cue_text":    { "type": "string" },
+          "episode":     { "type": "string" }
+        }
+      }
+    },
+    "fixes": {
+      "type": "array",
+      "description": "Accepted fixes (populated after AI review)."
+    }
+  }
+}
