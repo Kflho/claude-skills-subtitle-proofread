@@ -341,7 +341,8 @@ def step_nouns(project_dir, lang, target_dir=None):
     suspect_output = os.path.join(project_dir, 'temp', 'scans', 'suspect_nouns.json')
     mappings = os.path.join(project_dir, 'temp', 'noun_mappings.json')
     suspect_args = ['python', suspect_script, '--input-dir', target,
-                    '--lang', lang, '--mode', 'source', '--output', suspect_output]
+                    '--lang', lang, '--mode', 'source', '--output', suspect_output,
+                    '--max-singletons', '0']  # unlimited — AI will filter
     if os.path.exists(glossary):
         suspect_args.extend(['--glossary', glossary])
     if os.path.exists(mappings):
