@@ -15,6 +15,36 @@ description: >
 
 > v5.0: Phase 1 新增 VAD 有人声无字幕检测（需 `--video-dir`），作为第一类错误与乱码并列。详见 [references/architecture.md](references/architecture.md)。
 
+## 🔥 快速上手：专名校对
+
+> 翻译完成后对中文SRT做专有名词一致性审查。最常用的入口点。
+
+```bash
+python "<scripts-dir>/auto_translate.py" \
+  --source-dir "<日文源>" --target-dir "<中文翻译>" \
+  --mappings temp/noun_mappings.json
+```
+
+**检查点驱动，反复运行同一命令自动推进：**
+
+| 阶段 | 输出 | 做什么 |
+|------|------|--------|
+| `review` | `temp/scans/candidates.json` (N条) | 开始AI审查 |
+| `review_pending` | candidates 未归零 | 继续修复 + 重跑 |
+| `done` ✅ | candidates 归零 | 完成 |
+
+**AI 审查循环**（每条 candidate 有 `type` 字段）：
+
+| type | 含义 | 操作 |
+|------|------|------|
+| `inconsistency` | 已知专名译法不一致（如「阿托姆」→应为「阿童木」） | 按 `zh_canonical_in_mappings` 修复 SRT |
+| `unknown_suspect` | 未识别疑似专名 | 判断是否专名 → 是：补 `noun_mappings.json` + 统一 SRT；否：补 `temp/zh_common_blacklist.json` |
+
+**大规模审查（100+ unknown_suspect）**：不要逐条硬查。
+→ 写脚本用 API 批量分类（30条/批，deepseek-chat 成本 ~$0.01）
+→ 普通词补黑名单，专名补映射表，重扫 → 迭代至归零
+→ 完整流程见 [references/batch-review.md](references/batch-review.md)
+
 ### ASS 格式项目
 
 本 skill 同时支持 **SRT** 和 **ASS** 两种格式。所有工具通过 `parse_subtitles()`/`write_subtitles()` 自动检测格式，无需手动转换。
@@ -191,13 +221,22 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 
 **触发**: `[review] N candidate(s)` 或 `[suspect-nouns] N entries → report layer 3`
 
+**审查流程**（按候选数量选择策略）：
+
+**≤ 50 条** → 手动审查
 1. 读 `temp/scans/candidates.json`（统一格式）
 2. 每条 candidate 有 `type` 字段：
    - `inconsistency` → 已知专名译法不一致（如「阿托姆」→ 应为「阿童木」），按 `zh_canonical_in_mappings` 编辑 SRT
    - `unknown_suspect` → 未识别专名，判断是否专名 → 是：补 `noun_mappings.json` + 统一 SRT → 否：跳过
 3. 修完重新运行 → candidates 归零 → 完成
 
-→ 详细用法见 [references/translation.md](references/translation.md) 和 [references/phase3-unify.md](references/phase3-unify.md)
+**> 50 条** → API 批量分类（见 [references/batch-review.md](references/batch-review.md)）
+1. 读 `candidates.json` → 提取所有 `unknown_suspect`
+2. 写脚本用 `LLM_API_KEY` 批量分类（30条/批），判断每个词是 proper_noun 还是 common_word
+3. 普通词 → 补 `temp/zh_common_blacklist.json`（JSON 数组）
+4. 专名 → 补 `noun_mappings.json`（self-mapping 即可：`"专名": "专名"`）
+5. 重跑 auto_translate.py → 自动使用 `--zh-blacklist` 加载黑名单 → 候选数大幅下降
+6. 迭代至归零
 
 ### AI 碎片补全
 
@@ -297,12 +336,35 @@ python "<scripts-dir>/auto_translate.py" \
   --mappings temp/noun_mappings.json
 ```
 
-**两阶段，检查点驱动**（反复运行同一命令自动推进）：
+**完整迭代循环**（反复运行同一命令自动推进）：
 
-1. **translate** — 如果 target-dir 没有 SRT 文件 → 调用 `translate_srt.py` 翻译
-2. **review** — 调用 `find_suspect_nouns.py --mode translation`（全量扫描，无 cap）→ 输出 `temp/scans/candidates.json`
-3. AI 审查 `candidates.json` → 编辑 SRT + 补全 `noun_mappings.json` → 重新运行
-4. candidates 归零 → 完成
+```
+scan → candidates.json (N条)
+  │
+  ├─ N > 50 unknown_suspect → API 批量分类
+  │   ├─ common_word → temp/zh_common_blacklist.json
+  │   └─ proper_noun → temp/noun_mappings.json (self-mapping)
+  │
+  ├─ N ≤ 50 → AI 手动审查每条 candidate
+  │   ├─ inconsistency → 编辑 SRT 修复译法不一致
+  │   ├─ unknown_suspect(专名) → 补 mappings + 统一 SRT
+  │   └─ unknown_suspect(普通词) → 补黑名单
+  │
+  └─ 重跑 auto_translate.py → 自动检测 SRT 变更 → 重新扫描
+       ↓
+     candidates 归零 → done ✅
+```
+
+**关键文件**：
+
+| 文件 | 作用 |
+|------|------|
+| `temp/scans/candidates.json` | AI审查输入（扫描器输出） |
+| `temp/noun_mappings.json` | ja→zh 专名映射（补专名用） |
+| `temp/zh_common_blacklist.json` | 中文普通词黑名单（补普通词用） |
+| `temp/scans/classified_terms.json` | API 批量分类结果 |
+
+**黑名单机制**（v5.1）：`find_suspect_nouns.py` 支持 `--zh-blacklist <JSON>` 加载外部普通词列表。`auto_translate.py` 自动检测 `temp/zh_common_blacklist.json` 并传递。扫描器跳过黑名单中的词，从源头减少误报。
 
 > 和 `run_all.py` Phase 3 共用同一审查引擎，结果质量一致。
-> 详细用法见 [references/translation.md](references/translation.md)。
+> 详细用法见 [references/translation.md](references/translation.md) 和 [references/batch-review.md](references/batch-review.md)。
