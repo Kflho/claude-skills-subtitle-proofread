@@ -13,6 +13,7 @@ v2.1 变更:
 """
 
 import sys, os, re, subprocess, json, io
+from lib.subprocess_utils import run_ffmpeg
 
 # ── OP/ED region boundaries (seconds from start/end) ──
 OP_BOUNDARY_SEC = 95    # cues before this → OP region, exempt from garbled detection
@@ -545,11 +546,11 @@ def vad_filter_audio(input_audio, output_audio, silence_db=-30, min_silence=0.8,
     import shutil
 
     # 1. 用 ffmpeg silencedetect 找静音区间
-    proc = subprocess.run(
-        ['ffmpeg', '-i', input_audio,
+    proc = run_ffmpeg(
+        ['-i', input_audio,
          '-af', f'silencedetect=n={silence_db}dB:d={min_silence}',
          '-f', 'null', '-'],
-        capture_output=True, text=True, encoding='utf-8', errors='replace')
+        check=False)
 
     dur = get_audio_duration(input_audio)
     if dur is None or dur <= 0:
@@ -608,16 +609,12 @@ def vad_filter_audio(input_audio, output_audio, silence_db=-30, min_silence=0.8,
     with open(concat_file, 'w') as f:
         for i, (ss, es) in enumerate(speech_segs):
             seg_path = output_audio + f'.seg{i:03d}.wav'
-            subprocess.run([
-                'ffmpeg', '-y', '-ss', str(ss), '-t', str(es - ss),
-                '-i', input_audio, '-c', 'copy', seg_path
-            ], capture_output=True, check=True)
+            run_ffmpeg(['-y', '-ss', str(ss), '-t', str(es - ss),
+                        '-i', input_audio, '-c', 'copy', seg_path])
             f.write(f"file '{seg_path}'\n")
 
-    subprocess.run([
-        'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
-        '-i', concat_file, '-c', 'copy', output_audio
-    ], capture_output=True, check=True)
+    run_ffmpeg(['-y', '-f', 'concat', '-safe', '0',
+                '-i', concat_file, '-c', 'copy', output_audio])
 
     # 清理临时文件
     for i in range(len(speech_segs)):
@@ -633,24 +630,21 @@ def vad_filter_audio(input_audio, output_audio, silence_db=-30, min_silence=0.8,
 
 def extract_audio_wav(video_path, output_path, ss=None, duration=None):
     """从视频提取 WAV 音频（16kHz mono 无损）。可选起止时间。"""
-    cmd = ['ffmpeg', '-y']
+    args = ['-y']
     if ss is not None:
-        cmd += ['-ss', str(ss)]
+        args += ['-ss', str(ss)]
     if duration is not None:
-        cmd += ['-t', str(duration)]
-    cmd += ['-i', video_path, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', output_path]
-    # Windows: 确保 ffmpeg 子进程用 UTF-8 编码处理文件路径
-    env = os.environ.copy()
-    env['PYTHONIOENCODING'] = 'utf-8'
-    subprocess.run(cmd, capture_output=True, check=True, encoding='utf-8', errors='replace', env=env)
+        args += ['-t', str(duration)]
+    args += ['-i', video_path, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', output_path]
+    run_ffmpeg(args)
 
 
 def get_audio_duration(audio_path):
     """用 ffprobe 获取音频时长（秒）。"""
-    probe = subprocess.run(
-        ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration',
+    probe = run_ffmpeg(
+        ['-v', 'quiet', '-show_entries', 'format=duration',
          '-of', 'csv=p=0', audio_path],
-        capture_output=True, text=True, encoding='utf-8', errors='replace')
+        tool='ffprobe', check=False)
     return float(probe.stdout.strip()) if probe.stdout.strip() else None
 
 

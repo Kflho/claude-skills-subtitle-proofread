@@ -40,6 +40,7 @@ from lib.whisper_utils import (
     meaningful_char_count,
 )
 from utils.update_report import upsert_entries, update_entry_status
+from lib.subprocess_utils import run_ffmpeg, SubprocessError
 setup_windows_utf8()
 
 from fix.subtitle_session import SubtitleSession
@@ -763,25 +764,23 @@ class Fixer:
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-        cmd = [
-            'ffmpeg', '-y', '-loglevel', 'error',
-            '-ss', str(clip_start),
-            '-t', str(duration),
-            '-i', video_path,
-            '-c:v', 'libx264', '-crf', '28',
-            '-c:a', 'aac', '-b:a', '64k',
-            '-vf', 'scale=640:-2',
-            '-movflags', '+faststart',
-            output_path,
-        ]
         try:
-            subprocess.run(cmd, capture_output=True, check=True, timeout=120)
+            run_ffmpeg(['-y', '-loglevel', 'error',
+                        '-ss', str(clip_start),
+                        '-t', str(duration),
+                        '-i', video_path,
+                        '-c:v', 'libx264', '-crf', '28',
+                        '-c:a', 'aac', '-b:a', '64k',
+                        '-vf', 'scale=640:-2',
+                        '-movflags', '+faststart',
+                        output_path],
+                       timeout=120)
             return True
-        except subprocess.TimeoutExpired:
-            print(f'  TIMEOUT: {output_path}', file=sys.stderr)
-        except subprocess.CalledProcessError as e:
-            err = (e.stderr or b'')[-200:]
-            print(f'  FFMPEG ERROR: {err}', file=sys.stderr)
+        except SubprocessError as e:
+            if e.returncode == -1:
+                print(f'  TIMEOUT: {output_path}', file=sys.stderr)
+            else:
+                print(f'  FFMPEG ERROR: {e.stderr[-200:]}', file=sys.stderr)
         except Exception as e:
             print(f'  ERROR: {e}', file=sys.stderr)
         return False

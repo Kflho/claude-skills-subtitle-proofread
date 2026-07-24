@@ -33,6 +33,7 @@ import os
 import re
 import subprocess
 import sys
+from lib.subprocess_utils import run_whisper
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -131,7 +132,7 @@ def _check_whisper_cpp():
     # Also check common names on PATH
     for name in ['whisper-cli', 'whisper-cli.exe', 'whisper', 'main']:
         try:
-            result = subprocess.run([name, '--help'], capture_output=True, timeout=10)
+            result = run_whisper(['--help'], tool=name, check=False, timeout=10)
             if result.returncode == 0 or b'whisper' in (result.stdout or b'') + (result.stderr or b''):
                 return True
         except Exception:
@@ -183,9 +184,7 @@ def detect_whisper_cpp_version(whisper_cli=None):
     try:
         # Try --version first (newer builds), then fall back to --help
         for flag in ['--version', '--help', '-h']:
-            result = subprocess.run(
-                [cli, flag], capture_output=True, text=True,
-                encoding='utf-8', errors='replace', timeout=15)
+            result = run_whisper([flag], tool=cli, check=False, timeout=15)
             output = (result.stdout or '') + (result.stderr or '')
 
             # Known version patterns:
@@ -321,8 +320,8 @@ def _transcribe_whisper_cpp(audio_path, model_path, language,
     """Transcribe via whisper.cpp CLI. Returns unified segment list."""
     cli = whisper_cli or os.environ.get('WHISPER_CLI', 'whisper-cli')
 
-    cmd = [
-        cli, '-m', model_path, '-f', audio_path, '-l', language,
+    args = [
+        '-m', model_path, '-f', audio_path, '-l', language,
         '-t', str(threads), '-p', str(processors),
         '-bs', str(beam_size), '-bo', str(best_of),
         '-oj', '-of', audio_path + '.whisper', '--print-progress',
@@ -330,12 +329,11 @@ def _transcribe_whisper_cpp(audio_path, model_path, language,
         '-mc', str(max_context),
     ]
     if suppress_nst:
-        cmd.append('-sns')
+        args.append('-sns')
     if no_fallback:
-        cmd.append('-nf')
+        args.append('-nf')
 
-    proc = subprocess.run(cmd, capture_output=True, text=True,
-                          encoding='utf-8', errors='replace', timeout=1800)
+    proc = run_whisper(args, tool=cli, check=False, timeout=1800)
 
     # Print stderr for diagnostics
     for line in (proc.stderr or '').strip().split('\n'):

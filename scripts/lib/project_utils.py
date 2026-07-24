@@ -9,6 +9,7 @@ import json
 import os
 import re
 import subprocess
+from lib.subprocess_utils import run_git
 
 
 def load_json(path):
@@ -408,13 +409,9 @@ def find_original_srt(project_dir, episode):
 def git_backup(project_dir, message):
     """Auto git add + commit. Returns commit hash or status string."""
     try:
-        subprocess.run(['git', 'add', '-A'], cwd=project_dir,
-                       capture_output=True, timeout=10)
-        result = subprocess.run(
-            ['git', 'commit', '-m', message],
-            cwd=project_dir, capture_output=True, text=True, timeout=10,
-            encoding='utf-8', errors='replace'
-        )
+        run_git(['add', '-A'], cwd=project_dir, timeout=10)
+        result = run_git(['commit', '-m', message],
+                         cwd=project_dir, check=False, timeout=10)
         if result.returncode == 0:
             m = re.search(r'\[[\w-]+ ([a-f0-9]+)\]', result.stdout)
             return m.group(1)[:7] if m else 'ok'
