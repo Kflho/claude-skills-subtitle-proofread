@@ -128,7 +128,7 @@ _ZH_COMMON_BLACKLIST = frozenset({
 # Known term loading
 # ═══════════════════════════════════════════════════════════════
 
-def _load_known_terms(glossary_path=None, mappings_path=None, lang='ja'):
+def _load_known_terms(glossary_path=None, mappings_path=None, lang='ja', zh_blacklist_path=None):
     """Load all known terms to exclude from suspect detection.
 
     Returns: (known_ja_terms, known_zh_terms, ja_to_zh)
@@ -177,6 +177,13 @@ def _load_known_terms(glossary_path=None, mappings_path=None, lang='ja'):
         # Also add the Japanese known terms as they can appear in Chinese output
         known_zh.update({w for w in COMMON_KANJI if len(w) >= 1})
         known_zh.update({w for w in COMMON_KATAKANA if len(w) >= 1})
+
+    # Load external Chinese common word blacklist (project-specific, AI-curated)
+    if zh_blacklist_path and os.path.exists(zh_blacklist_path):
+        with open(zh_blacklist_path, 'r', encoding='utf-8') as f:
+            ext_terms = json.load(f)
+        if isinstance(ext_terms, list):
+            known_zh.update(t for t in ext_terms if len(t) >= 1)
 
     return known_ja, known_zh, ja_to_zh
 
@@ -286,7 +293,8 @@ def _is_in_name_context(cue_text, token, lang='ja'):
 
 def find_suspect_nouns(input_dir, lang='ja', mode='source',
                        glossary_path=None, mappings_path=None,
-                       source_dir=None, limit=None, max_singletons=50):
+                       source_dir=None, limit=None, max_singletons=50,
+                       zh_blacklist_path=None):
     """Scan SRT files for suspected proper nouns.
 
     Args:
@@ -297,12 +305,13 @@ def find_suspect_nouns(input_dir, lang='ja', mode='source',
         mappings_path: Path to noun_mappings.json
         source_dir: (translation mode) Japanese source SRTs for cross-reference
         limit: Max files to scan (for testing)
+        zh_blacklist_path: Path to JSON array of Chinese common words to exclude
 
     Returns:
         dict with 'groups' and 'singletons' lists
     """
     known_ja, known_zh, ja_to_zh = _load_known_terms(
-        glossary_path, mappings_path, lang
+        glossary_path, mappings_path, lang, zh_blacklist_path
     )
 
     # Prime jieba with known Chinese proper nouns so they're recognized as tokens
@@ -998,6 +1007,8 @@ def main():
                              'search=batch find user-provided error patterns')
     parser.add_argument('--glossary', help='Path to proper-nouns.md (known terms)')
     parser.add_argument('--mappings', help='Path to noun_mappings.json (known ja→zh)')
+    parser.add_argument('--zh-blacklist',
+                        help='Path to JSON array of Chinese common words to exclude')
     parser.add_argument('--source-dir',
                         help='Japanese source SRTs for cross-reference')
     parser.add_argument('--corrections',
@@ -1053,6 +1064,7 @@ def main():
         source_dir=args.source_dir,
         limit=args.limit or None,
         max_singletons=args.max_singletons if args.max_singletons > 0 else None,
+        zh_blacklist_path=args.zh_blacklist,
     )
 
     # Format output

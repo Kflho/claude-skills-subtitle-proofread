@@ -168,6 +168,10 @@ def stage_review(project_dir, target_dir, source_dir, mappings_path, limit=None)
         cmd.extend(['--source-dir', source_dir])
     if os.path.exists(mappings_path):
         cmd.extend(['--mappings', mappings_path])
+    # Pass external Chinese common word blacklist if exists
+    bl_path = os.path.join(project_dir, 'temp', 'zh_common_blacklist.json')
+    if os.path.exists(bl_path):
+        cmd.extend(['--zh-blacklist', bl_path])
     if limit:
         cmd.extend(['--limit', str(limit)])
 
