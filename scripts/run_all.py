@@ -574,8 +574,7 @@ def step_polish(project_dir, target_dir=None):
 def _wire_suspect_nouns_to_report(suspect_json_path, report_path):
     """Read suspect_nouns.json and write entries to report layer '3'.
 
-    Groups are reported as suspect clusters; singletons as individual candidates.
-    Each entry includes context so the AI reviewer can quickly assess.
+    Handles both legacy format (groups+singletons) and new unified candidates format.
     """
     import json as _json
     try:
@@ -586,35 +585,72 @@ def _wire_suspect_nouns_to_report(suspect_json_path, report_path):
 
     entries = []
 
-    # Groups → report as clusters with canonical form
-    for g in data.get('groups', []):
-        variants = g.get('variants', [])
-        source_ja = g.get('source_ja', g.get('suspected_canonical', '?'))
-        reason = g.get('reason', '')
-        for v in variants[:5]:  # cap per group
-            ctx_list = v.get('contexts', []) if isinstance(v, dict) else []
-            ctx_text = ctx_list[0].get('cue_text', '')[:40] if ctx_list else ''
-            entries.append({
-                'ep': v.get('ep', '') if isinstance(v, dict) else '',
-                'time': v.get('cue_start', '') if isinstance(v, dict) else '',
-                'original': v['text'] if isinstance(v, dict) else v,
-                'corrected': f'→ {g["suspected_canonical"]} (ja: {source_ja[:30]})',
-                'status': '⬜',
-                'note': f'{reason}; ctx: {ctx_text}',
-            })
+    # ── New unified candidates format ──
+    if 'candidates' in data:
+        for c in data['candidates'][:80]:  # cap for report
+            ctype = c.get('type', '')
+            if ctype == 'inconsistency':
+                zh_wrong = ''
+                zh_right = c.get('zh_canonical_in_mappings', '')
+                ja_src = c.get('ja_source', '')[:30]
+                for a in c.get('zh_appearances', []):
+                    if a.get('text', '') != zh_right:
+                        zh_wrong = a.get('text', '')
+                        break
+                locs = c.get('sample_contexts', [])
+                ctx_text = locs[0].get('zh_text', '')[:40] if locs else ''
+                ts = locs[0].get('timestamp', '') if locs else ''
+                fn = locs[0].get('file', '') if locs else ''
+                entries.append({
+                    'ep': fn[-20:],
+                    'time': ts,
+                    'original': zh_wrong,
+                    'corrected': f'→ {zh_right} (ja: {ja_src})',
+                    'status': '⬜',
+                    'note': f'inconsistency; ctx: {ctx_text}',
+                })
+            elif ctype == 'unknown_suspect':
+                ctxs = c.get('sample_contexts', [])
+                ctx_text = ctxs[0].get('zh_text', '')[:40] if ctxs else ''
+                ts = ctxs[0].get('timestamp', '') if ctxs else ''
+                fn = ctxs[0].get('file', '') if ctxs else ''
+                entries.append({
+                    'ep': fn[-20:],
+                    'time': ts,
+                    'original': c.get('zh_term', ''),
+                    'corrected': '',
+                    'status': '⬜',
+                    'note': f'unknown_suspect (×{c.get("frequency", 0)}); ctx: {ctx_text}',
+                })
+    else:
+        # ── Legacy format (groups + singletons) ──
+        for g in data.get('groups', []):
+            variants = g.get('variants', [])
+            source_ja = g.get('source_ja', g.get('suspected_canonical', '?'))
+            reason = g.get('reason', '')
+            for v in variants[:5]:
+                ctx_list = v.get('contexts', []) if isinstance(v, dict) else []
+                ctx_text = ctx_list[0].get('cue_text', '')[:40] if ctx_list else ''
+                entries.append({
+                    'ep': v.get('ep', '') if isinstance(v, dict) else '',
+                    'time': v.get('cue_start', '') if isinstance(v, dict) else '',
+                    'original': v['text'] if isinstance(v, dict) else v,
+                    'corrected': f'→ {g["suspected_canonical"]} (ja: {source_ja[:30]})',
+                    'status': '⬜',
+                    'note': f'{reason}; ctx: {ctx_text}',
+                })
 
-    # Singletons → report as individual suspects
-    for s in data.get('singletons', [])[:30]:
-        ctx = s.get('contexts', [{}])
-        ctx_text = ctx[0].get('cue_text', '')[:40] if ctx else ''
-        entries.append({
-            'ep': s.get('eps', [''])[0] if s.get('eps') else '',
-            'time': ctx[0].get('cue_start', '') if ctx else '',
-            'original': s['text'],
-            'corrected': '',
-            'status': '⬜',
-            'note': f'{s.get("reason", "")} (×{s.get("count", 0)}); ctx: {ctx_text}',
-        })
+        for s in data.get('singletons', [])[:30]:
+            ctx = s.get('contexts', [{}])
+            ctx_text = ctx[0].get('cue_text', '')[:40] if ctx else ''
+            entries.append({
+                'ep': s.get('eps', [''])[0] if s.get('eps') else '',
+                'time': ctx[0].get('cue_start', '') if ctx else '',
+                'original': s['text'],
+                'corrected': '',
+                'status': '⬜',
+                'note': f'{s.get("reason", "")} (×{s.get("count", 0)}); ctx: {ctx_text}',
+            })
 
     if entries:
         _replace_layer(report_path, step='3', entries=entries)

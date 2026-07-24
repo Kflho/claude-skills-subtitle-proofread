@@ -220,6 +220,21 @@ def _segment_ja(text):
     return tokens
 
 
+def _prime_jieba_with_known(known_zh_terms):
+    """Pre-register known Chinese proper nouns in jieba's dictionary.
+
+    Without this, rare names like '阿托姆' get split into '阿'+'托姆'
+    and never match as a suspect token.
+    """
+    jieba_mod = _get_jieba()
+    if not jieba_mod:
+        return
+    for term in known_zh_terms:
+        if term and len(term) >= 2:
+            # High frequency ensures jieba prefers these as whole tokens
+            jieba_mod.add_word(term, freq=99999)
+
+
 def _segment_zh(text):
     """Segment Chinese text into word tokens using jieba."""
     jieba_mod = _get_jieba()
@@ -271,7 +286,7 @@ def _is_in_name_context(cue_text, token, lang='ja'):
 
 def find_suspect_nouns(input_dir, lang='ja', mode='source',
                        glossary_path=None, mappings_path=None,
-                       source_dir=None, limit=None):
+                       source_dir=None, limit=None, max_singletons=50):
     """Scan SRT files for suspected proper nouns.
 
     Args:
@@ -289,6 +304,10 @@ def find_suspect_nouns(input_dir, lang='ja', mode='source',
     known_ja, known_zh, ja_to_zh = _load_known_terms(
         glossary_path, mappings_path, lang
     )
+
+    # Prime jieba with known Chinese proper nouns so they're recognized as tokens
+    if lang == 'zh':
+        _prime_jieba_with_known(known_zh)
 
     # Collect SRT files
     srt_files = sorted([
@@ -419,7 +438,7 @@ def find_suspect_nouns(input_dir, lang='ja', mode='source',
 
     return {
         'groups': groups,
-        'singletons': singletons[:50],  # cap for AI review
+        'singletons': singletons if max_singletons is None else singletons[:max_singletons],
     }
 
 
@@ -460,8 +479,8 @@ def _cluster_by_source(suspects, target_dir, source_dir, ja_to_zh, known_ja=None
     if known_ja is None:
         known_ja = set()
 
-    # Build reverse index: Japanese source term (normalized) → set of Chinese translations
-    ja_norm_to_zh_variants = defaultdict(set)
+    # Build reverse index: Japanese source term (normalized) → {zh_term: [locations]}
+    ja_norm_to_zh_variants = defaultdict(lambda: defaultdict(list))
     # Also: normalized ja → original ja surface forms
     ja_norm_to_surfaces = defaultdict(set)
 
@@ -486,7 +505,7 @@ def _cluster_by_source(suspects, target_dir, source_dir, ja_to_zh, known_ja=None
 
     suspect_set = {s['text'] for s in suspects}
 
-    for ep, target_file in sorted(target_by_ep.items())[:20]:  # sample first 20 EPs
+    for ep, target_file in sorted(target_by_ep.items()):
         if ep not in source_by_ep:
             continue
 
@@ -519,20 +538,30 @@ def _cluster_by_source(suspects, target_dir, source_dir, ja_to_zh, known_ja=None
                     # (e.g. トビ ⊂ トビラ → both refer to Tobio/飞雄)
                     is_mapped = ja_norm in ja_to_zh or ja_term in known_ja
                     if not is_mapped:
-                        for known_key in ja_to_zh:
-                            if (len(ja_norm) >= 2 and len(known_key) >= 2
-                                    and (ja_norm in known_key
-                                         or known_key in ja_norm)):
-                                is_mapped = True
-                                break
+                        # Substring match only for readings >= 4 chars
+                        # Shorter readings (like アイ) match too many false positives
+                        MIN_SUBSTR = 4
+                        if len(ja_norm) >= MIN_SUBSTR:
+                            for known_key in ja_to_zh:
+                                if (len(known_key) >= MIN_SUBSTR
+                                        and (ja_norm in known_key
+                                             or known_key in ja_norm)):
+                                    is_mapped = True
+                                    break
                     if not is_mapped:
                         continue
-                    ja_norm = _norm_ja_reading(ja_term)
-                    if not ja_norm or len(ja_norm) < 2:
+                    ja_norm2 = _norm_ja_reading(ja_term)
+                    if not ja_norm2 or len(ja_norm2) < 2:
                         continue
-                    ja_norm_to_surfaces[ja_norm].add(ja_term)
-                    ja_norm_to_zh_variants[ja_norm].add(zh_term)
-                    zh_to_ja_norms[zh_term].add(ja_norm)
+                    ja_norm_to_surfaces[ja_norm2].add(ja_term)
+                    location = {
+                        'file': target_file,
+                        'cue_index': i,
+                        'timestamp': tc.get('start', ''),
+                        'text': tc.get('text', '')[:120],
+                    }
+                    ja_norm_to_zh_variants[ja_norm2][zh_term].append(location)
+                    zh_to_ja_norms[zh_term].add(ja_norm2)
 
     # Build ALL ja_norm → zh_variant pairs first (even singletons)
     all_groups = []
@@ -551,7 +580,8 @@ def _cluster_by_source(suspects, target_dir, source_dir, ja_to_zh, known_ja=None
             'source_ja_norm': ja_norm,
             'reason': f'日语"{ja_norm}"',
             'variants': [
-                {'text': v, 'eps': []} for v in sorted(zh_variants)
+                {'text': v, 'eps': [], 'locations': locs[:20]}
+                for v, locs in sorted(zh_variants.items())
             ],
         })
 
@@ -826,6 +856,131 @@ def _apply_correction_fixes(input_dir, results):
 
 
 # ═══════════════════════════════════════════════════════════════
+# Output formatting — raw groups+singletons → unified candidates
+# ═══════════════════════════════════════════════════════════════
+
+def _format_candidates(raw_result, ja_to_zh, output_path):
+    """Transform raw groups+singletons into unified AI-review candidates.
+
+    Produces a flat list of candidates, each with type, source info,
+    appearances, and sample contexts for AI review.
+    """
+    candidates = []
+    cid = 0
+
+    # ── Groups → inconsistency candidates ──
+    for g in raw_result.get('groups', []):
+        source_ja = g.get('source_ja', '')
+        canonical = g.get('suspected_canonical', '')
+
+        # Skip placeholder canonicals
+        if not canonical or canonical.startswith('[未知:'):
+            continue
+
+        # Collect all appearances (canonical + wrong variants)
+        appearances = []
+        wrong_variants = []
+
+        for v in g.get('variants', []):
+            if not isinstance(v, dict):
+                continue
+            text = v.get('text', '')
+            locations = v.get('locations', [])
+            if text == canonical:
+                appearances.append({
+                    'text': text,
+                    'count': len(locations),
+                    'sample_locations': locations[:3],
+                })
+            else:
+                wrong_variants.append({
+                    'text': text,
+                    'count': len(locations),
+                    'sample_locations': locations[:10],
+                })
+
+        # Only report if there are actual wrong variants
+        if not wrong_variants:
+            continue
+
+        # Extract sample contexts from wrong variant locations
+        sample_contexts = []
+        for wv in wrong_variants:
+            for loc in wv.get('sample_locations', [])[:3]:
+                if len(sample_contexts) >= 5:
+                    break
+                sample_contexts.append({
+                    'file': loc.get('file', ''),
+                    'timestamp': loc.get('timestamp', ''),
+                    'zh_text': loc.get('text', '')[:120],
+                })
+
+        cid += 1
+        candidates.append({
+            'id': cid,
+            'type': 'inconsistency',
+            'ja_source': source_ja,
+            'zh_canonical_in_mappings': canonical,
+            'zh_appearances': appearances + wrong_variants,
+            'sample_contexts': sample_contexts,
+        })
+
+    # ── Singletons → unknown suspect candidates ──
+    for s in raw_result.get('singletons', []):
+        text = s.get('text', '')
+        if not text or len(text) < 2:
+            continue
+        # Skip if already a known Chinese mapping value
+        if text in ja_to_zh.values():
+            continue
+
+        ctxs = s.get('contexts', [])
+        locations = []
+        for ctx in ctxs[:10]:
+            locations.append({
+                'file': ctx.get('ep', '') if ctx.get('ep') else '',
+                'timestamp': ctx.get('cue_start', ''),
+                'text': ctx.get('cue_text', '')[:120],
+            })
+
+        cid += 1
+        candidates.append({
+            'id': cid,
+            'type': 'unknown_suspect',
+            'ja_source': '',
+            'zh_term': text,
+            'frequency': s.get('count', 0),
+            'in_mappings': text in ja_to_zh.values(),
+            'zh_appearances': [{
+                'text': text,
+                'count': s.get('count', 0),
+                'sample_locations': locations[:5],
+            }],
+            'sample_contexts': [
+                {'file': ctx.get('ep', '') if ctx.get('ep') else '',
+                 'timestamp': ctx.get('cue_start', ''),
+                 'zh_text': ctx.get('cue_text', '')[:120]}
+                for ctx in ctxs[:5]
+            ],
+        })
+
+    result = {
+        'candidates': candidates,
+        'stats': {
+            'total': len(candidates),
+            'inconsistency': sum(1 for c in candidates if c['type'] == 'inconsistency'),
+            'unknown_suspect': sum(1 for c in candidates if c['type'] == 'unknown_suspect'),
+        },
+    }
+
+    os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════
 # CLI
 # ═══════════════════════════════════════════════════════════════
 
@@ -853,6 +1008,11 @@ def main():
                         help='Output JSON path')
     parser.add_argument('--limit', type=int, default=0,
                         help='Max files to scan (for testing)')
+    parser.add_argument('--max-singletons', type=int, default=50,
+                        help='Max singletons to return (default: 50, 0=unlimited)')
+    parser.add_argument('--output-format', default='candidates',
+                        choices=['candidates', 'legacy'],
+                        help='Output format: candidates (unified AI review) or legacy (raw)')
     args = parser.parse_args()
 
     if not os.path.isdir(args.input_dir):
@@ -892,29 +1052,47 @@ def main():
         mappings_path=args.mappings,
         source_dir=args.source_dir,
         limit=args.limit or None,
+        max_singletons=args.max_singletons if args.max_singletons > 0 else None,
     )
 
-    # Write output
-    os.makedirs(os.path.dirname(args.output) or '.', exist_ok=True)
-    with open(args.output, 'w', encoding='utf-8') as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
+    # Format output
+    output_format = getattr(args, 'output_format', 'legacy')
+    if output_format == 'candidates':
+        # Transform raw groups+singletons into unified review candidates
+        ja_to_zh = {}
+        if args.mappings and os.path.exists(args.mappings):
+            with open(args.mappings, 'r', encoding='utf-8') as f:
+                ja_to_zh = json.load(f)
+        written = _format_candidates(result, ja_to_zh, args.output)
+    else:
+        # Legacy raw format (backward compat)
+        os.makedirs(os.path.dirname(args.output) or '.', exist_ok=True)
+        with open(args.output, 'w', encoding='utf-8') as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        written = result
 
     n_groups = len(result['groups'])
     n_single = len(result['singletons'])
     total_group_variants = sum(len(g.get('variants', [])) for g in result['groups'])
     print(f'→ {args.output}', file=sys.stderr)
-    print(f'  Groups: {n_groups} ({total_group_variants} variants) | '
-          f'Singletons: {n_single}', file=sys.stderr)
-
-    # Quick summary for AI
-    if result['groups']:
-        print('\n[SUSPECT GROUPS]', file=sys.stderr)
-        for g in result['groups'][:10]:
-            variants_str = ', '.join(
-                v['text'] for v in g.get('variants', [])[:5]
-            )
-            print(f'  {g["suspected_canonical"]} ← [{variants_str}]',
-                  file=sys.stderr)
+    if output_format == 'candidates':
+        n_candidates = len(written.get('candidates', []))
+        n_inc = sum(1 for c in written.get('candidates', []) if c.get('type') == 'inconsistency')
+        n_unk = n_candidates - n_inc
+        print(f'  Candidates: {n_candidates} ({n_inc} inconsistencies, {n_unk} unknown)',
+              file=sys.stderr)
+    else:
+        print(f'  Groups: {n_groups} ({total_group_variants} variants) | '
+              f'Singletons: {n_single}', file=sys.stderr)
+        # Quick summary for AI
+        if result['groups']:
+            print('\n[SUSPECT GROUPS]', file=sys.stderr)
+            for g in result['groups'][:10]:
+                variants_str = ', '.join(
+                    v['text'] for v in g.get('variants', [])[:5]
+                )
+                print(f'  {g["suspected_canonical"]} ← [{variants_str}]',
+                      file=sys.stderr)
 
 
 if __name__ == '__main__':
