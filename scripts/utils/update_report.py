@@ -22,6 +22,7 @@
                       time='00:02:00.490', corrected='行くぞ', status='✅')
 """
 
+import json
 import os
 import re
 import datetime
@@ -101,6 +102,21 @@ def get_relevant_layers(target_lang='ja', fmt='srt', has_reference=False,
     return relevant
 
 # ═══════════════════════════════════════════════════════════════
+# JSON 存储路径
+# ═══════════════════════════════════════════════════════════════
+
+def _json_path(md_path):
+    """从 Markdown 报告路径推导 JSON 权威存储路径。
+
+    temp/report.json 是权威存储；
+    reports/问题解决报告.md 是人类可读的导出格式。
+    """
+    reports_dir = os.path.dirname(os.path.abspath(md_path))
+    project_dir = os.path.dirname(reports_dir)
+    return os.path.join(project_dir, 'temp', 'report.json')
+
+
+# ═══════════════════════════════════════════════════════════════
 # 报告头模板
 # ═══════════════════════════════════════════════════════════════
 
@@ -168,16 +184,15 @@ def _parse_table_row(line):
     }
 
 
-def read_report(path):
-    """读取统一报告，返回 {layer_id: [entries]}。
-    layer_id 为字符串 ('1', '2', '3', '3.5', '4', '5', '6')。
-    兼容旧格式（步骤N → 自动映射到新层号）。
-    如果文件不存在，返回空 dict。
+def _migrate_from_md(md_path):
+    """一次性迁移：从现有 Markdown 报告解析结构化数据。
+
+    由 read_report() 自动调用（仅在 JSON 不存在但 MD 存在时）。
     """
-    if not os.path.exists(path):
+    if not os.path.exists(md_path):
         return {}
 
-    with open(path, 'r', encoding='utf-8') as f:
+    with open(md_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
     data = OrderedDict()
@@ -185,7 +200,6 @@ def read_report(path):
 
     for line in lines:
         line = line.rstrip('\n')
-        # 检测层标题
         layer_match = _parse_layer_header(line)
         if layer_match:
             current_layer = layer_match[0]
@@ -193,13 +207,49 @@ def read_report(path):
                 data[current_layer] = []
             continue
 
-        # 在层内解析表格行
         if current_layer is not None:
             entry = _parse_table_row(line)
             if entry:
                 data[current_layer].append(entry)
 
     return data
+
+
+def read_report(path):
+    """读取统一报告，返回 {layer_id: [entries]}。
+
+    从 temp/report.json（权威存储）加载。
+    首次运行时自动从 Markdown 迁移到 JSON。
+
+    layer_id 为字符串 ('2', '2.5', '3', '3.5', '4', '6')。
+    如果 JSON 和 MD 都不存在，返回空 dict。
+    """
+    json_path = _json_path(path)
+
+    # Fast path: JSON 权威存储已存在
+    if os.path.exists(json_path):
+        with open(json_path, 'r', encoding='utf-8') as f:
+            raw = json.load(f)
+        layers = raw.get('layers', {})
+        # 保持 LAYER_NAMES 的顺序
+        data = OrderedDict()
+        for lid in LAYER_NAMES:
+            if lid in layers:
+                data[lid] = layers[lid]
+        # 保留 LAYER_NAMES 之外的其他层
+        for lid, entries in layers.items():
+            if lid not in data:
+                data[lid] = entries
+        return data
+
+    # 迁移路径：MD 存在但 JSON 不存在 → 一次性迁移
+    if os.path.exists(path):
+        data = _migrate_from_md(path)
+        if data:
+            write_report(path, data)  # 持久化到 JSON + 重新生成 MD
+            return data
+
+    return {}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -255,7 +305,37 @@ def _count_summary(data):
 
 
 def write_report(path, data):
-    """将结构化数据写回 markdown 文件。"""
+    """将结构化数据写入 JSON 权威存储 + 重新生成 Markdown 导出。
+
+    JSON 路径: temp/report.json（机器可读，权威存储）
+    MD 路径:   reports/问题解决报告.md（人类可读，导出格式）
+    """
+    json_path = _json_path(path)
+
+    # ── 构建 JSON 结构 ──
+    layers = OrderedDict()
+    for lid in LAYER_NAMES:
+        if lid in data:
+            layers[lid] = data[lid]
+    # 保留 LAYER_NAMES 之外的其他层
+    for lid, entries in data.items():
+        if lid not in layers:
+            layers[lid] = entries
+
+    report = {
+        'version': 1,
+        'updated': datetime.datetime.now().isoformat(timespec='seconds'),
+        'layers': layers,
+    }
+
+    # ── 写 JSON（原子性：先写临时文件再 rename）──
+    os.makedirs(os.path.dirname(json_path), exist_ok=True)
+    tmp_path = json_path + '.tmp'
+    with open(tmp_path, 'w', encoding='utf-8') as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, json_path)
+
+    # ── 写 Markdown 导出 ──
     fixed, pending, deleted = _count_summary(data)
     today = datetime.date.today().isoformat()
 
