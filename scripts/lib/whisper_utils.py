@@ -296,93 +296,42 @@ def classify_garbled_text(text, target_lang='ja'):
 # ═══════════════════════════════════════════════════════════════
 
 def parse_srt(path, mark_garbled=True, op_boundary=OP_BOUNDARY_SEC, ed_boundary=ED_BOUNDARY_SEC, target_lang='ja'):
-    """解析 SRT 文件，返回带时间戳的 cue 列表。
-    每个 cue: {start, end, start_s, end_s, text, line, is_garbled?, garbled_type?}
-
-    Args:
-        op_boundary: OP 豁免边界（开头 N 秒不标记乱码），默认 95s
-        ed_boundary: ED 豁免边界（结尾 N 秒不标记乱码），默认 120s
-        target_lang: 目标语言 'ja'|'zh'，影响乱码判断
-    """
-    from lib.srt_utils import read_srt_file, parse_srt_cue
-
-    lines = read_srt_file(path)
-    cues, idx = [], 0
-    while idx < len(lines):
-        cue, idx = parse_srt_cue(lines, idx)
-        if cue is None:
-            idx += 1
-            continue
-        c = {
-            'start': cue['start'],
-            'end': cue['end'],
-            'text': cue['text'].strip(),
-            'line': cue.get('_start_line'),
-            'start_s': to_seconds(cue['start']),
-            'end_s': to_seconds(cue['end']),
-        }
-        if mark_garbled:
-            classification = classify_garbled_text(c['text'], target_lang=target_lang)
-            c['is_garbled'] = (classification['type'] == 'garbled')
-            c['garbled_type'] = classification['type']
-        cues.append(c)
-
-    # OP/ED 豁免
-    if mark_garbled and cues:
-        max_end_s = max(c['end_s'] for c in cues)
-        ed_start = max(0, max_end_s - ed_boundary)
-        for c in cues:
-            if c.get('is_garbled') and (
-                c['start_s'] < op_boundary or c['start_s'] > ed_start
-            ):
-                c['is_garbled'] = False
-                c['garbled_type'] = 'clean'
-
-    return cues
+    """解析 SRT 文件，返回带时间戳的 cue 列表。（委托到 subtitle_io）"""
+    from lib.subtitle_io import read_subtitles
+    # subtitle_io uses its own OP/ED constants; ignore passed boundaries
+    # (they were always the defaults in practice)
+    return read_subtitles(path, mark_garbled=mark_garbled, target_lang=target_lang)
 
 
 def write_srt(path, cues):
-    """将 cue 列表写回 SRT 文件。"""
-    def _norm_ts(ts):
-        """Normalize timestamp: last dot before space/end → comma (SRT spec)."""
-        ts = ts.strip()
-        # Replace the last '.' in the timestamp part with ',' (SRT standard)
-        # Pattern: HH:MM:SS.mmm → HH:MM:SS,mmm
-        if '.' in ts:
-            # Find the last '.' in the timestamp (before any non-digit tail)
-            parts = ts.split('.')
-            if len(parts) == 2:
-                # Only one dot: HH:MM:SS.mmm
-                ts = f'{parts[0]},{parts[1]}'
-        return ts
-
-    os.makedirs(os.path.dirname(path) if os.path.dirname(path) else '.', exist_ok=True)
-    with open(path, 'w', encoding='utf-8-sig') as f:
-        for i, c in enumerate(cues, 1):
-            f.write(f'{i}\n')
-            f.write(f'{_norm_ts(c["start"])} --> {_norm_ts(c["end"])}\n')
-            f.write(f'{c["text"]}\n\n')
+    """将 cue 列表写回 SRT 文件。（委托到 subtitle_io）"""
+    from lib.subtitle_io import write_subtitles
+    write_subtitles(path, cues)
 
 
 def apply_fixes_to_srt(path, fixes):
-    """将修复列表写入 SRT。fixes: [{'start': '...', 'replacement': '...'}, ...]
-    返回成功修复数。已正确的 cue 计入 fixed 但不重写。
+    """将修复列表写入 SRT。（委托到 subtitle_io）
+
+    支持两种 fixes 格式：
+      旧格式（无 action）：[{'start': '...', 'replacement': '...'}, ...]
+      新格式（有 action）：[{'action': 'replace_text', 'start': '...', 'replacement': '...'}, ...]
+
+    向后兼容：读文件→在cue上应用修复→写回。
     """
-    cues = parse_srt(path, mark_garbled=False)
+    from lib.subtitle_io import read_subtitles, write_subtitles
+    cues = read_subtitles(path, mark_garbled=False)
     fixed = 0
-    changed = False
     for cue in cues:
         for f in fixes:
-            if f['start'] == cue['start'] and f.get('replacement'):
+            if f.get('start') == cue['start'] and f.get('replacement'):
                 if cue['text'] == f['replacement']:
-                    fixed += 1  # Already correct — count but don't rewrite
+                    fixed += 1  # Already correct
                     break
                 cue['text'] = f['replacement']
                 fixed += 1
-                changed = True
                 break
-    if changed:
-        write_srt(path, cues)
+    if fixed > 0:
+        write_subtitles(path, cues)
     return fixed
 
 
@@ -486,27 +435,15 @@ def write_ass_cues(path, cues):
 def parse_subtitles(path, mark_garbled=True,
                     op_boundary=OP_BOUNDARY_SEC, ed_boundary=ED_BOUNDARY_SEC,
                     target_lang='ja'):
-    """解析字幕文件（SRT 或 ASS），自动检测格式。
-
-    Returns:
-        与 parse_srt() 相同格式的 cue 列表
-    """
-    if path.lower().endswith('.ass'):
-        return parse_ass_cues(path, mark_garbled=mark_garbled,
-                              op_boundary=op_boundary, ed_boundary=ed_boundary,
-                              target_lang=target_lang)
-    else:
-        return parse_srt(path, mark_garbled=mark_garbled,
-                         op_boundary=op_boundary, ed_boundary=ed_boundary,
-                         target_lang=target_lang)
+    """解析字幕文件，自动检测格式。（委托到 subtitle_io）"""
+    from lib.subtitle_io import read_subtitles
+    return read_subtitles(path, mark_garbled=mark_garbled, target_lang=target_lang)
 
 
 def write_subtitles(path, cues):
-    """写回字幕文件（SRT 或 ASS），自动检测格式。"""
-    if path.lower().endswith('.ass'):
-        return write_ass_cues(path, cues)
-    else:
-        return write_srt(path, cues)
+    """写回字幕文件，自动检测格式。（委托到 subtitle_io）"""
+    from lib.subtitle_io import write_subtitles as _write
+    _write(path, cues)
 
 
 # ═══════════════════════════════════════════════════════════════

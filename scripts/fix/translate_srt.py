@@ -132,10 +132,7 @@ def baidu_translate(text, appid, secret, source='auto', target='ja', endpoint=No
 # SRT parsing
 # ═══════════════════════════════════════════════════════════════
 
-def parse_srt_cues(path):
-    """Parse SRT into list of {start, end, start_s, end_s, text, ...}."""
-    from lib.whisper_utils import parse_srt as _parse
-    return _parse(path, mark_garbled=False)
+# parse_srt_cues: use lib.subtitle_io.read_subtitles or lib.whisper_utils.parse_srt directly
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -218,7 +215,8 @@ Examples:
         args.endpoint = config_endpoint or BAIDU_API
 
     # Parse input
-    cues = parse_srt_cues(args.input)
+    from lib.subtitle_io import read_subtitles
+    cues = read_subtitles(args.input, mark_garbled=False)
     print(f'Input: {args.input} ({len(cues)} cues)', file=sys.stderr)
 
     if not cues:
@@ -235,7 +233,8 @@ Examples:
     # Resume: load already translated
     translated_set = set()
     if args.resume and os.path.exists(args.output):
-        existing = parse_srt_cues(args.output)
+        from lib.subtitle_io import read_subtitles
+        existing = read_subtitles(args.output, mark_garbled=False)
         translated_set = {c['start'] for c in existing}
         print(f'Resume: {len(translated_set)} already translated', file=sys.stderr)
 

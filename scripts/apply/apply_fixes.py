@@ -74,239 +74,121 @@ from lib.ass_utils import (
     read_ass_file, write_ass_file, iter_ass_files
 )
 
-from lib import srt_utils
+from lib.subtitle_io import (
+    read_subtitles, write_subtitles, apply_fixes_to_cues,
+    _find_cue as _find_cue_by_timecode,
+)
 
 
 # ═══════════════════════════════════════════════════════════════
-# SRT 辅助函数
+# SRT 辅助函数 — 使用 cue 模型（subtitle_io）
 # ═══════════════════════════════════════════════════════════════
 
 def _is_srt(path: str) -> bool:
     return path.lower().endswith('.srt')
 
 
-def _parse_srt_cues(lines: list[str]) -> list[dict]:
-    """将 SRT 文件行列表解析为 cue 列表。
+def _load_srt_cues(fpath: str) -> list[dict]:
+    """Load SRT file as cue dicts via subtitle_io."""
+    return read_subtitles(fpath, mark_garbled=False)
 
-    每个 cue 包含: cue_dict (同 parse_srt_cue) + _start_line / _end_line
-    """
-    cues = []
-    idx = 0
-    while idx < len(lines):
-        start_idx = idx
-        cue, idx = srt_utils.parse_srt_cue(lines, idx)
-        if cue is None:
-            idx += 1
-            continue
-        cue['_start_line'] = start_idx
-        cue['_end_line'] = idx - 1  # 最后一个有效行的索引
-        cues.append(cue)
-    return cues
+
+def _save_srt_cues(fpath: str, cues: list[dict]):
+    """Write cue dicts back to SRT file via subtitle_io."""
+    write_subtitles(fpath, cues)
 
 
 def _find_srt_cue_by_line(cues: list[dict], line_num: int) -> dict | None:
-    """通过 1-based 行号查找包含该行的 SRT cue。"""
-    line_idx = line_num - 1  # 转为 0-based
+    """Find cue by 1-based line number (fallback, kept for backward compat)."""
+    line_idx = line_num - 1
     for cue in cues:
-        if cue['_start_line'] <= line_idx <= cue['_end_line']:
+        sl = cue.get('_start_line', -1)
+        if sl <= line_idx <= sl + 4:  # SRT blocks are ~4 lines
             return cue
     return None
 
 
-def _rebuild_srt_lines(cues: list[dict]) -> list[str]:
-    """从 cue 列表重建 SRT 文件行列表。"""
-    lines = []
-    for i, cue in enumerate(cues):
-        lines.extend(srt_utils.build_srt_cue_lines(cue))
-    return lines
+def _find_srt_cue(cues: list[dict], fix: dict) -> dict | None:
+    """Find cue by 'start' timecode (primary) or 'line' number (fallback)."""
+    return _find_cue_by_timecode(cues, fix)
 
 
-def _find_srt_cues_range(cues: list[dict], start_line: int, count: int) -> list[dict]:
-    """从起始行号找到连续的 count 个 SRT cues。"""
-    start_idx = None
-    for i, cue in enumerate(cues):
-        line_idx = start_line - 1
-        if cue['_start_line'] <= line_idx <= cue['_end_line']:
-            start_idx = i
-            break
-    if start_idx is None:
-        return []
-    end_idx = min(start_idx + count, len(cues))
-    return cues[start_idx:end_idx]
-
-
-def apply_replace_text(lines, fix):
-    """替换指定行的 text 字段。支持 ASS 和 SRT。"""
-    i = fix['line'] - 1  # 转为 0-index
-    if i < 0 or i >= len(lines):
-        return False, f"行号 {fix['line']} 超出范围"
-
-    # SRT 格式：需要找到对应的 cue 块
-    if _is_srt(fix.get('file', '')):
-        cues = _parse_srt_cues(lines)
-        cue = _find_srt_cue_by_line(cues, fix['line'])
-        if cue is None:
-            return False, f"第 {fix['line']} 行不在任何 SRT cue 中"
-        old = cue['text']
-        if old == fix['replacement']:
-            return True, f"already correct: {old[:40]}"
-        cue['text'] = fix['replacement']
-        # 重建文件行
-        new_lines = _rebuild_srt_lines(cues)
-        lines.clear()
-        lines.extend(new_lines)
-        return True, f"{old[:40]} → {fix['replacement'][:40]}"
-
-    # ASS 格式
-    d = parse_dialogue(lines[i])
-    if d is None:
-        return False, f"第 {fix['line']} 行不是 Dialogue 行"
-    old = d['text']
-    d['text'] = fix['replacement']
-    lines[i] = build_dialogue_line(d) + '\n'
+def apply_replace_text(cues, fix):
+    """Replace text of a single cue (cue model)."""
+    cue = _find_srt_cue(cues, fix)
+    if cue is None:
+        return False, f"未找到 cue: start={fix.get('start', '?')}, line={fix.get('line', '?')}"
+    old = cue['text']
+    if old == fix['replacement']:
+        return True, f"already correct: {old[:40]}"
+    cue['text'] = fix['replacement']
     return True, f"{old[:40]} → {fix['replacement'][:40]}"
 
 
-def apply_replace_name(lines, fix):
-    """替换指定行的 Name 字段（仅 ASS）。"""
-    i = fix['line'] - 1
-    if i < 0 or i >= len(lines):
-        return False, f"行号 {fix['line']} 超出范围"
-    # SRT 无 Name 字段
-    if _is_srt(fix.get('file', '')):
-        return False, "SRT 文件不支持 Name 字段替换"
-    d = parse_dialogue(lines[i])
-    if d is None:
-        return False, f"第 {fix['line']} 行不是 Dialogue 行"
-    old = d['name']
-    d['name'] = fix['replacement']
-    lines[i] = build_dialogue_line(d) + '\n'
-    return True, f"Name: {old} → {fix['replacement']}"
+def apply_delete_line(cues, fix):
+    """Delete a single cue from the list."""
+    cue = _find_srt_cue(cues, fix)
+    if cue is None:
+        return True, f"already deleted: line {fix.get('line', '?')}"
+    old_text = cue['text'][:40]
+    cues.remove(cue)
+    return True, f"删除 SRT cue: {old_text}"
 
 
-def apply_delete_line(lines, fix):
-    """删除指定行。SRT 格式会删除整个 cue 块。"""
-    i = fix['line'] - 1
-    if i < 0 or i >= len(lines):
-        return False, f"行号 {fix['line']} 超出范围"
-
-    # SRT 格式：删除整个 cue 块
-    if _is_srt(fix.get('file', '')):
-        cues = _parse_srt_cues(lines)
-        cue = _find_srt_cue_by_line(cues, fix['line'])
-        if cue is None:
-            return True, f"already deleted: line {fix['line']}"
-        old_text = cue['text'][:40]
-        cues.remove(cue)
-        new_lines = _rebuild_srt_lines(cues)
-        lines.clear()
-        lines.extend(new_lines)
-        return True, f"删除 SRT cue: {old_text}"
-
-    # ASS 格式
-    old = lines[i].strip()[:60]
-    lines[i] = ''  # 标记为空，稍后过滤
-    return True, f"删除: {old}"
-
-
-def apply_merge_cues(lines, fix):
-    """合并相邻的 SRT cues（SRT 专用）。"""
-    if not _is_srt(fix.get('file', '')):
-        return False, "merge_cues 仅支持 SRT 格式"
-
+def apply_merge_cues(cues, fix):
+    """Merge consecutive cues in the cue list."""
     count = fix.get('count', 2)
-    cues = _parse_srt_cues(lines)
-    target_cues = _find_srt_cues_range(cues, fix['line'], count)
+    target = _find_srt_cue(cues, fix)
+    if target is None:
+        return False, f"未找到起始 cue"
 
-    if len(target_cues) < 2:
-        return False, f"起始行 {fix['line']} 附近未找到足够的 cues（需 {count}，找到 {len(target_cues)}）"
+    idx = cues.index(target)
+    if idx + count > len(cues):
+        return False, f"起始 cue 后不足 {count} 个 cues（仅 {len(cues) - idx}）"
 
-    # 合并 cues
-    merged_text_parts = []
-    for c in target_cues:
-        if c['text'].strip():
-            merged_text_parts.append(c['text'].strip())
+    target_cues = cues[idx:idx + count]
+    merged_parts = [c['text'].strip() for c in target_cues if c['text'].strip()]
+    merged_text = '\n'.join(merged_parts) if fix.get('multiline', True) else ' '.join(merged_parts)
 
-    merged_text = '\n'.join(merged_text_parts) if fix.get('multiline', True) else ' '.join(merged_text_parts)
+    target['text'] = merged_text
+    target['end'] = target_cues[-1]['end']
+    target['end_s'] = target_cues[-1]['end_s']
 
-    # 使用第一个 cue 的时间范围
-    target_cues[0]['text'] = merged_text
-    target_cues[0]['end'] = target_cues[-1]['end']
-    target_cues[0]['_end_line'] = target_cues[-1]['_end_line']
-
-    # 移除后续 cues
     for c in target_cues[1:]:
         cues.remove(c)
-
-    # 重建文件行
-    new_lines = _rebuild_srt_lines(cues)
-    lines.clear()
-    lines.extend(new_lines)
     return True, f"合并 {count} 个 cues: {merged_text[:60]}..."
 
 
-def _script_range(ch):
-    """Return a regex character class for the script of *ch*, or None."""
-    if '一' <= ch <= '鿿' or '㐀' <= ch <= '䶿':
-        return r'一-鿿㐀-䶿'          # kanji
-    if '぀' <= ch <= 'ゟ':
-        return r'぀-ゟ'                       # hiragana
-    if '゠' <= ch <= 'ヿ':
-        return r'゠-ヿ'                       # katakana
-    return None
-
-
-def _wrap_cjk_boundary(pattern, original):
-    """Wrap *pattern* with script-aware lookbehind/lookahead so it only
-    matches at the boundary of the same script class.
-
-    Prevents ``水博士`` from matching inside ``御茶水博士``, or
-    ``ラン`` from matching inside ``ウラン``.
-
-    *pattern* should already be ``re.escape``-d.
-    """
-    if not original:
-        return pattern
-
-    first_range = _script_range(original[0])
-    last_range = _script_range(original[-1])
-
-    bounded = pattern
-    if first_range:
-        bounded = r'(?<![' + first_range + r'])' + bounded
-    if last_range:
-        bounded = bounded + r'(?![' + last_range + r'])'
-    return bounded
-
-
 def apply_replace_global(fpath, fix):
-    """全局文本替换（不区分文件/行）。带 CJK 脚本边界保护，防止子串冲突。"""
-    with open(fpath, 'r', encoding='utf-8-sig' if _is_srt(fpath) else 'utf-8') as f:
-        content = f.read()
-
-    original = fix['original']
-    replacement = fix['replacement']
-
-    escaped = re.escape(original)
-    bounded = _wrap_cjk_boundary(escaped, original)
-    new_content, count = re.subn(bounded, replacement, content)
-
+    """Global text replacement — operates on cues, not raw file. Safer, no cross-line risk."""
+    cues = _load_srt_cues(fpath)
+    old = fix['original']
+    new = fix['replacement']
+    count = 0
+    for cue in cues:
+        if old in cue['text']:
+            cue['text'] = cue['text'].replace(old, new)
+            count += 1
     if count > 0:
-        with open(fpath, 'w', encoding='utf-8') as f:
-            f.write(new_content)
-        return True, f"全局替换 {count} 处（边界保护）"
-    return True, f"already correct: {original[:40]}"
+        _save_srt_cues(fpath, cues)
+        return True, f"全局替换 {count} 处"
+    return True, f"already correct: {old[:40]}"
 
 
 def apply_replace_global_regex(fpath, fix):
-    """全局正则替换。"""
-    with open(fpath, 'r', encoding='utf-8-sig' if _is_srt(fpath) else 'utf-8') as f:
-        content = f.read()
-    new_content, count = re.subn(fix['pattern'], fix['replacement'], content)
-    if count > 0:
-        with open(fpath, 'w', encoding='utf-8') as f:
-            f.write(new_content)
-        return True, f"正则替换 {count} 处"
+    """Global regex replacement — operates on cues, not raw file."""
+    cues = _load_srt_cues(fpath)
+    pat = fix['pattern']
+    repl = fix['replacement']
+    total = 0
+    for cue in cues:
+        new_text, n = re.subn(pat, repl, cue['text'])
+        if n > 0:
+            cue['text'] = new_text
+            total += n
+    if total > 0:
+        _save_srt_cues(fpath, cues)
+        return True, f"正则替换 {total} 处"
     return True, f"already correct (regex): {fix['pattern'][:40]}"
 
 
@@ -436,103 +318,163 @@ def main():
                 total_applied += 1
                 print(f"  [OK] {fix.get('note', fix['action'])} -> 影响 {applied} 个文件")
 
-    # 3. 逐文件逐行修复
+    # 3. 逐文件逐行修复（使用 cue 模型）
     if per_file_fixes:
         print("\n=== 逐行修复 ===\n")
         for fname, fpath in iter_ass_files(args.target_dir):
             if fname not in per_file_fixes:
                 continue
-            lines = read_ass_file(fpath)
 
-            # 预解析 SRT cues（用于获取时间码 + 时间码→行号转换）
-            srt_cues_cache = None
-            if _is_srt(fpath):
-                srt_cues_cache = _parse_srt_cues(lines)
-
-            # Resolve timecode-based fixes to line numbers (for noun_checker OP/ED fixes)
-            for fix in per_file_fixes.get(fname, []):
-                if 'line' not in fix and 'start' in fix and srt_cues_cache:
-                    for cue in srt_cues_cache:
-                        if cue.get('start', '').replace(',', '.') == fix['start'].replace(',', '.'):
-                            fix['line'] = cue['_start_line'] + 1  # 1-based line number
-                            break
-
-            # 按行号降序排列，避免 delete_line 导致后续修复行号偏移
-            file_fixes = sorted(per_file_fixes[fname], key=lambda f: f.get('line', 0), reverse=True)
-
-            applied = 0
+            file_fixes = per_file_fixes[fname]
             ep_tag = _extract_ep(fname)
-            for fix in file_fixes:
-                # 记录修复前信息（用于报告日志）
-                pre_time = ''
-                pre_text = ''
-                if srt_cues_cache:
-                    cue = _find_srt_cue_by_line(srt_cues_cache, fix.get('line', 0))
+
+            if _is_srt(fpath):
+                # ── SRT: load cues once, apply all fixes, save once ──
+                cues = _load_srt_cues(fpath)
+                applied = 0
+
+                for fix in file_fixes:
+                    action = fix['action']
+
+                    # Record pre-fix state for report
+                    pre_time = fix.get('start', '')
+                    pre_text = ''
+                    cue = _find_srt_cue(cues, fix)
                     if cue:
-                        pre_time = cue.get('start', '')
+                        pre_time = cue.get('start', pre_time)
                         pre_text = cue.get('text', '')[:120]
 
-                action = fix['action']
-                if action == 'replace_text':
-                    ok, msg = apply_replace_text(lines, fix)
-                elif action == 'replace_name':
-                    ok, msg = apply_replace_name(lines, fix)
-                elif action == 'delete_line':
-                    ok, msg = apply_delete_line(lines, fix)
-                elif action == 'merge_cues':
-                    ok, msg = apply_merge_cues(lines, fix)
-                else:
-                    ok, msg = False, f"未知 action: {action}"
-
-                if ok:
-                    is_already = 'already correct' in msg or 'already deleted' in msg
-                    if is_already:
-                        total_already += 1
+                    if action == 'replace_text':
+                        ok, msg = apply_replace_text(cues, fix)
+                    elif action == 'delete_line':
+                        ok, msg = apply_delete_line(cues, fix)
+                    elif action == 'merge_cues':
+                        ok, msg = apply_merge_cues(cues, fix)
+                    elif action == 'replace_name':
+                        ok, msg = False, "SRT 文件不支持 Name 字段替换"
                     else:
-                        applied += 1
-                        if args.log_to_report and args.step:
-                            if action == 'replace_text':
-                                report_entries.append({
-                                    'ep': ep_tag, 'time': pre_time,
-                                    'original': pre_text,
-                                    'corrected': fix.get('replacement', '')[:120],
-                                    'status': '✅',
-                                })
-                            elif action == 'delete_line':
-                                report_entries.append({
-                                    'ep': ep_tag, 'time': pre_time,
-                                    'original': pre_text,
-                                    'corrected': '(已删除)',
-                                    'status': '🗑️',
-                                })
-                            elif action == 'merge_cues':
-                                report_entries.append({
-                                    'ep': ep_tag, 'time': pre_time,
-                                    'original': pre_text,
-                                    'corrected': f'合并 {fix.get("count", 2)} 个 cues',
-                                    'status': '✅',
-                                })
-                            elif action == 'replace_name':
-                                report_entries.append({
-                                    'ep': ep_tag, 'time': pre_time,
-                                    'original': f'Name: {pre_text}',
-                                    'corrected': f'Name: {fix.get("replacement", "")}',
-                                    'status': '✅',
-                                })
-                else:
-                    total_skipped += 1
-                    print(f"  ✗ {fname}:{fix.get('line', '?')} - {msg}")
+                        ok, msg = False, f"未知 action: {action}"
 
-            if applied > 0:
-                if not args.dry_run:
-                    if _is_srt(fpath):
-                        # SRT: _rebuild_srt_lines 已更新 lines 内容，直接写入
-                        write_ass_file(fpath, lines)
+                    if ok:
+                        is_already = 'already correct' in msg or 'already deleted' in msg
+                        if is_already:
+                            total_already += 1
+                        else:
+                            applied += 1
+                            if args.log_to_report and args.step:
+                                if action == 'replace_text':
+                                    report_entries.append({
+                                        'ep': ep_tag, 'time': pre_time,
+                                        'original': pre_text,
+                                        'corrected': fix.get('replacement', '')[:120],
+                                        'status': '✅',
+                                    })
+                                elif action == 'delete_line':
+                                    report_entries.append({
+                                        'ep': ep_tag, 'time': pre_time,
+                                        'original': pre_text,
+                                        'corrected': '(已删除)',
+                                        'status': '🗑️',
+                                    })
+                                elif action == 'merge_cues':
+                                    report_entries.append({
+                                        'ep': ep_tag, 'time': pre_time,
+                                        'original': pre_text,
+                                        'corrected': f'合并 {fix.get("count", 2)} 个 cues',
+                                        'status': '✅',
+                                    })
                     else:
+                        total_skipped += 1
+                        print(f"  ✗ {fname}:{fix.get('line', fix.get('start', '?'))} - {msg}")
+
+                if applied > 0:
+                    if not args.dry_run:
+                        _save_srt_cues(fpath, cues)
+                    total_applied += applied
+                    print(f"  {fname}: {applied} applied")
+
+            else:
+                # ── ASS: use existing line-based processing ──
+                lines = read_ass_file(fpath)
+                file_fixes_sorted = sorted(file_fixes, key=lambda f: f.get('line', 0), reverse=True)
+                applied = 0
+
+                for fix in file_fixes_sorted:
+                    action = fix['action']
+                    i = fix.get('line', 0) - 1
+                    pre_time = ''
+                    pre_text = ''
+
+                    if action == 'replace_text':
+                        if i < 0 or i >= len(lines):
+                            ok, msg = False, f"行号 {fix['line']} 超出范围"
+                        else:
+                            d = parse_dialogue(lines[i])
+                            if d is None:
+                                ok, msg = False, f"第 {fix['line']} 行不是 Dialogue 行"
+                            else:
+                                old = d['text']
+                                pre_text = old[:120]
+                                pre_time = d['start']
+                                if old == fix['replacement']:
+                                    ok, msg = True, f"already correct: {old[:40]}"
+                                else:
+                                    d['text'] = fix['replacement']
+                                    lines[i] = build_dialogue_line(d) + '\n'
+                                    ok, msg = True, f"{old[:40]} → {fix['replacement'][:40]}"
+                    elif action == 'replace_name':
+                        if i < 0 or i >= len(lines):
+                            ok, msg = False, f"行号 {fix['line']} 超出范围"
+                        else:
+                            d = parse_dialogue(lines[i])
+                            if d is None:
+                                ok, msg = False, f"第 {fix['line']} 行不是 Dialogue 行"
+                            else:
+                                old = d['name']
+                                d['name'] = fix['replacement']
+                                lines[i] = build_dialogue_line(d) + '\n'
+                                ok, msg = True, f"Name: {old} → {fix['replacement']}"
+                    elif action == 'delete_line':
+                        if i < 0 or i >= len(lines):
+                            ok, msg = False, f"行号 {fix['line']} 超出范围"
+                        else:
+                            pre_text = lines[i].strip()[:60]
+                            lines[i] = ''
+                            ok, msg = True, f"删除: {pre_text}"
+                    else:
+                        ok, msg = False, f"ASS 不支持 action: {action}"
+
+                    if ok:
+                        is_already = 'already correct' in msg or 'already deleted' in msg
+                        if is_already:
+                            total_already += 1
+                        else:
+                            applied += 1
+                            if args.log_to_report and args.step:
+                                if action == 'replace_text':
+                                    report_entries.append({
+                                        'ep': ep_tag, 'time': pre_time,
+                                        'original': pre_text,
+                                        'corrected': fix.get('replacement', '')[:120],
+                                        'status': '✅',
+                                    })
+                                elif action == 'delete_line':
+                                    report_entries.append({
+                                        'ep': ep_tag, 'time': pre_time,
+                                        'original': pre_text,
+                                        'corrected': '(已删除)',
+                                        'status': '🗑️',
+                                    })
+                    else:
+                        total_skipped += 1
+                        print(f"  ✗ {fname}:{fix.get('line', '?')} - {msg}")
+
+                if applied > 0:
+                    if not args.dry_run:
                         lines = [l for l in lines if l != '']
                         write_ass_file(fpath, lines)
-                total_applied += applied
-                print(f"  {fname}: {applied} applied")
+                    total_applied += applied
+                    print(f"  {fname}: {applied} applied")
 
     # ── 报告日志 ──
     if args.log_to_report and args.step and report_entries:

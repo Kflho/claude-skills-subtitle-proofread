@@ -22,10 +22,7 @@ import lib._path  # noqa: F401
 # SRT parsing
 # ═══════════════════════════════════════════════════════════════
 
-def parse_srt(path):
-    """Parse SRT into list of {start, end, start_s, end_s, text}."""
-    from lib.whisper_utils import parse_srt as _parse
-    return _parse(path, mark_garbled=False)
+# parse_srt: use lib.subtitle_io.read_subtitles or lib.whisper_utils.parse_srt directly
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -166,8 +163,9 @@ def main():
     print(f'Whisper:   {args.whisper_srt}', file=sys.stderr)
     print(f'Reference: {args.reference_srt}', file=sys.stderr)
 
-    whisper_cues = parse_srt(args.whisper_srt)
-    ref_cues = parse_srt(args.reference_srt)
+    from lib.whisper_utils import parse_srt as _parse
+    whisper_cues = _parse(args.whisper_srt)
+    ref_cues = _parse(args.reference_srt)
     print(f'  Cues: {len(whisper_cues)} (Whisper) vs {len(ref_cues)} (Ref)', file=sys.stderr)
 
     diffs = compare(whisper_cues, ref_cues, threshold=args.threshold)
