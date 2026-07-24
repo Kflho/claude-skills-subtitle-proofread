@@ -39,13 +39,13 @@ import urllib.request
 import lib._path  # noqa: F401
 
 from lib.whisper_utils import parse_subtitles, write_subtitles
+from lib.config import (
+    LLM_API_KEY, LLM_MODEL_DEFAULT, LLM_BASE_URL_DEFAULT,
+)
 
 # ═══════════════════════════════════════════════════════════════
 # Config
 # ═══════════════════════════════════════════════════════════════
-
-DEFAULT_MODEL = 'deepseek-chat'
-DEFAULT_BASE_URL = 'https://api.deepseek.com/v1'
 BATCH_SIZE = 10   # cues per API call (tuned for ~$3.38 / 193 episodes)
 DELAY = 1.0       # seconds between batches (rate limit safety)
 
@@ -286,9 +286,9 @@ def main():
     parser.add_argument('--output-dir', default='中文润色后',
                         help='Output directory (with --input-dir, default: 中文润色后/)')
     parser.add_argument('--glossary', help='proper-nouns.md path for term consistency')
-    parser.add_argument('--model', default=DEFAULT_MODEL,
-                        help=f'DeepSeek model (default: {DEFAULT_MODEL})')
-    parser.add_argument('--base-url', default=DEFAULT_BASE_URL,
+    parser.add_argument('--model', default=LLM_MODEL_DEFAULT,
+                        help=f'DeepSeek model (default: {LLM_MODEL_DEFAULT})')
+    parser.add_argument('--base-url', default=LLM_BASE_URL_DEFAULT,
                         help='API base URL')
     parser.add_argument('--dry-run', action='store_true',
                         help='Preview only, no API calls')
@@ -297,7 +297,7 @@ def main():
     args = parser.parse_args()
 
     # API key
-    api_key = os.environ.get('LLM_API_KEY', '') or os.environ.get('POLISH_API_KEY', '')
+    api_key = LLM_API_KEY
     if not api_key and not args.dry_run:
         print('ERROR: LLM_API_KEY not set (also tried POLISH_API_KEY).', file=sys.stderr)
         print('Set it via environment variable or pass --dry-run to preview.',

@@ -37,18 +37,18 @@ import urllib.request
 from collections import Counter
 
 import lib._path  # noqa: F401
-from lib.whisper_utils import parse_subtitles, write_subtitles
+from lib.whisper_utils import parse_subtitles, write_subtitles, OP_BOUNDARY_SEC, ED_BOUNDARY_SEC
+from lib.config import (
+    LLM_API_KEY, LLM_MODEL, LLM_BASE_URL,
+    LLM_MODEL_DEFAULT, LLM_BASE_URL_DEFAULT,
+)
 
 # ═══════════════════════════════════════════════════════════════
 # Config
 # ═══════════════════════════════════════════════════════════════
 
-DEFAULT_MODEL = 'deepseek-chat'
-DEFAULT_BASE_URL = 'https://api.deepseek.com/v1'
 BATCH_SIZE = 10   # cues per API call
 DELAY = 1.0       # seconds between batches
-OP_WINDOW_S = 95  # first N seconds = OP region (matches OP_BOUNDARY_SEC)
-ED_WINDOW_S = 120 # last N seconds = ED region (matches ED_BOUNDARY_SEC)
 
 SYSTEM_PROMPT = """你是动画字幕翻译专家。将日语字幕翻译为自然口语化的中文。
 
@@ -159,9 +159,9 @@ def _time_to_seconds(ts):
 
 def _is_oped_region(cue_start_s, cue_end_s, total_duration_s):
     """Check if a cue falls in OP (first N s) or ED (last N s) region."""
-    if cue_start_s <= OP_WINDOW_S:
+    if cue_start_s <= OP_BOUNDARY_SEC:
         return 'OP'
-    if total_duration_s > 0 and cue_end_s >= total_duration_s - ED_WINDOW_S:
+    if total_duration_s > 0 and cue_end_s >= total_duration_s - ED_BOUNDARY_SEC:
         return 'ED'
     return None
 
@@ -623,9 +623,9 @@ def main():
                         help='Output directory (default: 中文翻译后/)')
     parser.add_argument('--glossary', help='Path to proper-nouns.md (ja→zh mapping, legacy)')
     parser.add_argument('--mappings', help='Path to noun_mappings.json (ja→zh, preferred)')
-    parser.add_argument('--model', default=DEFAULT_MODEL,
-                        help=f'LLM model (default: {DEFAULT_MODEL})')
-    parser.add_argument('--base-url', default=DEFAULT_BASE_URL,
+    parser.add_argument('--model', default=LLM_MODEL_DEFAULT,
+                        help=f'LLM model (default: {LLM_MODEL_DEFAULT})')
+    parser.add_argument('--base-url', default=LLM_BASE_URL_DEFAULT,
                         help='API base URL')
     parser.add_argument('--dry-run', action='store_true',
                         help='Preview only, no API calls')
@@ -634,7 +634,7 @@ def main():
     args = parser.parse_args()
 
     # API key（LLM_API_KEY 优先，回退到 POLISH_API_KEY）
-    api_key = os.environ.get('LLM_API_KEY', '') or os.environ.get('POLISH_API_KEY', '')
+    api_key = LLM_API_KEY
     if not api_key and not args.dry_run:
         print('ERROR: LLM_API_KEY not set (also tried POLISH_API_KEY).', file=sys.stderr)
         print('  export LLM_API_KEY="sk-..."', file=sys.stderr)
@@ -642,8 +642,8 @@ def main():
         sys.exit(1)
 
     # Model and base URL from env vars (with fallback to CLI defaults)
-    model = os.environ.get('LLM_MODEL', '') or os.environ.get('POLISH_MODEL', '') or args.model
-    base_url = os.environ.get('LLM_BASE_URL', '') or os.environ.get('POLISH_BASE_URL', '') or args.base_url
+    model = LLM_MODEL or args.model
+    base_url = LLM_BASE_URL or args.base_url
 
     # Load glossary/mappings (--mappings preferred, --glossary as fallback)
     glossary_str = ''

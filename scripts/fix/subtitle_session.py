@@ -22,11 +22,11 @@ from lib.whisper_utils import (
 )
 setup_windows_utf8()
 
-# ── Whisper defaults (read from environment) ──
-
-DEFAULT_WHISPER_CLI = os.environ.get('WHISPER_CLI', '')
-DEFAULT_WHISPER_MODEL = os.environ.get('WHISPER_MODEL', '')
-DEFAULT_RETRY_MODEL = os.environ.get('WHISPER_RETRY_MODEL', '')
+from lib.config import (
+    WHISPER_CLI, WHISPER_MODEL, WHISPER_RETRY_MODEL,
+    DEFAULT_TARGET_LANG, DEFAULT_MAX_PAD, DEFAULT_MAX_CHARS,
+    VIDEO_CANDIDATES,
+)
 
 
 class SubtitleSession:
@@ -48,7 +48,7 @@ class SubtitleSession:
     """
 
     def __init__(self, episode: str, project_dir: str, *,
-                 target_lang: str = 'ja',
+                 target_lang: str = DEFAULT_TARGET_LANG,
                  video_dir: str = None,
                  whisper_cli: str = None,
                  model: str = None,
@@ -67,9 +67,9 @@ class SubtitleSession:
         self.ref_srt_path = None
 
         # Whisper config
-        self.whisper_cli = whisper_cli or DEFAULT_WHISPER_CLI
-        self.model = model or DEFAULT_WHISPER_MODEL
-        self.retry_model = retry_model or DEFAULT_RETRY_MODEL
+        self.whisper_cli = whisper_cli or WHISPER_CLI
+        self.model = model or WHISPER_MODEL
+        self.retry_model = retry_model or WHISPER_RETRY_MODEL
 
         # User-supplied overrides
         self._srt_dir_override = srt_dir
@@ -143,10 +143,9 @@ class SubtitleSession:
         candidates = []
         if self._video_dir_override:
             candidates.append(self._video_dir_override)
-        candidates.extend([
-            os.path.join(self.project_dir, 'video'),
-            os.path.join(self.project_dir, 'videos'),
-        ])
+        candidates.extend(
+            os.path.join(self.project_dir, d) for d in VIDEO_CANDIDATES
+        )
         exts = ('.mkv', '.mp4', '.avi', '.mov')
         for vdir in candidates:
             if not os.path.isdir(vdir):
@@ -224,7 +223,7 @@ class SubtitleSession:
         return self._ref_cues
 
     def find_ref_text(self, start_s: float, end_s: float,
-                      max_chars: int = 200) -> str:
+                      max_chars: int = DEFAULT_MAX_CHARS) -> str:
         """Find reference subtitle text overlapping a time range.
 
         Returns the text of the reference cue with the greatest time
@@ -370,7 +369,7 @@ class SubtitleSession:
     def compute_review_clip_bounds(garbled_start: float, garbled_end: float,
                                    cluster_ss: float, cluster_es: float,
                                    speech_segs: list,
-                                   max_pad: float = 2.0) -> tuple | None:
+                                   max_pad: float = DEFAULT_MAX_PAD) -> tuple | None:
         """Compute video clip boundaries for human review — VAD-aware.
 
         Returns (clip_start_s, clip_end_s) or None if no speech detected.

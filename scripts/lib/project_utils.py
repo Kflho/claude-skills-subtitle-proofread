@@ -10,6 +10,10 @@ import os
 import re
 import subprocess
 from lib.subprocess_utils import run_git
+from lib.config import (
+    get_input_dir, DEFAULT_INPUT_DIR, VIDEO_CANDIDATES,
+    WHISPER_CLI, WHISPER_MODEL, WHISPER_BACKEND,
+)
 
 
 def load_json(path):
@@ -28,14 +32,14 @@ def get_target_dir(project_dir):
       2. Env var INPUT_DIR (set by run_all.py --input-dir)
       3. Default: project_dir/AI审查后
     """
-    env_val = os.environ.get('SUBTITLE_INPUT_DIR') or os.environ.get('INPUT_DIR')
-    if env_val:
+    env_val = get_input_dir()
+    if env_val and env_val != DEFAULT_INPUT_DIR:
         if env_val == '.':
             return project_dir
         if os.path.isabs(env_val):
             return env_val
         return os.path.join(project_dir, env_val)
-    return os.path.join(project_dir, 'AI审查后')
+    return os.path.join(project_dir, DEFAULT_INPUT_DIR)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -235,8 +239,7 @@ def detect_resources(project_dir, video_dir=None):
     # ── Video files ──
     vdir = video_dir
     if not vdir or not os.path.isdir(vdir):
-        for d in [os.path.join(project_dir, 'video'),
-                  os.path.join(project_dir, 'videos')]:
+        for d in [os.path.join(project_dir, d) for d in VIDEO_CANDIDATES]:
             if os.path.isdir(d):
                 vdir = d
                 break
@@ -253,7 +256,7 @@ def detect_resources(project_dir, video_dir=None):
         from lib.whisper_backends import detect_available_backends as _detect_backends
         available_backends = _detect_backends()
         resources['whisper_backends'] = available_backends
-        resources['whisper_backend'] = os.environ.get('WHISPER_BACKEND', '').strip() or (
+        resources['whisper_backend'] = WHISPER_BACKEND or (
             available_backends[0] if available_backends else '')
     except ImportError:
         available_backends = []
@@ -261,8 +264,8 @@ def detect_resources(project_dir, video_dir=None):
         resources['whisper_backend'] = ''
 
     # Legacy check: WHISPER_CLI + WHISPER_MODEL (for backward compat)
-    whisper_cli = os.environ.get('WHISPER_CLI', '')
-    whisper_model = os.environ.get('WHISPER_MODEL', '')
+    whisper_cli = WHISPER_CLI
+    whisper_model = WHISPER_MODEL
     has_legacy_whisper = bool(whisper_cli and os.path.isfile(whisper_cli) and whisper_model)
 
     resources['has_whisper'] = bool(available_backends) or has_legacy_whisper
@@ -362,10 +365,9 @@ def find_video(project_dir, episode, video_dir=None):
     candidates = []
     if video_dir:
         candidates.append(video_dir)
-    candidates.extend([
-        os.path.join(project_dir, 'video'),
-        os.path.join(project_dir, 'videos'),
-    ])
+    candidates.extend(
+        os.path.join(project_dir, d) for d in VIDEO_CANDIDATES
+    )
 
     for vdir in candidates:
         if not os.path.isdir(vdir):

@@ -186,9 +186,7 @@ def _format_srt_cue_lines(cue: dict) -> list[str]:
 # Garbled text classification
 # ═══════════════════════════════════════════════════════════════
 
-# OP/ED boundaries (seconds)
-OP_BOUNDARY_SEC = 95
-ED_BOUNDARY_SEC = 120
+from lib.whisper_utils import OP_BOUNDARY_SEC, ED_BOUNDARY_SEC  # canonical source
 
 KANA_RE = re.compile(r'[぀-ヿ]')
 KANJI_RE = re.compile(r'[一-鿿]')

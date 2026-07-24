@@ -32,11 +32,12 @@ from utils.update_report import upsert_entries as _upsert_report
 from utils.update_report import replace_layer as _replace_layer
 
 from lib.project_utils import load_json, detect_resources, resources_summary, can_use_whisper, detect_format, detect_project_lang
+from lib.config import WHISPER_CLI, WHISPER_MODEL, DEFAULT_INPUT_DIR, DEFAULT_TIMEOUT
 
 
 # ── Helpers ──
 
-def _run(cmd_parts, cwd, timeout=600, desc=''):
+def _run(cmd_parts, cwd, timeout=DEFAULT_TIMEOUT, desc=''):
     """Run a subprocess command, print status, return True on success."""
     label = f'[{desc}]' if desc else ''
     cmd_display = ' '.join(str(p) for p in cmd_parts)
@@ -103,7 +104,7 @@ def step_scan(project_dir, lang, force_rescan=False, target_dir=None,
     Args:
         episodes: optional list of episode IDs to scan (None = all)
     """
-    target = target_dir or os.path.join(project_dir, 'AI审查后')
+    target = target_dir or os.path.join(project_dir, DEFAULT_INPUT_DIR)
     findings = os.path.join(project_dir, 'temp', 'scans', 'findings.json')
     issues = os.path.join(project_dir, 'temp', 'scans', 'issues')
     ai_nouns = os.path.join(project_dir, 'temp', 'scans', 'ai_nouns.json')
@@ -228,7 +229,7 @@ def step_fix_episodes(project_dir, lang, resources,
         selected = sorted(selected)
     else:
         # No findings — try to find all subtitle files in target
-        target = target_dir or os.path.join(project_dir, 'AI审查后')
+        target = target_dir or os.path.join(project_dir, DEFAULT_INPUT_DIR)
         from lib.whisper_utils import extract_file_id
         selected = []
         if os.path.isdir(target):
@@ -313,7 +314,7 @@ def step_fix_episodes(project_dir, lang, resources,
 
 def step_nouns(project_dir, lang, target_dir=None):
     """Layer 3: noun_checker — proper nouns + OP/ED consistency."""
-    target = target_dir or os.path.join(project_dir, 'AI审查后')
+    target = target_dir or os.path.join(project_dir, DEFAULT_INPUT_DIR)
     glossary = os.path.join(project_dir, 'reports', 'proper-nouns.md')
     checker = os.path.join(_SCRIPT_DIR, 'nouns', 'noun_checker.py')
 
@@ -491,7 +492,7 @@ def _dedup_fixes(fixes):
 
 def step_apply_all(project_dir, lang, target_dir=None):
     """Layer 4: apply_fixes — collect all fixes, apply at once."""
-    target = target_dir or os.path.join(project_dir, 'AI审查后')
+    target = target_dir or os.path.join(project_dir, DEFAULT_INPUT_DIR)
     apply_script = os.path.join(_SCRIPT_DIR, 'apply', 'apply_fixes.py')
 
     # Collect fixes from all sources
@@ -543,7 +544,7 @@ def step_ass_repair(project_dir, target_dir=None):
         print('[ass] SRT project — skipping.', file=sys.stderr)
         return True
 
-    target = target_dir or os.path.join(project_dir, 'AI审查后')
+    target = target_dir or os.path.join(project_dir, DEFAULT_INPUT_DIR)
     repair = os.path.join(_SCRIPT_DIR, 'ass', 'ass_repair.py')
     return _run(['python', repair, '--target-dir', target, '--check', 'all'],
                 project_dir, desc='ass')
@@ -555,7 +556,7 @@ def step_polish(project_dir, target_dir=None):
     Reads Chinese SRT from AI审查后/, polishes via DeepSeek API,
     writes to 中文润色后/.
     """
-    target = target_dir or os.path.join(project_dir, 'AI审查后')
+    target = target_dir or os.path.join(project_dir, DEFAULT_INPUT_DIR)
     output_dir = os.path.join(project_dir, '中文润色后')
     glossary = os.path.join(project_dir, 'reports', 'proper-nouns.md')
 
@@ -767,7 +768,7 @@ def _append_to_glossary(project_dir, accepted_candidates, lang):
 
 def step_clean(project_dir, target_dir=None):
     """Clean up empty cues."""
-    target = target_dir or os.path.join(project_dir, 'AI审查后')
+    target = target_dir or os.path.join(project_dir, DEFAULT_INPUT_DIR)
     cleaner = os.path.join(_SCRIPT_DIR, 'utils', 'clean_empty_cues.py')
     return _run(['python', cleaner, '--target-dir', target],
                 project_dir, desc='clean')
@@ -904,7 +905,7 @@ def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True,
                                     if f.endswith(('.ass', '.srt'))}
                 garbled = [g for g in garbled if g.get('file', '') in target_files]
 
-    if garbled and not (os.environ.get('WHISPER_CLI') or os.environ.get('WHISPER_MODEL')):
+    if garbled and not (WHISPER_CLI or WHISPER_MODEL):
         # Degraded mode: generate human-review report from scan findings
         _write_degraded_report(project_dir, garbled, findings_path, review_dir, scan_dir)
         print(f'[deliver] Degraded mode: {len(garbled)} unresolved garbled cues '
@@ -914,7 +915,7 @@ def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True,
 
     # ── Final status ──
     # Count remaining [???] markers across all SRT files
-    target = target_dir or os.path.join(project_dir, 'AI审查后')
+    target = target_dir or os.path.join(project_dir, DEFAULT_INPUT_DIR)
     marker_count = 0
     if os.path.isdir(target):
         for fname in sorted(os.listdir(target)):
@@ -952,7 +953,7 @@ def _apply_ai_checklists(project_dir, lang, target_dir=None):
     Fixer.apply_ai_fragments() which handles VAD alignment + escalation
     to human review for unfilled entries.
     """
-    srt_dir = target_dir or os.path.join(project_dir, 'AI审查后')
+    srt_dir = target_dir or os.path.join(project_dir, DEFAULT_INPUT_DIR)
     scan_dir = os.path.join(project_dir, 'temp', 'scans')
     if not os.path.isdir(scan_dir):
         print('[apply-ai-review] No temp/scans/ directory.', file=sys.stderr)
@@ -1094,8 +1095,8 @@ Examples:
                         help='Process all episodes even if SRT has no garbled cues')
     parser.add_argument('--force-rescan', action='store_true',
                         help='Force re-scan even if findings.json is fresh')
-    parser.add_argument('--input-dir', default='AI审查后',
-                        help='Subtitle input directory name (default: AI审查后). '
+    parser.add_argument('--input-dir', default=DEFAULT_INPUT_DIR,
+                        help=f'Subtitle input directory name (default: {DEFAULT_INPUT_DIR}). '
                              'Use "." to point --target-dir directly at the subtitle files.')
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
@@ -1108,7 +1109,7 @@ Examples:
         target_dir = os.path.join(project_dir, input_dir)
 
     # Propagate to subprocess scripts via env var (used by get_target_dir())
-    if input_dir != 'AI审查后':
+    if input_dir != DEFAULT_INPUT_DIR:
         os.environ['INPUT_DIR'] = input_dir
 
     # Ensure subprocess-called scripts can find lib/ via import lib._path

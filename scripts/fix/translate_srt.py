@@ -30,6 +30,7 @@ import urllib.parse
 import lib._path  # noqa: F401
 
 from lib.whisper_utils import write_srt
+from lib.config import BAIDU_APPID, BAIDU_SECRET, BAIDU_API_ENDPOINT
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -38,9 +39,9 @@ from lib.whisper_utils import write_srt
 
 def load_credentials():
     """Load Baidu API credentials from ~/.baidu_translate or env vars."""
-    appid = os.environ.get('BAIDU_APPID', '')
-    secret = os.environ.get('BAIDU_SECRET', '')
-    endpoint = os.environ.get('BAIDU_API_ENDPOINT', '')
+    appid = BAIDU_APPID
+    secret = BAIDU_SECRET
+    endpoint = BAIDU_API_ENDPOINT
 
     config_path = os.path.expanduser('~/.baidu_translate')
     if os.path.exists(config_path):
@@ -68,8 +69,8 @@ LANG_MAP = {'ja': 'jp', 'jp': 'jp', 'zh': 'zh', 'en': 'en', 'auto': 'auto'}
 
 
 def get_api_endpoint():
-    """Get API endpoint from env var or default."""
-    return os.environ.get('BAIDU_API_ENDPOINT', BAIDU_API)
+    """Get API endpoint from config or default."""
+    return BAIDU_API_ENDPOINT
 
 
 def baidu_translate(text, appid, secret, source='auto', target='ja', endpoint=None):

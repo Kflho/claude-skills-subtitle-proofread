@@ -29,6 +29,8 @@ import os
 import subprocess
 import sys
 
+from lib.config import PYTHONIOENCODING
+
 
 # ═══════════════════════════════════════════════════════════════
 # SubprocessError
@@ -61,7 +63,7 @@ class SubprocessError(Exception):
 def _base_env():
     """Environment dict with UTF-8 encoding for subprocess I/O on Windows."""
     env = os.environ.copy()
-    env['PYTHONIOENCODING'] = 'utf-8'
+    env['PYTHONIOENCODING'] = PYTHONIOENCODING
     return env
 
 

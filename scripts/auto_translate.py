@@ -28,6 +28,7 @@ import subprocess
 import sys
 
 import lib._path  # noqa: F401
+from lib.config import LLM_API_KEY
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _FIND_SUSPECT = os.path.join(_SCRIPT_DIR, 'nouns', 'find_suspect_nouns.py')
@@ -120,7 +121,7 @@ def determine_stage(project_dir, target_dir, source_dir):
 
 def stage_translate(project_dir, source_dir, target_dir, mappings_path, dry_run=False):
     """Run translate phase: Japanese → Chinese via LLM API."""
-    api_key = os.environ.get('LLM_API_KEY', '') or os.environ.get('POLISH_API_KEY', '')
+    api_key = LLM_API_KEY
     if not api_key and not dry_run:
         print('ERROR: LLM_API_KEY not set.', file=sys.stderr)
         print('  export LLM_API_KEY="sk-..."', file=sys.stderr)

@@ -34,6 +34,7 @@ import re
 import subprocess
 import sys
 from lib.subprocess_utils import run_whisper
+from lib.config import WHISPER_CLI, WHISPER_MODEL, WHISPER_BACKEND
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -92,7 +93,7 @@ def detect_available_backends():
     available = []
 
     # ── 1. Explicit env var ──
-    explicit = os.environ.get('WHISPER_BACKEND', '').strip()
+    explicit = WHISPER_BACKEND  # already stripped at import
     if explicit:
         # Validate that the declared backend actually works
         if explicit in BACKEND_INFO and _check_backend(explicit):
@@ -126,7 +127,7 @@ def _check_backend(backend_id):
 
 def _check_whisper_cpp():
     """Check if whisper.cpp CLI is available."""
-    cli_path = os.environ.get('WHISPER_CLI', '')
+    cli_path = WHISPER_CLI
     if cli_path and _is_exe(cli_path):
         return True
     # Also check common names on PATH
@@ -180,7 +181,7 @@ def detect_whisper_cpp_version(whisper_cli=None):
     if _WHISPER_CPP_VERSION_CACHE is not None:
         return _WHISPER_CPP_VERSION_CACHE
 
-    cli = whisper_cli or os.environ.get('WHISPER_CLI', 'whisper-cli')
+    cli = whisper_cli or WHISPER_CLI or 'whisper-cli'
     try:
         # Try --version first (newer builds), then fall back to --help
         for flag in ['--version', '--help', '-h']:
@@ -280,7 +281,7 @@ def transcribe(audio_path, model_path, language='ja', *,
     if backend == 'whisper-cpp':
         # Accept whisper_cli from kwargs (passed by whisper_utils.run_whisper)
         # or fall back to WHISPER_CLI env var, or PATH lookup
-        whisper_cli = kwargs.pop('whisper_cli', None) or os.environ.get('WHISPER_CLI', 'whisper-cli')
+        whisper_cli = kwargs.pop('whisper_cli', None) or WHISPER_CLI or 'whisper-cli'
         return _transcribe_whisper_cpp(
             audio_path, model_path, language,
             whisper_cli=whisper_cli,
@@ -318,7 +319,7 @@ def _transcribe_whisper_cpp(audio_path, model_path, language,
                             nth=0.6, max_context=0,
                             no_fallback=False, suppress_nst=False):
     """Transcribe via whisper.cpp CLI. Returns unified segment list."""
-    cli = whisper_cli or os.environ.get('WHISPER_CLI', 'whisper-cli')
+    cli = whisper_cli or WHISPER_CLI or 'whisper-cli'
 
     args = [
         '-m', model_path, '-f', audio_path, '-l', language,
@@ -602,7 +603,7 @@ def backend_detection_report():
                     ver = detect_whisper_cpp_version()
                     if ver:
                         detail['version'] = f'v{ver[0]}.{ver[1]}.{ver[2]}'
-                    cli = os.environ.get('WHISPER_CLI', '')
+                    cli = WHISPER_CLI
                     detail['path'] = cli if cli and os.path.isfile(cli) else '(on PATH)'
                 elif bid in ('faster-whisper', 'openai-whisper'):
                     detail['path'] = '(Python package)'

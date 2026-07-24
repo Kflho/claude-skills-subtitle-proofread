@@ -41,6 +41,7 @@ from lib.whisper_utils import (
 )
 from utils.update_report import upsert_entries, update_entry_status
 from lib.subprocess_utils import run_ffmpeg, SubprocessError
+from lib.config import DEFAULT_TARGET_LANG, DEFAULT_COMPARE_THRESHOLD
 setup_windows_utf8()
 
 from fix.subtitle_session import SubtitleSession
@@ -88,7 +89,7 @@ class Fixer:
     """
 
     def __init__(self, episode: str, project_dir: str, *,
-                 target_lang: str = 'ja',
+                 target_lang: str = DEFAULT_TARGET_LANG,
                  video_dir: str = None,
                  whisper_cli: str = None,
                  model: str = None,
@@ -164,7 +165,7 @@ class Fixer:
     # ═══════════════════════════════════════════════════════════
 
     def fix_by_reference(self, reference_srt: str, *,
-                         threshold: float = 0.4) -> FixReport:
+                         threshold: float = DEFAULT_COMPARE_THRESHOLD) -> FixReport:
         """Fix mismatches by comparing with a translated reference SRT.
 
         Parses the reference, compares each cue by time overlap with
