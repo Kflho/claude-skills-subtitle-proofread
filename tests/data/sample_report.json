@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "updated": "2026-01-01T00:00:00",
+  "layers": {
+    "2": [
+      {"ep": "EP001", "time": "00:00:01.000", "original": "bad_text", "corrected": "good_text", "status": "✅"},
+      {"ep": "EP001", "time": "00:00:06.000", "original": "me", "corrected": "", "status": "⬜"}
+    ],
+    "3": [
+      {"ep": "", "time": "", "original": "アトム", "corrected": "阿童木", "status": "⬜"}
+    ]
+  }
+}
