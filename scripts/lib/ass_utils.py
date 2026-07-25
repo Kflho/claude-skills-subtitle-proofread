@@ -213,7 +213,7 @@ def read_ass_file(path: str) -> list[str]:
     if _is_srt_path(path):
         return srt_utils.read_srt_file(path)
     # ASS files: use same encoding detection as SRT
-    from lib.srt_utils import _detect_encoding
+    from lib.subtitle_io import _detect_encoding
     with open(path, 'rb') as f:
         raw = f.read()
     encoding = _detect_encoding(raw)

@@ -41,7 +41,7 @@ python "<scripts-dir>/auto_translate.py" \
 | `unknown_suspect` | 未识别疑似专名 | 判断是否专名 → 是：补 `noun_mappings.json` + 统一 SRT；否：补 `temp/zh_common_blacklist.json` |
 
 **大规模审查（100+ unknown_suspect）**：不要逐条硬查。
-→ 写脚本用 API 批量分类（30条/批，deepseek-chat 成本 ~$0.01）
+→ 写脚本用 API 批量分类（30条/批，deepseek-v4-pro 成本 ~$0.01）
 → 普通词补黑名单，专名补映射表，重扫 → 迭代至归零
 → 完整流程见 [references/batch-review.md](references/batch-review.md)
 
@@ -132,22 +132,32 @@ python "<scripts-dir>/run_all.py" \
 
 ## 语言限制
 
-| 功能 | ja（日语） | zh（中文） | 其他 |
-|------|:---:|:---:|:---:|
-| 乱码扫描 | ✅ | ✅ | ✅ |
-| Whisper 修复 | ✅ (kotoba) | ⚠️ 需中文模型 | ⚠️ 需对应模型 |
-| Baidu 翻译层 | ❌ (日语目标无需) | ✅ (Whisper 输出 ja→zh) | ❌ |
-| 词典过滤 | ✅ (jamdict/JMdict) | ✅ (jieba/498K 词) | ❌ |
-| 专名分类 | ✅ (jamdict) | ✅ (jieba + 规则) | ❌ |
-| Glossary 清洗 | ✅ (JMdict + 规则) | ✅ (jieba 词典 + 规则) | ❌ |
-| AI 润色（去翻译腔） | ❌ (日语原文无需) | ✅ (OpenAI 兼容 API) | ❌ |
+| 功能 | ja（日语） | zh（中文） | ru（俄语） | 其他 |
+|------|:---:|:---:|:---:|:---:|
+| 乱码扫描 | ✅ | ✅ | ✅ | ✅ |
+| LLM 翻译 | ✅ (ja→zh) | — | ✅ (ru→zh) | ✅ (任意→zh) |
+| Whisper 修复 | ✅ (kotoba) | ⚠️ 需中文模型 | ❌ | ⚠️ 需对应模型 |
+| Baidu 翻译层 | ❌ (日语目标无需) | ✅ (Whisper 输出 ja→zh) | ❌ | ❌ |
+| 词典过滤 | ✅ (jamdict/JMdict) | ✅ (jieba/498K 词) | ❌ | ❌ |
+| 专名分类 | ✅ (jamdict) | ✅ (jieba + 规则) | ❌ | ❌ |
+| Glossary 清洗 | ✅ (JMdict + 规则) | ✅ (jieba 词典 + 规则) | ❌ | ❌ |
+| AI 润色（去翻译腔） | ❌ (日语原文无需) | ✅ (OpenAI 兼容 API) | ✅ (同 zh) | ✅ (同 zh) |
 
+> `translate_srt.py` **自动检测源语言**（ja/ru/zh），动态切换 system prompt，无需手动指定。
+> 日语检测到假名时启用专用规则（敬语、主语省略等），非日语跳过。
 > `--lang zh` 时使用 jieba 分词 + 词典查询对标 jamdict。jieba 不可用时退回 n-gram + 启发式规则。
 > Baidu 翻译为**可选**：未配置时自动降级，日语原文保留在 AI fragments 中由 AI 自行翻译。
 > AI 润色为**可选**：Pipeline 末尾交互提问。需要 `LLM_API_KEY` 环境变量。无 key 时降级为 AI 助理自行润色（⚠️ 高 token 消耗，7.5 万 cue）。
 > ⚠️ **translate_srt.py 必须要有 LLM_API_KEY**：无 key 时脚本无法运行。不要静默降级为 AI 自行翻译——量级太大（193 集 × 200 条 = 不可行）。正确做法：告知用户 key 为空，请用户设置后重试。详见 [references/translation.md](references/translation.md)。
 
 ## 名词库准备 + 翻译
+
+> **非日语源（ru/en/其他）**：跳过名词库准备（jamdict/jieba 不适用），直接翻译。
+> 翻译后对中文输出执行专名校对即可（`auto_translate.py --target-dir`），见下方「专名统一审查」。
+> ```bash
+> python "<scripts>/translate_srt.py" --input-dir "<源字幕>" --output-dir "<中文输出>"
+> # 源语言自动检测，system prompt 动态适配
+> ```
 
 翻译项目**必须先准备名词库**，否则专名翻译不一致。
 
@@ -285,6 +295,7 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 | `[translate] Baidu credentials not found` | 正常降级。配置 `BAIDU_APPID` + `BAIDU_SECRET` 或接受 AI 自行翻译 |
 | `[polish] LLM_API_KEY not set` | 正常降级。设置环境变量或选 `n` 跳过润色。不要复用 Claude Code 内部 key |
 | `[translate_srt] LLM_API_KEY not set` | **不要降级为 AI 自行翻译。**告知用户 key 为空，请用户设置后重跑。≤5 集且用户明确同意时才可手工翻译 |
+| `HTTP Error 400: Bad Request` + `invalid_request_error` | 模型名不兼容。检查 API 返回的 supported model names，更新 `lib/config.py` 中 `LLM_MODEL_DEFAULT`（当前 `deepseek-v4-pro`）。也可通过 `LLM_MODEL` env 或 `--model` CLI 参数覆盖 |
 
 ## AI 介入点
 
@@ -312,6 +323,8 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 | `--resume` | Resume after AI noun review (Phase 3 only) |
 | `--force-rescan` | Re-scan even if cache fresh |
 | `LLM_API_KEY` (env) | LLM API key for polish (optional) + translate_srt.py (**required**). Separate from Claude Code's. |
+| `LLM_MODEL` (env) | Override default model. Current default: `deepseek-v4-pro`. Use `--model` for per-run override. |
+| `--source-lang <LANG>` | translate_srt.py: force source language (ja/ru/zh). Default: auto-detect. |
 | `--mappings <JSON>` | translate_srt.py: path to noun_mappings.json (preferred over --glossary) |
 
 > `--apply-ai-review` 是后处理快速路径，不能和 full run 一起用。

@@ -30,7 +30,7 @@ LLM_MODEL     = os.environ.get('LLM_MODEL', '') or os.environ.get('POLISH_MODEL'
 LLM_BASE_URL  = os.environ.get('LLM_BASE_URL', '') or os.environ.get('POLISH_BASE_URL', '')
 
 # Hardcoded defaults for LLM (used when env var is empty and CLI arg not given)
-LLM_MODEL_DEFAULT    = 'deepseek-chat'
+LLM_MODEL_DEFAULT    = 'deepseek-v4-pro'
 LLM_BASE_URL_DEFAULT = 'https://api.deepseek.com/v1'
 
 # ═══════════════════════════════════════════════════════════════

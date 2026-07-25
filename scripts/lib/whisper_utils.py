@@ -441,10 +441,10 @@ def parse_subtitles(path, mark_garbled=True,
     return read_subtitles(path, mark_garbled=mark_garbled, target_lang=target_lang)
 
 
-def write_subtitles(path, cues):
+def write_subtitles(path, cues, template_path=None):
     """写回字幕文件，自动检测格式。（委托到 subtitle_io）"""
     from lib.subtitle_io import write_subtitles as _write
-    _write(path, cues)
+    _write(path, cues, template_path=template_path)
 
 
 # ═══════════════════════════════════════════════════════════════

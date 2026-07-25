@@ -262,14 +262,20 @@ def read_subtitles(path: str, mark_garbled: bool = True,
     return cues
 
 
-def write_subtitles(path: str, cues: list[dict]):
+def write_subtitles(path: str, cues: list[dict], template_path: str = None):
     """Write cue list back to subtitle file. Auto-detects SRT vs ASS.
 
     Cues are re-numbered sequentially (1, 2, 3...) for SRT.
     Start/end timecodes are normalized to SRT comma format.
+
+    Args:
+        path: Output file path.
+        cues: Cue list to write.
+        template_path: For ASS output, read header/styles from this file
+                       if the output doesn't exist yet (new translation).
     """
     if path.lower().endswith('.ass'):
-        return _write_ass_cues(path, cues)
+        return _write_ass_cues(path, cues, template_path=template_path)
     else:
         return _write_srt_cues(path, cues)
 
@@ -468,11 +474,25 @@ def _read_ass_cues(path: str, mark_garbled: bool = True,
     return cues
 
 
-def _write_ass_cues(path: str, cues: list[dict]):
-    """Write cue list to ASS file."""
+def _write_ass_cues(path: str, cues: list[dict], template_path: str = None):
+    """Write cue list to ASS file.
+
+    Args:
+        path: Output ASS file path.
+        cues: Cue list with _start_line and _ass_dialogue metadata.
+        template_path: If `path` doesn't exist, read header/styles from this file.
+    """
     from lib.ass_utils import read_ass_file, build_dialogue_line
 
-    lines = read_ass_file(path)
+    # If output doesn't exist, use template for header/styles
+    read_path = path if os.path.exists(path) else (template_path or path)
+    if not os.path.exists(read_path):
+        raise FileNotFoundError(
+            f'ASS output "{path}" does not exist and no template_path provided. '
+            f'Pass template_path= to write_subtitles() for new translations.'
+        )
+
+    lines = read_ass_file(read_path)
     # Build index: line_number → cue
     cue_by_line = {}
     for cue in cues:

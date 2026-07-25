@@ -50,24 +50,81 @@ from lib.config import (
 BATCH_SIZE = 10   # cues per API call
 DELAY = 1.0       # seconds between batches
 
-SYSTEM_PROMPT = """你是动画字幕翻译专家。将日语字幕翻译为自然口语化的中文。
+# ═══════════════════════════════════════════════════════════════
+# Language detection & prompt building
+# ═══════════════════════════════════════════════════════════════
+
+# Character ranges for CJK / Cyrillic / Kana detection
+import unicodedata
+
+
+def _detect_source_lang(cues, sample_size=20):
+    """Detect source language from cue text. Returns 'ja', 'ru', 'zh', or 'other'.
+
+    Samples up to `sample_size` cues and counts characters in each script.
+    """
+    ja_count = 0
+    ru_count = 0
+    zh_count = 0
+    total_chars = 0
+
+    for cue in cues[:sample_size]:
+        text = cue.get('text', '') if isinstance(cue, dict) else str(cue)
+        for ch in text:
+            cp = ord(ch)
+            if 0x3040 <= cp <= 0x30FF:    # Hiragana + Katakana
+                ja_count += 1
+            elif 0x0400 <= cp <= 0x04FF:   # Cyrillic
+                ru_count += 1
+            elif 0x4E00 <= cp <= 0x9FFF:   # CJK Unified
+                zh_count += 1
+            total_chars += 1
+
+    if total_chars == 0:
+        return 'other'
+
+    ja_ratio = ja_count / total_chars
+    ru_ratio = ru_count / total_chars
+
+    if ja_ratio >= 0.05:
+        return 'ja'
+    if ru_ratio >= 0.05:
+        return 'ru'
+    if zh_count / total_chars >= 0.3:
+        return 'zh'
+    return 'other'
+
+
+def _build_system_prompt(source_lang):
+    """Build system prompt with language-specific rules."""
+    lang_name = {'ja': '日语', 'ru': '俄语', 'zh': '中文', 'other': '外语'}.get(source_lang, '外语')
+
+    base = f"""你是动画字幕翻译专家。将{lang_name}字幕翻译为自然口语化的中文。
 
 规则：
 1. **准确翻译**：保持原意，不增不减
 2. **口语化**：用自然中文口语表达，避免翻译腔
-   - 省略冗余主语（日语主语常可省略）
-   - 敬语适度（です/ます 不一定翻成"请"）
    - 书面词换口语词（"如何"→"怎么"、"迅速"→"快"）
 3. **角色语言风格**：
    - 老年男性：用语稳重、简洁
    - 少年/儿童：口语化、直接
    - 女性：自然柔和（不要过度加"呢""哦"）
 4. **保持专有名词**：角色名、地名、组织名、术语不改变原文
-5. **字幕长度适中**：翻译后不应明显变长或变短
+5. **字幕长度适中**：翻译后不应明显变长或变短"""
 
-输入是一组日语字幕，输出每条对应的中文翻译。
+    # Japanese-specific rules
+    if source_lang == 'ja':
+        base += """
+   - 省略冗余主语（日语主语常可省略）
+   - 敬语适度（です/ます 不一定翻成"请"）"""
+
+    base += f"""
+
+输入是一组{lang_name}字幕，输出每条对应的中文翻译。
 输出必须是严格的 JSON 数组，每个元素是翻译后的中文字幕字符串。
 不要输出任何 JSON 之外的内容。"""
+    return base
+
 
 USER_TEMPLATE = """上下文（前面已翻译的字幕）：
 {context_before}
@@ -350,8 +407,10 @@ def _parse_json_response(response):
     # Strategy 1: direct parse after stripping markdown fences
     cleaned = response.strip()
     if cleaned.startswith('```'):
-        cleaned = re.sub(r'^```\w*\n', '', cleaned)
-        cleaned = re.sub(r'\n```$', '', cleaned)
+        # Remove opening fence (```json or just ```)
+        cleaned = re.sub(r'^```[\w-]*\s*', '', cleaned)
+        # Remove closing fence
+        cleaned = re.sub(r'\s*```\s*$', '', cleaned)
     strategies.append(cleaned)
 
     # Strategy 2: extract first JSON array via regex
@@ -414,12 +473,13 @@ def _parse_json_response(response):
     return None
 
 
-def _translate_batch(cues, api_key, model, base_url, glossary_str, context_texts=None):
+def _translate_batch(cues, api_key, model, base_url, glossary_str, context_texts=None, source_lang='ja'):
     """Translate one batch of cues. Returns list of translated text or None.
 
     Args:
         cues: list of cue dicts to translate
         context_texts: optional list of already-translated strings for context
+        source_lang: detected source language ('ja', 'ru', 'zh', 'other')
     """
     texts = [c['text'] if isinstance(c, dict) else str(c) for c in cues]
 
@@ -438,7 +498,7 @@ def _translate_batch(cues, api_key, model, base_url, glossary_str, context_texts
     )
 
     messages = [
-        {'role': 'system', 'content': SYSTEM_PROMPT},
+        {'role': 'system', 'content': _build_system_prompt(source_lang)},
         {'role': 'user', 'content': user_msg},
     ]
 
@@ -456,7 +516,7 @@ def _translate_batch(cues, api_key, model, base_url, glossary_str, context_texts
 def translate_file(input_path, output_path, glossary_str, ja_to_zh,
                    api_key, model, base_url,
                    op_zh=None, ed_zh=None, op_texts=None, ed_texts=None,
-                   dry_run=False):
+                   dry_run=False, source_lang=None):
     """Translate a single subtitle file (SRT or ASS).
 
     Returns (total, translated, failed).
@@ -468,6 +528,11 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
     if total == 0:
         print(f'  {fname}: 0 cues (empty)', file=sys.stderr)
         return 0, 0, 0
+
+    # Auto-detect source language if not specified
+    if source_lang is None:
+        source_lang = _detect_source_lang(cues)
+        print(f'  {fname}: detected source language = {source_lang}', file=sys.stderr)
 
     # Step 1: OP/ED pre-replace
     oped_replaced = 0
@@ -506,7 +571,7 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
             continue
 
         result = _translate_batch(batch, api_key, model, base_url, glossary_str,
-                                  context_texts=translated_context)
+                                  context_texts=translated_context, source_lang=source_lang)
 
         if result:
             for j, translated_text in enumerate(result):
@@ -520,7 +585,7 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
             print(f'\n    [retry] batch {i//BATCH_SIZE+1}', file=sys.stderr)
             time.sleep(1)
             result = _translate_batch(batch, api_key, model, base_url, glossary_str,
-                                      context_texts=translated_context)
+                                      context_texts=translated_context, source_lang=source_lang)
             if result:
                 for j, translated_text in enumerate(result):
                     if j < len(batch) and translated_text and translated_text != batch[j]['text']:
@@ -544,7 +609,7 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
     # Write output
     if not dry_run and translated > 0:
         os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
-        write_subtitles(output_path, result_cues)
+        write_subtitles(output_path, result_cues, template_path=input_path)
 
     return total, translated + oped_replaced, failed
 
@@ -554,7 +619,7 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
 # ═══════════════════════════════════════════════════════════════
 
 def translate_dir(input_dir, output_dir, glossary_str, ja_to_zh,
-                  api_key, model, base_url, dry_run=False):
+                  api_key, model, base_url, dry_run=False, source_lang=None):
     """Translate all SRT/ASS files in a directory."""
     if not os.path.isdir(input_dir):
         print(f'ERROR: {input_dir} not found', file=sys.stderr)
@@ -593,7 +658,7 @@ def translate_dir(input_dir, output_dir, glossary_str, ja_to_zh,
             api_key, model, base_url,
             op_zh=op_zh, ed_zh=ed_zh,
             op_texts=op_texts, ed_texts=ed_texts,
-            dry_run=dry_run,
+            dry_run=dry_run, source_lang=source_lang,
         )
 
         grand_total += total
@@ -615,7 +680,8 @@ def main():
     global BATCH_SIZE
 
     parser = argparse.ArgumentParser(
-        description='SRT/ASS Japanese→Chinese batch translator (OpenAI-compatible API)')
+        description='SRT/ASS batch translator via OpenAI-compatible API '
+                    '(auto-detects source language: ja/ru/zh)')
     parser.add_argument('--input', help='Single SRT/ASS file to translate')
     parser.add_argument('--output', help='Output file path (single file mode)')
     parser.add_argument('--input-dir', help='Directory of SRT/ASS files to translate')
@@ -631,6 +697,9 @@ def main():
                         help='Preview only, no API calls')
     parser.add_argument('--batch', type=int, default=BATCH_SIZE,
                         help=f'Cues per batch (default: {BATCH_SIZE})')
+    parser.add_argument('--source-lang', choices=['ja', 'ru', 'zh', 'other'],
+                        default=None,
+                        help='Source language (default: auto-detect from cues)')
     args = parser.parse_args()
 
     # API key（LLM_API_KEY 优先，回退到 POLISH_API_KEY）
@@ -642,8 +711,8 @@ def main():
         sys.exit(1)
 
     # Model and base URL from env vars (with fallback to CLI defaults)
-    model = LLM_MODEL or args.model
-    base_url = LLM_BASE_URL or args.base_url
+    model = args.model or LLM_MODEL or LLM_MODEL_DEFAULT
+    base_url = args.base_url or LLM_BASE_URL or LLM_BASE_URL_DEFAULT
 
     # Load glossary/mappings (--mappings preferred, --glossary as fallback)
     glossary_str = ''
@@ -663,11 +732,13 @@ def main():
             base = os.path.splitext(os.path.basename(args.input))[0]
             args.output = os.path.join(args.output_dir, f'{base}.srt')
         translate_file(args.input, args.output, glossary_str, ja_to_zh,
-                       api_key, model, base_url, dry_run=args.dry_run)
+                       api_key, model, base_url, dry_run=args.dry_run,
+                       source_lang=args.source_lang)
     # Directory mode
     elif args.input_dir:
         translate_dir(args.input_dir, args.output_dir, glossary_str, ja_to_zh,
-                      api_key, model, base_url, dry_run=args.dry_run)
+                      api_key, model, base_url, dry_run=args.dry_run,
+                      source_lang=args.source_lang)
     else:
         parser.print_help()
         sys.exit(1)
