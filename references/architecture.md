@@ -11,7 +11,7 @@ scripts/
 ├── fix/
 │   ├── fix_orchestrator.py        ← 统一修复模块（Fixer 类）：参考→Whisper→auto_triage
 │   ├── episode_workflow.py        ← 单集编排器（大部分逻辑已迁移到 Fixer）
-│   ├── whisper_pipeline.py        ← Whisper Tier 1/2 + VAD + build_fix_regions (v5.3: unified region builder)
+│   ├── whisper_pipeline.py        ← Whisper Tier 1/2 + VAD + build_fix_regions (unified region builder)
 │   ├── translate_srt.py           ← 百度翻译 SRT（text 模式专用）
 │   ├── oped_fixer.py              ← 跨集 OP/ED 检测与修复
 │   └── compare_srt.py             ← 时间码对齐 + 文本相似度比对
@@ -54,7 +54,7 @@ run_all.py (唯一入口)
   │     └─ VAD 语音时间线: 提取音频 → WebRTC VAD → 缓存 speech timeline
   │           → temp/scans/EPxxx_vad.json
   ├─→ episode_workflow.py EPxxx       Phase 2: 逐集（subprocess）
-  │     └─→ Fixer.run_auto()          (v5.3: unified VAD-driven single path)
+  │     └─→ Fixer.run_auto()          (unified VAD-driven single path)
   │           ├─ fix_by_reference()    → translate_srt.py + compare_srt.py
   │           ├─ fix_by_whisper()      → whisper_pipeline.py → whisper-cli.exe
   │           │     ├─ 复用 Phase 1 VAD 缓存
@@ -74,7 +74,7 @@ unified_scanner (Phase 1)
   │  输出 findings.json → per_episode_issues[EP001] = [乱码 cue 列表]
   │  VAD 缓存 → temp/scans/EP001_vad.json
   ▼
-Fixer.run_auto() (Phase 2, v5.3)
+Fixer.run_auto() (Phase 2)
   │  读 findings.json → 知道哪些集有乱码
   │  复用 Phase 1 VAD 缓存 → build_fix_regions()
   │  转为 cluster 格式 → Tier 1/2 Whisper → match_whisper_to_cues()
@@ -111,11 +111,11 @@ Whisper 输出 replacement
       └─ 其余 → 人工
 ```
 
-## v5.3: VAD 统一修复架构
+## VAD 统一修复架构
 
 ### 设计理念
 
-v5.3 将修复管线从**双路径**（乱码修复 + 缺字幕补全）重构为**统一 VAD 驱动**的单路径。
+修复管线是**统一 VAD 驱动**的单路径（原为乱码修复 + 缺字幕补全双路径，已合并）。
 核心思想：VAD 人声段落是对话的原子单位 — 所有字幕修复都围绕 VAD speech segment 展开。
 
 `build_fix_regions()` 一个函数替代了 `build_clusters()` + `find_missing_subtitle_gaps()` + `add_placeholder_cues()`，
