@@ -7,11 +7,11 @@
 ```
 scripts/
 ├── run_all.py                     ← 批量编排器，逐集调 episode_workflow
-├── scan/unified_scanner.py        ← 单次遍历：乱码检测 + 重复检测 + 术语收集 + (v5.0) VAD 无字幕检测
+├── scan/unified_scanner.py        ← 单次遍历：乱码检测 + 重复检测 + 术语收集 + VAD 语音时间线提取
 ├── fix/
 │   ├── fix_orchestrator.py        ← 统一修复模块（Fixer 类）：参考→Whisper→auto_triage
 │   ├── episode_workflow.py        ← 单集编排器（大部分逻辑已迁移到 Fixer）
-│   ├── whisper_pipeline.py        ← Whisper Tier 1 拼接 / Tier 2 整集 + VAD + build_clusters
+│   ├── whisper_pipeline.py        ← Whisper Tier 1/2 + VAD + build_fix_regions (v5.3: unified region builder)
 │   ├── translate_srt.py           ← 百度翻译 SRT（text 模式专用）
 │   ├── oped_fixer.py              ← 跨集 OP/ED 检测与修复
 │   └── compare_srt.py             ← 时间码对齐 + 文本相似度比对
@@ -51,14 +51,14 @@ scripts/
 run_all.py (唯一入口)
   ├─→ unified_scanner.py              Phase 1: 全量扫描 → findings.json
   │     ├─ 字符扫描: garbled chars + repeats + term freq
-  │     └─ (v5.0) VAD 扫描: 提取音频 → WebRTC VAD → missing_subtitles
-  │           缓存 speech timeline → temp/scans/EPxxx_vad.json
+  │     └─ VAD 语音时间线: 提取音频 → WebRTC VAD → 缓存 speech timeline
+  │           → temp/scans/EPxxx_vad.json
   ├─→ episode_workflow.py EPxxx       Phase 2: 逐集（subprocess）
-  │     └─→ Fixer.run_auto()          (cascading: ref → Whisper → missing-sub fill)
+  │     └─→ Fixer.run_auto()          (v5.3: unified VAD-driven single path)
   │           ├─ fix_by_reference()    → translate_srt.py + compare_srt.py
   │           ├─ fix_by_whisper()      → whisper_pipeline.py → whisper-cli.exe
-  │           │     └─ 复用 Phase 1 VAD 缓存 (避免重复提取音频)
-  │           ├─ fix_missing_subtitles() (v5.0) → gap 音频 → Whisper → 插入新 cue
+  │           │     ├─ 复用 Phase 1 VAD 缓存
+  │           │     └─ build_fix_regions() 统一检测（garbled/partial/missing）
   │           └─ review_ai()           AI 短碎片清单 → [???] 标记写入 SRT
   ├─→ step_nouns()                    Phase 3: noun_checker → AI review
   ├─→ step_apply_all()                Phase 3: apply_fixes（收集所有 fixes 一次应用）
@@ -72,10 +72,12 @@ run_all.py (唯一入口)
 unified_scanner (Phase 1)
   │  扫描 AI审查后/*.srt
   │  输出 findings.json → per_episode_issues[EP001] = [乱码 cue 列表]
+  │  VAD 缓存 → temp/scans/EP001_vad.json
   ▼
-Fixer.run_auto() (Phase 2)
+Fixer.run_auto() (Phase 2, v5.3)
   │  读 findings.json → 知道哪些集有乱码
-  │  build_clusters() → Tier 1/2 Whisper → match_whisper_to_cues()
+  │  复用 Phase 1 VAD 缓存 → build_fix_regions()
+  │  转为 cluster 格式 → Tier 1/2 Whisper → match_whisper_to_cues()
   │  auto_triage: looks_like_plausible_japanese() → 分诊
   │  ├── 可读 → 直接写 SRT + 报告 ✅
   │  ├── 短碎片 → AI 补全 ⬜
@@ -109,11 +111,15 @@ Whisper 输出 replacement
       └─ 其余 → 人工
 ```
 
-## v5.0: VAD 有人声无字幕检测
+## v5.3: VAD 统一修复架构
 
 ### 设计理念
 
-"有人声无字幕" 是字幕文件的 **第一类错误**，与乱码字符并列。v5.0 将其从 Phase 2 的副作用升级为 Phase 1 的正式检测。
+v5.3 将修复管线从**双路径**（乱码修复 + 缺字幕补全）重构为**统一 VAD 驱动**的单路径。
+核心思想：VAD 人声段落是对话的原子单位 — 所有字幕修复都围绕 VAD speech segment 展开。
+
+`build_fix_regions()` 一个函数替代了 `build_clusters()` + `find_missing_subtitle_gaps()` + `add_placeholder_cues()`，
+统一检测三种场景：乱码、部分重叠、缺字幕。删除 ⚠SPEECH 占位符机制。
 
 ### 数据流
 
@@ -121,56 +127,52 @@ Whisper 输出 replacement
 Phase 1 (Scan)
   unified_scanner.py --video-dir <DIR>
     │
-    ├─ 文本扫描 (existing): garbled_cues → findings.json
+    ├─ 文本扫描: garbled_cues → findings.json
     │
-    └─ VAD 扫描 (NEW):
-        1. _find_video_for_srt() → 匹配视频文件（集号匹配）
+    └─ VAD 扫描:
+        1. _find_video_for_srt() → 匹配视频文件
         2. extract_audio_wav() → 16kHz mono WAV
-        3. whisper_pipeline.get_speech_timeline() → WebRTC VAD
-        4. whisper_pipeline.find_missing_subtitle_gaps() → 发现 gaps
-        5. 写入 findings.json:
-           {
-             "missing_subtitles": {
-               "EP001": [{"start_s": 120.5, "end_s": 125.3, "duration": 4.8}, ...]
-             }
-           }
-        6. _save_vad_cache() → temp/scans/EPxxx_vad.json (Phase 2 复用)
+        3. get_speech_timeline() → WebRTC VAD → speech_segs
+        4. _save_vad_cache() → temp/scans/EPxxx_vad.json
+        (不再做 gap detection — 移至 Phase 2)
 
-Phase 2 (Fix)
-  Fixer.fix_missing_subtitles()
+Phase 2 (Fix, unified)
+  Fixer.fix_by_whisper()
     │
-    1. 读 findings.json → missing_subtitles[episode]
-    2. 每个 gap: extract_audio_wav(ss, dur) → run_whisper()
-    3. 成功: is_valid_subtitle_text() → 插入新 cue (format_tc)
-    4. 失败: → 插入 [???] 标记 cue
-    5. write_srt() (插入 + 排序 + 重编号)
-    6. upsert_entries() → 问题解决报告.md (Layer 2)
-
-  Fixer.fix_by_whisper() — VAD clean 复用:
-    │
-    1. _load_speech_segs() → 尝试读取 Phase 1 缓存
-    2. 缓存命中: _apply_vad_clean_from_cache() (跳过音频提取)
-    3. 缓存未命中: 原有流程 (extract + VAD)
+    1. _load_speech_segs() → 读取 Phase 1 VAD 缓存
+    2. vad_delete_nonspeech() → 删除纯非人声 cue
+    3. build_fix_regions(speech_segs, cues) → 统一检测:
+       ├─ type=garbled:        人声覆盖乱码 cue → fix region
+       ├─ type=partial_overlap: 人声部分覆盖 cue+延伸到 uncovered → fix region
+       └─ type=missing:        人声完全无 cue → fix region
+    4. _regions_to_clusters() → 转为 cluster 格式
+    5. Tier 1 (concat) 或 Tier 2 (full-ep) Whisper
+    6. Triage → auto-keep / AI fragments / auto-cut
+    7. cues_to_clear → orchestrator 删除被覆盖的 cue
+    8. new_cues → orchestrator 插入新 cue
 ```
 
-### 关键常量
+### 关键新增函数
 
-| 常量 | 值 | 位置 |
-|------|-----|------|
-| `MISSING_SUBTITLE_MIN_GAP` | 3.0s | unified_scanner.py |
-| `MISSING_SUBTITLE_MERGE_GAP` | 5.0s | unified_scanner.py |
-| `MISSING_SUBTITLE_MAX_GAP` | 45.0s | unified_scanner.py (跳过 OP/ED 歌曲) |
-| `SUSPICIOUS_GAP_SEC` | 20.0s | unified_scanner.py (文本启发式阈值) |
+| 函数 | 位置 | 用途 |
+|------|------|------|
+| `build_fix_regions()` | whisper_pipeline.py | 以 VAD speech segment 为 ground truth 统一构建 fix region |
+| `_regions_to_clusters()` | whisper_fixer.py | 将 fix regions 转为 Tier 1/2 兼容的 cluster 格式 |
+| `_collect_cues_to_clear()` | whisper_fixer.py | 从 regions 收集所有待删除的 overlapped cues |
+| `extract_speech_timeline()` | unified_scanner.py | Phase 1 纯语音时间线提取（不做 gap 检测） |
 
-### 新增 CLI 标志
+### 保留的核心函数
 
-| Flag | 用途 |
+| 函数 | 用途 |
 |------|------|
-| `--video-dir <DIR>` | 启用 Phase 1 VAD 检测 + Phase 2 Whisper |
-| `--skip-vad` | 跳过 VAD 检测（即使有 --video-dir） |
-| `--vad-cache-dir <DIR>` | VAD 缓存目录（默认 temp/scans/） |
+| `get_speech_timeline()` | WebRTC VAD 引擎 |
+| `vad_delete_nonspeech()` | VAD 非人声 cue 删除 |
+| `run_tier1()` / `run_tier2()` | Whisper 执行层（接受 cluster 格式，未变） |
+| `match_whisper_to_cues()` | Whisper 输出回贴 cue |
+| `build_clusters()` | 保留为向后兼容（标记 deprecated） |
 
 ### 向后兼容
 
 - 无 `--video-dir` → Phase 1 仅字符扫描，Phase 2 跳过（残血模式）
-- Phase 2 仍保留 fallback: 如 Phase 1 未产生 findings，`fix_by_whisper()` 的 `detect_missing_dialogue` 参数仍可在 Phase 2 做内联检测
+- Phase 2 不依赖 Phase 1 findings — VAD speech timeline 从缓存读取
+- 缓存未命中时 Phase 2 实时运行 VAD（`extract_audio_wav` + `get_speech_timeline`）

@@ -11,8 +11,8 @@ Phase 1: SCAN                    Phase 2: FIX                    Phase 3: UNIFY 
 ─────────────────                ─────────────────               ─────────────────────────
 unified_scanner.py               fix_orchestrator.py             noun_checker.py
   ├─ garbled_cues ───────────────→ Fixer.run_auto()               find_suspect_nouns.py
-  ├─ missing_subtitles ──────────→   ├─ WhisperFixer              oped_fixer.py
-  └─ glossary ───────────────────→   │   (VAD→cluster→Whisper)   apply_fixes.py
+  ├─ VAD speech timeline ────────→   ├─ WhisperFixer              oped_fixer.py
+  └─ glossary ───────────────────→   │   (VAD→fix regions→Whisper)  apply_fixes.py
                                       │                           step_deliver()
                                       ├─ FragmentProcessor
                                       │   (AI补全+VAD对齐)
@@ -46,7 +46,7 @@ scripts/
 ├── fix/                        # Phase 2: 错误修复引擎
 │   ├── fix_orchestrator.py     #   薄orchestrator — 组合WhisperFixer+FragmentProcessor
 │   ├── subtitle_session.py     #   路径解析/检测/缓存 — 被orchestrator和worker共用
-│   ├── whisper_fixer.py        #   VAD→聚类→Whisper转录→分诊 (数据契约:WhisperResult)
+│   ├── whisper_fixer.py        #   VAD→统一fix regions→Whisper转录→分诊 (v5.3, 数据契约:WhisperResult)
 │   ├── fragment_processor.py   #   AI碎片JSON+apply+VAD对齐 (直接写SRT, pragmatic exception)
 │   ├── oped_fixer.py           #   OP/ED跨集一致性修复
 │   ├── compare_srt.py          #   字幕对比/相似度
@@ -54,7 +54,7 @@ scripts/
 │   └── episode_workflow.py     #   单集子进程工作流
 │
 ├── scan/                       # Phase 1: 字符扫描
-│   └── unified_scanner.py      #   乱码检测+VAD缺失字幕扫描
+│   └── unified_scanner.py      #   乱码检测+VAD语音时间线提取 (v5.3: gap检测→Phase 2)
 │
 ├── nouns/                      # Phase 3: 专有名词
 │   ├── noun_checker.py         #   名词表对比

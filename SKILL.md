@@ -9,10 +9,13 @@ description: >
 
 # Subtitle Proofread
 
-3-phase pipeline：扫描（乱码 + VAD无字幕检测）→ Whisper 修复 + 缺字幕补全 → 专名统一 + 交付。无法自动修复的条目写入 `[???]` 标记，在 Aegisub 中审查。
+3-phase pipeline：扫描（乱码 + VAD语音时间线）→ Whisper 统一修复 → 专名统一 + 交付。无法自动修复的条目写入 `[???]` 标记，在 Aegisub 中审查。
 
 **资源驱动**：有什么用什么。有视频+Whisper→修复乱码+补全缺字幕；有参考字幕→注入 AI 校对上下文。缺资源也能残血运行——跳过缺失步骤，剩余步骤照常。
 
+> v5.3: Phase 2 重构 — `build_fix_regions()` 以 VAD 人声段落为 ground truth 统一处理
+> 乱码、部分重叠、缺字幕三种场景，替代原有的 `build_clusters()` + `find_missing_subtitle_gaps()` 双路径。
+> 删除 ⚠SPEECH 占位符机制，删除 `fix_missing_subtitles()` 独立路径。
 > v5.2: Phase 3 新增 `oped_fill.py`（三步全API空白行填充：边界检测→器乐分类→翻译模板）
 > + `oped_fixer.py` 集成 `--detect-boundaries` API 边界检测（替代硬编码 95s/120s）。
 > 详见 [references/architecture.md](references/architecture.md)。
@@ -96,7 +99,7 @@ git add -A && git commit -m "备份：pipeline前 — $(date +%Y-%m-%d)"
 ```bash
 cd "<project-root>"
 
-# 完整 pipeline（推荐）：扫描 + VAD 无字幕检测 + Whisper 修复
+# 完整 pipeline（推荐）：扫描 + VAD 语音检测 + Whisper 统一修复
 python "<scripts-dir>/run_all.py" \
   --input-dir "<SUBTITLE_DIR>" \
   --video-dir "<VIDEO_DIR>"
@@ -120,7 +123,7 @@ python "<scripts-dir>/run_all.py" \
 ```
 
 > `--input-dir` 指定字幕子目录（默认 `AI审查后`）。`--lang` 自动检测。
-> `--video-dir` 启用 VAD 有人声无字幕检测 + Whisper 修复。无视频时加 `--skip-whisper` 残血运行。
+> `--video-dir` 启用 VAD 语音检测 + Whisper 统一修复（v5.3：乱码+部分重叠+缺字幕一次处理）。无视频时加 `--skip-whisper` 残血运行。
 > `--limit` 只限 Phase 2 修复集数，扫描覆盖全部文件。
 
 ### 模块化调用
@@ -302,16 +305,21 @@ python "<scripts>/translate_srt.py" --input-dir "<日文源>" --output-dir "<输
 ```
 Phase 1: Scan
   → unified_scanner: garbled chars, repeat patterns, term frequency
-  → VAD 有人声无字幕检测（需 --video-dir，无视频自动跳过）
+  → VAD 语音时间线提取（需 --video-dir，无视频自动跳过）
+     v5.3: 不做 gap 检测 — 移至 Phase 2 build_fix_regions()
   → build_glossary → proper-nouns.md
   → glossary AI review: AI reads full glossary, manages whitelist/blacklist directly (🤖)
-  → Output: findings.json + proper-nouns.md
+  → Output: findings.json + proper-nouns.md + {EP}_vad.json 缓存
   → Does NOT write to 问题解决报告（scan is read-only）
 
-Phase 2: Triage
+Phase 2: Triage (v5.3: unified VAD-driven)
   → 若有参考字幕 → 注入 reference_text 到 AI fragments（原文，不翻译）
-  → VAD clean + Whisper garbled fix (复用 Phase 1 VAD 缓存)
-  → (v5.0) Missing subtitle fill: gap 音频 → Whisper → 插入新 cue / [???]
+  → VAD clean: 删除非人声 cue（[音楽][拍手] 等）
+  → build_fix_regions(): 以 VAD 人声段落为 ground truth 统一检测
+     ├─ type=garbled:    人声覆盖乱码 cue → 清空重录
+     ├─ type=partial_overlap: 人声部分覆盖 cue + 延伸到 uncovered → 清空重录
+     └─ type=missing:    人声完全无 cue 覆盖 → 插入新 cue
+  → 转为 cluster 格式 → Tier 1/2 Whisper → match back → triage
   → classify + triage → auto-keep ✅ / ai_fragments 🤖 / auto-cut 🗑️
   → Baidu 翻译 (--lang zh): Whisper 输出 ja→zh（无凭证时降级 AI 翻译）
 
@@ -448,7 +456,7 @@ python "<scripts-dir>/fix/oped_fill.py" "<SUBTITLE_DIR>" \
 | `--dry-run` | Preview, no file changes |
 | `--input-dir <DIR>` | Subtitle subdirectory (default: `AI审查后`). Use `.` for direct path |
 | `--target-dir <DIR>` | Project root (default: CWD) |
-| `--video-dir <DIR>` | Video directory — enables VAD + Whisper (v5.0: VAD missing-sub detection) |
+| `--video-dir <DIR>` | Video directory — enables VAD speech detection + Whisper unified fix (v5.3) |
 | `-e EP005-EP010` | Specific episode range |
 | `--limit 5` | First N episodes only |
 | `--skip-whisper` | Skip audio processing (残血模式) |
