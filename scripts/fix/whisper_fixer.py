@@ -407,7 +407,8 @@ class WhisperFixer:
 
             for f in all_items:
                 eval_text = (f.get('replacement')
-                             or f.get('original', '')).strip()
+                             or f.get('original')
+                             or '').strip()
 
                 # ① No meaningful chars → auto-cut
                 if meaningful_char_count(eval_text, self._target_lang) < 2:

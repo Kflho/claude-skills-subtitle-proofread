@@ -369,6 +369,16 @@ def _transcribe_whisper_cpp(audio_path, model_path, language,
             os.remove(json_path)
         return []
 
+    # DEBUG: Save a copy for root-cause analysis (persistent location)
+    try:
+        import shutil
+        persistent_dir = os.path.join(os.path.expanduser('~'), '.claude', 'whisper_debug')
+        os.makedirs(persistent_dir, exist_ok=True)
+        debug_path = os.path.join(persistent_dir, os.path.basename(json_path))
+        shutil.copy2(json_path, debug_path)
+        print(f'  [debug] Whisper JSON saved to: {debug_path}', file=sys.stderr)
+    except Exception:
+        pass
     os.remove(json_path)
 
     # ── Parse JSON with version-aware compat ──
