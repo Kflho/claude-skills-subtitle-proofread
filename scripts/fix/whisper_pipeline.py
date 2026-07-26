@@ -479,43 +479,56 @@ def _is_context_text(whisper_text, left_text, right_text, threshold=0.5):
     return False
 
 
-def build_clusters(cues):
-    """Cluster garbled cues by proximity, expand to clean cue boundaries."""
+def _cluster_garbled_cues(cues):
+    """Fallback: cluster garbled cues by proximity (no VAD available)."""
     garbled_cues = [c for c in cues if c.get('is_garbled')]
     if not garbled_cues:
         return []
-
     groups, current = [], [garbled_cues[0]]
     for g in garbled_cues[1:]:
         if g['start_s'] - current[-1]['start_s'] <= MAX_CLUSTER_GAP:
             current.append(g)
         else:
-            groups.append(current)
-            current = [g]
+            groups.append(current); current = [g]
     groups.append(current)
-
     clusters = []
     for g_group in groups:
         first, last = g_group[0], g_group[-1]
-        left_idx = next((k for k, c in enumerate(cues) if c['start'] == first['start']), 0)
-        right_idx = next((k for k, c in enumerate(cues) if c['start'] == last['start']), 0)
-
-        left = next((cues[k] for k in range(left_idx - 1, -1, -1)
+        li = next((k for k, c in enumerate(cues) if c['start'] == first['start']), 0)
+        ri = next((k for k, c in enumerate(cues) if c['start'] == last['start']), 0)
+        left = next((cues[k] for k in range(li - 1, -1, -1)
                      if not cues[k].get('is_garbled') and cues[k]['text']), None)
-        right = next((cues[k] for k in range(right_idx + 1, len(cues))
+        right = next((cues[k] for k in range(ri + 1, len(cues))
                       if not cues[k].get('is_garbled') and cues[k]['text']), None)
-
-        # Expand to include adjacent clean cues as acoustic context.
-        # Using left['start_s'] (not left['end_s']) means Whisper hears
-        # the full preceding sentence before attempting the garbled one.
         ss = left['start_s'] if left else max(0, first['start_s'] - GAP_SEC)
         es = right['end_s'] if right else last['end_s'] + GAP_SEC
         ss, es = min(ss, first['start_s']), max(es, last['end_s'])
-
         clusters.append({
             'ss': ss, 'es': es, 'dur': es - ss,
             'garbled': g_group,
-            # Full text stored for _is_context_text() filtering in match_whisper_to_cues
+            'left_text': left['text'] if left else '',
+            'right_text': right['text'] if right else '',
+        })
+    return clusters
+
+
+def regions_to_clusters(regions):
+    """Convert fix regions to cluster format for Tier 1 Whisper.
+
+    Expands region boundaries to include adjacent context cues
+    as acoustic context for better Whisper accuracy.
+    """
+    clusters = []
+    for region in regions:
+        left = region.get('context_left')
+        right = region.get('context_right')
+        ss = left['start_s'] if left else max(0, region['start_s'] - GAP_SEC)
+        es = right['end_s'] if right else region['end_s'] + GAP_SEC
+        ss, es = min(ss, region['start_s']), max(es, region['end_s'])
+
+        clusters.append({
+            'ss': ss, 'es': es, 'dur': es - ss,
+            'garbled': region['cues_to_clear'],
             'left_text': left['text'] if left else '',
             'right_text': right['text'] if right else '',
         })
@@ -925,7 +938,12 @@ def main():
             tier = 1
             print(f'[tier] {len(garbled)} fragments ≤ {UPGRADE_THRESHOLD} → Tier 1 (segment)',
                   file=sys.stderr)
-            clusters = build_clusters(cues)
+            if speech_segs:
+                regions = build_fix_regions(speech_segs, cues)
+                clusters = regions_to_clusters(regions) if regions else []
+            else:
+                # No VAD — cluster garbled cues by proximity only
+                clusters = _cluster_garbled_cues(cues)
             print(f'  {len(clusters)} clusters', file=sys.stderr)
             if not clusters:
                 print('⚠ No clusters built — skipping Whisper.', file=sys.stderr)
@@ -939,7 +957,7 @@ def main():
             if unmatched and args.retry_model:
                 print(f'\n[retry] {len(unmatched)} unmatched → retry with backup model ...',
                       file=sys.stderr)
-                retry_clusters = build_clusters(
+                retry_clusters = _cluster_garbled_cues(
                     [{**c, 'is_garbled': True} if c['start'] in {u['start'] for u in unmatched}
                      else c for c in cues]
                 )

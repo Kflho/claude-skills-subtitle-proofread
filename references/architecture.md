@@ -169,7 +169,7 @@ Phase 2 (Fix, unified)
 | `vad_delete_nonspeech()` | VAD 非人声 cue 删除 |
 | `run_tier1()` / `run_tier2()` | Whisper 执行层（接受 cluster 格式，未变） |
 | `match_whisper_to_cues()` | Whisper 输出回贴 cue |
-| `build_clusters()` | 保留为向后兼容（标记 deprecated） |
+| `_cluster_garbled_cues()` | 无 VAD 时的 garbled-only 聚类回退（standalone CLI） |
 
 ### 向后兼容
 

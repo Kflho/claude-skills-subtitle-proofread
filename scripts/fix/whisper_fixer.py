@@ -202,7 +202,7 @@ class WhisperFixer:
     def fix_by_whisper(self, *, separate_vocals: bool = True,
                        force_tier2: bool = False,
                        skip_vad_clean: bool = False) -> WhisperResult:
-        """Run Whisper auto-fix pipeline (v5.3: unified VAD-driven).
+        """Run Whisper auto-fix pipeline (unified VAD-driven).
 
         1. VAD clean: delete non-speech cues
         2. Build unified fix regions from VAD speech segments
@@ -297,7 +297,8 @@ class WhisperFixer:
 
             # Convert regions → cluster format for Tier 1/2 compatibility.
             # Context cues expand the audio range for better Whisper accuracy.
-            clusters = _regions_to_clusters(regions)
+            from fix.whisper_pipeline import regions_to_clusters
+            clusters = regions_to_clusters(regions)
 
             total_garbled = sum(len(r['garbled_cues']) for r in regions)
             total_cues_to_clear = sum(len(r['cues_to_clear']) for r in regions)
@@ -339,7 +340,7 @@ class WhisperFixer:
                     if unmatched_cues and self._retry_model:
                         print(f'[whisper] {len(unmatched_cues)} unmatched → '
                               f'retry with backup model', file=sys.stderr)
-                        retry_clusters = _regions_to_clusters(
+                        retry_clusters = regions_to_clusters(
                             build_fix_regions(speech_segs, cues,
                                               target_lang=self._target_lang))
                         if retry_clusters:
@@ -454,36 +455,6 @@ class WhisperFixer:
         finally:
             import shutil
             shutil.rmtree(tmpdir, ignore_errors=True)
-
-    # ═══════════════════════════════════════════════════════════
-    # Helpers: region → cluster conversion (v5.3)
-    # ═══════════════════════════════════════════════════════════
-
-
-def _regions_to_clusters(regions):
-    """Convert fix regions to cluster format for Tier 1 Whisper.
-
-    Expands region boundaries to include adjacent context cues
-    as acoustic context for better Whisper accuracy.
-    """
-    from fix.whisper_pipeline import GAP_SEC
-
-    clusters = []
-    for region in regions:
-        left = region.get('context_left')
-        right = region.get('context_right')
-        ss = left['start_s'] if left else max(0, region['start_s'] - GAP_SEC)
-        es = right['end_s'] if right else region['end_s'] + GAP_SEC
-        ss, es = min(ss, region['start_s']), max(es, region['end_s'])
-
-        clusters.append({
-            'ss': ss, 'es': es, 'dur': es - ss,
-            'garbled': region['cues_to_clear'],
-            'left_text': left['text'] if left else '',
-            'right_text': right['text'] if right else '',
-        })
-    return clusters
-
 
 def _collect_cues_to_clear(regions):
     """Collect all cues_to_clear from fix regions, deduplicated by start time."""
