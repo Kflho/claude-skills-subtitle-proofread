@@ -41,8 +41,17 @@ python "<scripts-dir>/auto_translate.py" \
 | `unknown_suspect` | 未识别疑似专名 | 判断是否专名 → 是：补 `noun_mappings.json` + 统一 SRT；否：补 `temp/zh_common_blacklist.json` |
 
 **大规模审查（100+ unknown_suspect）**：不要逐条硬查。
-→ 写脚本用 API 批量分类（30条/批，deepseek-v4-pro 成本 ~$0.01）
-→ 普通词补黑名单，专名补映射表，重扫 → 迭代至归零
+→ 用 `batch_classify.py` 批量分类（30条/批，API 成本 ~$0.30-0.50）
+→ 普通词自动补黑名单，专名自动补映射表，重扫 → 迭代至归零
+
+```bash
+# 一键批量分类
+python "<scripts-dir>/batch_classify.py"
+
+# 先测试几批
+python "<scripts-dir>/batch_classify.py" --limit 3
+```
+
 → 完整流程见 [references/batch-review.md](references/batch-review.md)
 
 ### ASS 格式项目
@@ -111,6 +120,87 @@ python "<scripts-dir>/run_all.py" \
 > `--input-dir` 指定字幕子目录（默认 `AI审查后`）。`--lang` 自动检测。
 > `--video-dir` 启用 VAD 有人声无字幕检测 + Whisper 修复。无视频时加 `--skip-whisper` 残血运行。
 > `--limit` 只限 Phase 2 修复集数，扫描覆盖全部文件。
+
+### 模块化调用
+
+`run_all.py` 适合一键跑完，但每个 Phase 的底层脚本也可独立调用——调试/定制流程/单步骤重跑时不用从头来。
+
+**Phase 1：扫描**（只读，不改文件）
+
+```bash
+# 全量扫描：乱码 + 词频 + 词表生成
+python "<scripts-dir>/scan/unified_scanner.py" \
+  --target-dir "<SUBTITLE_DIR>" \
+  --output-findings temp/scans/findings.json \
+  --build-glossary --project-lang zh
+
+# 从 findings 生成专名表
+python "<scripts-dir>/nouns/build_glossary.py" \
+  --findings temp/scans/findings.json \
+  -o reports/proper-nouns.md \
+  --mappings-output temp/noun_mappings.json
+```
+
+**Phase 2：修复**（改 SRT，逐集运行）
+
+```bash
+# 单集修复（audio 模式：VAD + Whisper）
+python "<scripts-dir>/fix/episode_workflow.py" EP001 \
+  --mode audio --project-dir "<PROJECT_DIR>"
+
+# 单集修复（text 模式：参考字幕对比）
+python "<scripts-dir>/fix/episode_workflow.py" EP001 \
+  --mode text --project-dir "<PROJECT_DIR>"
+
+# 仅预览（不改文件）
+python "<scripts-dir>/fix/episode_workflow.py" EP001 --dry-run
+
+# 单步骤拆分
+python "<scripts-dir>/fix/episode_workflow.py" EP001 --step audio      # VAD + Whisper 转录
+python "<scripts-dir>/fix/episode_workflow.py" EP001 --step translate  # 翻译参考字幕
+python "<scripts-dir>/fix/episode_workflow.py" EP001 --step compare    # 对比 Whisper vs 参考
+python "<scripts-dir>/fix/episode_workflow.py" EP001 --step apply      # 应用修复
+python "<scripts-dir>/fix/episode_workflow.py" EP001 --step ai-review  # AI 审查碎片
+```
+
+**Phase 3：专名统一**（扫描 + 交互审查）
+
+```bash
+# 有日文源 → 交叉比对
+python "<scripts-dir>/auto_translate.py" \
+  --source-dir "<日文源>" --target-dir "<中文翻译>" \
+  --mappings temp/noun_mappings.json
+
+# 无日文源 → 中文侧扫描
+python "<scripts-dir>/auto_translate.py" \
+  --target-dir "<中文翻译>" \
+  --mappings temp/noun_mappings.json
+
+# 仅扫描专名（不比对 SRT）
+python "<scripts-dir>/nouns/find_suspect_nouns.py" \
+  --target-dir "<中文翻译>" --project-lang zh
+```
+
+**Phase 4：AI 润色**（--lang zh 项目可选）
+
+```bash
+python "<scripts-dir>/polish_zh.py" --input-dir "<SUBTITLE_DIR>"
+```
+
+### LLM API 配置
+
+翻译（`translate_srt.py`）、润色（`polish_zh.py`）、fix_tail_wo 翻译步骤共用 `LLM_API_KEY`。
+
+> ⚠️ **模型名称**：DeepSeek API 当前只支持 `deepseek-v4-pro` 和 `deepseek-v4-flash`。
+> `deepseek-chat` 已失效（返回 HTTP 400）。
+>
+> ```bash
+> export LLM_API_KEY='sk-...'
+> export LLM_MODEL='deepseek-v4-pro'       # 默认值，对应 config.py LLM_MODEL_DEFAULT
+> export LLM_BASE_URL='https://api.deepseek.com/v1'
+> ```
+>
+> 推荐写入 `~/.claude/settings.json` 的 `env` 字段持久化，不污染项目 CLAUDE.md。
 
 ### 4. 验证
 
