@@ -619,7 +619,8 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
 # ═══════════════════════════════════════════════════════════════
 
 def translate_dir(input_dir, output_dir, glossary_str, ja_to_zh,
-                  api_key, model, base_url, dry_run=False, source_lang=None):
+                  api_key, model, base_url, dry_run=False, source_lang=None,
+                  skip_oped=False):
     """Translate all SRT/ASS files in a directory."""
     if not os.path.isdir(input_dir):
         print(f'ERROR: {input_dir} not found', file=sys.stderr)
@@ -637,14 +638,18 @@ def translate_dir(input_dir, output_dir, glossary_str, ja_to_zh,
     print(f'{len(srt_files)} files to translate', file=sys.stderr)
 
     # Phase 0: Collect & pre-translate OP/ED across all episodes
-    print('[oped] Scanning OP/ED across episodes...', file=sys.stderr)
-    op_zh, ed_zh, op_texts, ed_texts = collect_oped_across_episodes(
-        input_dir, api_key, model, base_url, dry_run
-    )
-    if op_zh:
-        print(f'  [oped] OP pre-translated: {len(op_texts)} episodes', file=sys.stderr)
-    if ed_zh:
-        print(f'  [oped] ED pre-translated: {len(ed_texts)} episodes', file=sys.stderr)
+    op_zh, ed_zh, op_texts, ed_texts = '', '', set(), set()
+    if not skip_oped:
+        print('[oped] Scanning OP/ED across episodes...', file=sys.stderr)
+        op_zh, ed_zh, op_texts, ed_texts = collect_oped_across_episodes(
+            input_dir, api_key, model, base_url, dry_run
+        )
+        if op_zh:
+            print(f'  [oped] OP pre-translated: {len(op_texts)} episodes', file=sys.stderr)
+        if ed_zh:
+            print(f'  [oped] ED pre-translated: {len(ed_texts)} episodes', file=sys.stderr)
+    else:
+        print('[oped] Skipped (--skip-oped)', file=sys.stderr)
 
     # Phase 1: Translate each file
     grand_total = grand_translated = grand_failed = 0
@@ -700,6 +705,8 @@ def main():
     parser.add_argument('--source-lang', choices=['ja', 'ru', 'zh', 'other'],
                         default=None,
                         help='Source language (default: auto-detect from cues)')
+    parser.add_argument('--skip-oped', action='store_true',
+                        help='Skip OP/ED detection and pre-translation')
     args = parser.parse_args()
 
     # API key（LLM_API_KEY 优先，回退到 POLISH_API_KEY）
@@ -738,7 +745,8 @@ def main():
     elif args.input_dir:
         translate_dir(args.input_dir, args.output_dir, glossary_str, ja_to_zh,
                       api_key, model, base_url, dry_run=args.dry_run,
-                      source_lang=args.source_lang)
+                      source_lang=args.source_lang,
+                      skip_oped=args.skip_oped)
     else:
         parser.print_help()
         sys.exit(1)
