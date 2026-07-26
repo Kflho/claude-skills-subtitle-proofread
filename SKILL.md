@@ -215,27 +215,17 @@ python "<scripts-dir>/whisper_batch_transcribe.py" \
 > 适用：没有任何字幕文件，或已有字幕质量太差不值得修复。
 > 输出：Whisper 自带 VAD 分段，直接生成完整 SRT。
 
-**Whisper 重复修复**（转录后去幻觉重复）
+**Whisper 幻觉重复**（已知问题，翻译阶段处理）
 
-```bash
-# 批量修复：检测连续高度相似 cue → 切片重跑 Whisper
-python "<scripts-dir>/fix_repeated_cues.py" \
-  --input-dir "<SUBTITLE_DIR>" \
-  --video-dir "<VIDEO_DIR>" --lang ja
+Whisper 在音乐/噪声段会产生幻觉重复（连续多条 cue 文本高度相似甚至完全相同）。
+> ⚠️ **切片重跑 Whisper 方案已验证无效**（`fix_repeated_cues.py` 已弃用）。
+> 根因是音频本身触发幻觉，重跑只换一组幻觉，不会修复。
 
-# 单集预览
-python "<scripts-dir>/fix_repeated_cues.py" "EP001.srt" \
-  --video "EP001.mkv" --lang ja --dry-run
+**正确做法**：在 AI 翻译阶段，system prompt 中告知 LLM：
+> "连续多条字幕文本相同或高度相似是 Whisper 的 bug（幻觉重复），
+> 照常翻译每条即可，不要尝试区分或合并它们。最终由人工审查决定保留哪条。"
 
-# 调整相似度阈值（默认 0.6）和最小群组大小（默认 2）
-python "<scripts-dir>/fix_repeated_cues.py" \
-  --input-dir "<SUBTITLE_DIR>" \
-  --video-dir "<VIDEO_DIR>" \
-  --similarity 0.7 --min-group 3
-```
-
-> 适用：Whisper 转录后连续多条字幕高度相似（如 "ごめん" / "ごめんなさい" 反复出现），
-> 说明在音乐/噪声段产生了幻觉重复。切片重跑 Whisper 修复，仍相似则可能是器乐段。
+> 此问题目前无法自动审查，只能等人工校对阶段处理。
 
 **Phase 4：AI 润色**（--lang zh 项目可选）
 
