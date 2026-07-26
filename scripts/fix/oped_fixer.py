@@ -43,6 +43,7 @@ from lib.whisper_utils import (
     OP_BOUNDARY_SEC, ED_BOUNDARY_SEC,
     parse_srt, parse_ass_cues, parse_subtitles, write_srt,
 )
+from lib.oped_detect import detect_boundaries as api_detect_boundaries
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -295,14 +296,29 @@ class OpedFixer:
                  ed_boundary: float = ED_BOUNDARY_SEC,
                  min_episodes: int = MIN_EPISODES_FOR_CLUSTER,
                  time_tolerance: float = TIME_TOLERANCE_SEC,
-                 reference_dir: str = None):
+                 reference_dir: str = None,
+                 boundaries: dict = None):
         self.target_dir = target_dir
         self.lang = lang
-        self.op_boundary = op_boundary
-        self.ed_boundary = ed_boundary
         self.min_episodes = min_episodes
         self.time_tolerance = time_tolerance
         self.reference_dir = reference_dir
+
+        # Accept API-detected boundaries (from oped_detect module)
+        # API boundaries take precedence over hardcoded defaults
+        if boundaries and boundaries.get('confidence') not in (None, 'fallback'):
+            self.op_boundary = boundaries.get('op_end_s', op_boundary)
+            self.ed_boundary = boundaries.get('ed_end_s', ed_boundary)
+            if self.ed_boundary is None:
+                self.ed_boundary = ed_boundary
+            self._boundaries_from_api = True
+        else:
+            self.op_boundary = op_boundary
+            self.ed_boundary = ed_boundary
+            self._boundaries_from_api = False
+
+        # Store the full boundaries dict for downstream use (oped_fill)
+        self.boundaries = boundaries or {}
 
         # Collected data
         self.episodes: dict = {}  # {fname: {op_cues, ed_cues, max_end}}
@@ -313,6 +329,27 @@ class OpedFixer:
 
         # Reference data: {(region, bucket_start_s): canonical_text}
         self.reference_texts: dict[tuple, str] = {}
+
+    # ── Step 0: API boundary detection ──────────────────────────
+
+    @staticmethod
+    def detect_boundaries(target_dir: str, lang: str = 'auto',
+                          sample_count: int = 5,
+                          api_key: str = None, model: str = None,
+                          base_url: str = None, dry_run: bool = False) -> dict:
+        """Run API-based OP/ED boundary detection (replaces hardcoded defaults).
+
+        Returns a boundaries dict compatible with OpedFixer(boundaries=...).
+        """
+        return api_detect_boundaries(
+            target_dir,
+            lang=lang,
+            sample_count=sample_count,
+            api_key=api_key,
+            model=model,
+            base_url=base_url,
+            dry_run=dry_run,
+        )
 
     # ── Step 1: Collect ──────────────────────────────────────────
 
@@ -858,6 +895,10 @@ Examples:
   # Auto-clean instrumental only (for projects without OP/ED vocals)
   python oped_fixer.py AI审查后/ --lang ja -o temp/scans/oped_fixes.json --auto-only
 
+  # Use API to detect OP/ED boundaries instead of hardcoded defaults
+  python oped_fixer.py AI审查后/ --lang zh --detect-boundaries \\
+      -o temp/scans/oped_fixes.json --auto-only
+
   # Full: auto-clean + generate AI review for vocal OP/ED
   python oped_fixer.py AI审查后/ --lang ja -o temp/scans/oped_fixes.json \\
       --ai-review temp/scans/oped_ai_review.json
@@ -881,6 +922,9 @@ Examples:
                         help=f'OP boundary in seconds (default: {OP_BOUNDARY_SEC})')
     parser.add_argument('--ed-boundary', type=float, default=ED_BOUNDARY_SEC,
                         help=f'ED boundary in seconds (default: {ED_BOUNDARY_SEC})')
+    parser.add_argument('--detect-boundaries', action='store_true',
+                        help='Use API (LLM) to detect OP/ED boundaries from cue patterns. '
+                             'Overrides --op-boundary and --ed-boundary when API succeeds.')
     parser.add_argument('--min-episodes', type=int, default=MIN_EPISODES_FOR_CLUSTER,
                         help=f'Min episodes for cluster (default: {MIN_EPISODES_FOR_CLUSTER})')
     parser.add_argument('--reference',
@@ -904,6 +948,22 @@ Examples:
     else:
         lang = args.lang
 
+    # ── Optional: API-based boundary detection ──
+    boundaries = None
+    if args.detect_boundaries:
+        print('[oped] Running API boundary detection...', file=sys.stderr)
+        boundaries = OpedFixer.detect_boundaries(
+            args.target_dir, lang=lang,
+            api_key=None, model=None, base_url=None,  # use env vars
+        )
+        if boundaries.get('confidence') not in (None, 'fallback'):
+            print(f'[oped] API boundaries: OP=0-{boundaries["op_end_s"]:.0f}s, '
+                  f'ED={boundaries.get("ed_end_s", "N/A")}', file=sys.stderr)
+            for w in boundaries.get('warnings', []):
+                print(f'[oped] ⚠ {w}', file=sys.stderr)
+        else:
+            print('[oped] API detection unavailable, using defaults', file=sys.stderr)
+
     fixer = OpedFixer(
         args.target_dir,
         lang=lang,
@@ -911,6 +971,7 @@ Examples:
         ed_boundary=args.ed_boundary,
         min_episodes=args.min_episodes,
         reference_dir=args.reference,
+        boundaries=boundaries,
     )
 
     result = fixer.run(

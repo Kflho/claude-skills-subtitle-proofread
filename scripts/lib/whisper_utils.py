@@ -16,8 +16,8 @@ import sys, os, re, subprocess, json, io
 from lib.subprocess_utils import run_ffmpeg
 
 # ── OP/ED region boundaries (seconds from start/end) ──
-OP_BOUNDARY_SEC = 95    # cues before this → OP region, exempt from garbled detection
-ED_BOUNDARY_SEC = 120   # cues within this many seconds of the end → ED region
+OP_BOUNDARY_SEC = 180   # cues before this → OP region (3min, covers cold opens)
+ED_BOUNDARY_SEC = 180   # cues within this many seconds of the end → ED+preview region
 
 # ── Whisper confidence thresholds (for AI review flagging) ──
 AI_REVIEW_AVG_LOGPROB_THRESHOLD = -1.0     # avg_logprob below this → uncertain
