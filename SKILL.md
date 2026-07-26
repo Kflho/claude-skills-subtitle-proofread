@@ -196,6 +196,25 @@ python "<scripts-dir>/fix/oped_fill.py" "<SUBTITLE_DIR>" \
 python "<scripts-dir>/lib/oped_detect.py" "<SUBTITLE_DIR>" --lang zh --dry-run
 ```
 
+**Whisper 批量转录**（从视频生成 SRT，不依赖已有字幕）
+
+```bash
+# 从视频直接 Whisper 转录 — 无需任何已有字幕文件
+python "<scripts-dir>/whisper_batch_transcribe.py" \
+  --video-dir "<VIDEO_DIR>" \
+  --output-dir "<OUTPUT_DIR>" \
+  --lang ja
+
+# 限制前 N 集测试
+python "<scripts-dir>/whisper_batch_transcribe.py" \
+  --video-dir "<VIDEO_DIR>" \
+  --output-dir "<OUTPUT_DIR>" \
+  --lang ja --limit 3
+```
+
+> 适用：没有任何字幕文件，或已有字幕质量太差不值得修复。
+> 输出：Whisper 自带 VAD 分段，直接生成完整 SRT。
+
 **Phase 4：AI 润色**（--lang zh 项目可选）
 
 ```bash
@@ -434,6 +453,8 @@ python "<scripts-dir>/fix/oped_fill.py" "<SUBTITLE_DIR>" \
 → [references/interventions.md](references/interventions.md) — 每个 🤖 点：触发条件、操作流程、判断规则。
 
 ## 参考
+
+→ [references/workflows.md](references/workflows.md) — 典型工作流场景（从视频生成、翻译、修复、完整流程）。**设计工作流前先看这个，避免重复造轮子。**
 
 → [references/phase1-scan.md](references/phase1-scan.md) — Phase 1 扫描命令参考。
 → [references/phase2-triage.md](references/phase2-triage.md) — Phase 2 Whisper 修复命令参考。
