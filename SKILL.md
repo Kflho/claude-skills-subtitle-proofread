@@ -215,6 +215,28 @@ python "<scripts-dir>/whisper_batch_transcribe.py" \
 > 适用：没有任何字幕文件，或已有字幕质量太差不值得修复。
 > 输出：Whisper 自带 VAD 分段，直接生成完整 SRT。
 
+**Whisper 重复修复**（转录后去幻觉重复）
+
+```bash
+# 批量修复：检测连续高度相似 cue → 切片重跑 Whisper
+python "<scripts-dir>/fix_repeated_cues.py" \
+  --input-dir "<SUBTITLE_DIR>" \
+  --video-dir "<VIDEO_DIR>" --lang ja
+
+# 单集预览
+python "<scripts-dir>/fix_repeated_cues.py" "EP001.srt" \
+  --video "EP001.mkv" --lang ja --dry-run
+
+# 调整相似度阈值（默认 0.6）和最小群组大小（默认 2）
+python "<scripts-dir>/fix_repeated_cues.py" \
+  --input-dir "<SUBTITLE_DIR>" \
+  --video-dir "<VIDEO_DIR>" \
+  --similarity 0.7 --min-group 3
+```
+
+> 适用：Whisper 转录后连续多条字幕高度相似（如 "ごめん" / "ごめんなさい" 反复出现），
+> 说明在音乐/噪声段产生了幻觉重复。切片重跑 Whisper 修复，仍相似则可能是器乐段。
+
 **Phase 4：AI 润色**（--lang zh 项目可选）
 
 ```bash
