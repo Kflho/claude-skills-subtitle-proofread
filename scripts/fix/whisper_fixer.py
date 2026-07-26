@@ -48,9 +48,9 @@ class WhisperResult:
     auto_keep_fixes: list = field(default_factory=list)
     ai_fragments: list = field(default_factory=list)
     auto_cuts: list = field(default_factory=list)
-    new_cues: list = field(default_factory=list)   # missing_sub only
+    new_cues: list = field(default_factory=list)   # for new cues inserted into gaps
+    cues_to_clear: list = field(default_factory=list)  # v5.3: overlapped cues to delete
     details: list = field(default_factory=list)
-    placeholder_count: int = 0
 
     @classmethod
     def empty(cls, source: str = 'whisper', deleted: int = 0,
@@ -201,17 +201,14 @@ class WhisperFixer:
 
     def fix_by_whisper(self, *, separate_vocals: bool = True,
                        force_tier2: bool = False,
-                       skip_vad_clean: bool = False,
-                       detect_missing_dialogue: bool = True,
-                       missing_dialogue_min_gap: float = 3.0) -> WhisperResult:
-        """Run Whisper auto-fix pipeline.
+                       skip_vad_clean: bool = False) -> WhisperResult:
+        """Run Whisper auto-fix pipeline (v5.3: unified VAD-driven).
 
         1. VAD clean: delete non-speech cues
-        2. Missing dialogue detection: find VAD speech without subtitle
-           coverage → insert ⚠SPEECH placeholder cues
-        3. Build clusters with context wrapping
-        4. Tier 1 (segment-based) → auto-upgrade to Tier 2 if needed
-        5. Triage: auto-keep ✅ / AI fragments 🤖 / auto-cut 🗑️
+        2. Build unified fix regions from VAD speech segments
+           → single function replaces build_clusters() + find_missing_subtitle_gaps()
+        3. Convert regions to cluster format → Tier 1/2 Whisper
+        4. Triage: auto-keep ✅ / AI fragments 🤖 / auto-cut 🗑️
 
         Does NOT write SRT or report.  Returns WhisperResult.
         """
@@ -279,61 +276,39 @@ class WhisperFixer:
                         print(f'[whisper] Continuing without VAD clean',
                               file=sys.stderr)
 
-            # ── Missing dialogue detection: FALLBACK only ──
-            placeholder_count = 0
-            if detect_missing_dialogue and speech_segs:
-                already_detected = self._session.has_missing_subtitles()
-                if not already_detected:
-                    from fix.whisper_pipeline import (
-                        find_missing_subtitle_gaps, add_placeholder_cues,
-                    )
-                    gaps = find_missing_subtitle_gaps(
-                        speech_segs, cues,
-                        min_gap=missing_dialogue_min_gap,
-                        max_gap=45.0)
-                    if gaps:
-                        cues = add_placeholder_cues(gaps, cues,
-                                                    self._srt_path)
-                        placeholder_count = len(gaps)
-                        print(f'[whisper] {placeholder_count} missing-dialogue '
-                              f'gaps → ⚠SPEECH placeholders added (fallback)',
-                              file=sys.stderr)
-                else:
-                    print(f'[whisper] Missing subtitles already detected by '
-                          f'Phase 1 — skipping inline detection',
-                          file=sys.stderr)
-
-            # Reload garbled after VAD
-            garbled = [c for c in cues if c.get('is_garbled')]
-            if not garbled:
-                if placeholder_count > 0:
-                    cues = parse_srt(self._srt_path, mark_garbled=True,
-                                     target_lang=self._target_lang)
-                    garbled = [c for c in cues if c.get('is_garbled')]
-                    if not garbled:
-                        print(f'[whisper] ⚠ Placeholders added but not '
-                              f'detected as garbled — skipping Whisper',
-                              file=sys.stderr)
-                        return WhisperResult(
-                            source='whisper', deleted=deleted_count,
-                            placeholder_count=placeholder_count,
-                            details=[f'{placeholder_count} '
-                                     f'missing-dialogue markers'])
-                else:
-                    print(f'[whisper] All garbled cues deleted by VAD',
-                          file=sys.stderr)
-                    return WhisperResult(source='whisper',
-                                         deleted=deleted_count)
-
-            # Step 2: Build clusters + run Whisper
+            # ── Build unified fix regions from VAD speech segments ──
+            # v5.3: Single function replaces build_clusters() +
+            # find_missing_subtitle_gaps() + add_placeholder_cues().
+            # VAD speech segments are the ground truth — all affected cues
+            # (garbled, partial-overlap, missing) are handled in one pass.
             from fix.whisper_pipeline import (
-                build_clusters, run_tier1, run_tier2,
+                build_fix_regions, run_tier1, run_tier2,
                 UPGRADE_THRESHOLD,
             )
 
-            if force_tier2 or len(garbled) > UPGRADE_THRESHOLD:
+            regions = build_fix_regions(speech_segs, cues,
+                                         target_lang=self._target_lang)
+
+            if not regions:
+                print(f'[whisper] {self._episode}: no fix regions found',
+                      file=sys.stderr)
+                return WhisperResult(source='whisper',
+                                     deleted=deleted_count)
+
+            # Convert regions → cluster format for Tier 1/2 compatibility.
+            # Context cues expand the audio range for better Whisper accuracy.
+            clusters = _regions_to_clusters(regions)
+
+            total_garbled = sum(len(r['garbled_cues']) for r in regions)
+            total_cues_to_clear = sum(len(r['cues_to_clear']) for r in regions)
+            print(f'[whisper] {self._episode}: {len(regions)} fix regions '
+                  f'({total_garbled} garbled + '
+                  f'{total_cues_to_clear - total_garbled} partial/missing)',
+                  file=sys.stderr)
+
+            if force_tier2 or total_garbled > UPGRADE_THRESHOLD:
                 tier = 2
-                print(f'[whisper] {len(garbled)} fragments > '
+                print(f'[whisper] {total_garbled} garbled > '
                       f'{UPGRADE_THRESHOLD} → Tier 2 (full-episode)',
                       file=sys.stderr)
                 fixes, stats = run_tier2(
@@ -347,11 +322,11 @@ class WhisperFixer:
                 )
             else:
                 tier = 1
-                clusters = build_clusters(cues)
                 if not clusters:
                     fixes, _ = [], []
                 else:
-                    print(f'[whisper] Tier 1: {len(clusters)} clusters',
+                    print(f'[whisper] Tier 1: {len(clusters)} clusters '
+                          f'from {len(regions)} regions',
                           file=sys.stderr)
                     fixes, unmatched_cues = run_tier1(
                         self._video_path, cues, clusters,
@@ -364,7 +339,9 @@ class WhisperFixer:
                     if unmatched_cues and self._retry_model:
                         print(f'[whisper] {len(unmatched_cues)} unmatched → '
                               f'retry with backup model', file=sys.stderr)
-                        retry_clusters = build_clusters(cues)
+                        retry_clusters = _regions_to_clusters(
+                            build_fix_regions(speech_segs, cues,
+                                              target_lang=self._target_lang))
                         if retry_clusters:
                             retry_fixes, _ = run_tier1(
                                 self._video_path, cues, retry_clusters,
@@ -399,6 +376,9 @@ class WhisperFixer:
                         fixes = merged
                         tier = 2
 
+            # Record cues_to_clear for orchestrator deletion
+            cues_to_clear = _collect_cues_to_clear(regions)
+
             # Step 3: Triage — classify BEFORE returning
             result = WhisperResult(source='whisper', tier=tier,
                                    deleted=deleted_count)
@@ -427,23 +407,6 @@ class WhisperFixer:
             for f in all_items:
                 eval_text = (f.get('replacement')
                              or f.get('original', '')).strip()
-
-                # ── Placeholder handling: ⚠SPEECH markers ──
-                if f.get('original', '').strip() == '⚠SPEECH':
-                    replacement = f.get('replacement', '').strip()
-                    if replacement and replacement != '⚠SPEECH':
-                        if self._target_lang != 'ja':
-                            if looks_like_plausible_text(replacement,
-                                                         self._target_lang):
-                                auto_keep.append(f)
-                            else:
-                                ai_fragments.append(f)
-                        else:
-                            auto_keep.append(f)
-                    else:
-                        f['replacement'] = '[???]'
-                        auto_keep.append(f)
-                    continue
 
                 # ① No meaningful chars → auto-cut
                 if meaningful_char_count(eval_text, self._target_lang) < 2:
@@ -474,7 +437,8 @@ class WhisperFixer:
             # Add auto-cut count to deleted
             # (actual deletion happens in orchestrator)
             result.deleted += len(auto_cut)
-            result.placeholder_count = placeholder_count
+            # v5.3: cues_to_clear from fix regions (overlapped cues to delete)
+            result.cues_to_clear = cues_to_clear
 
             for f in auto_cut:
                 print(f'  [cut] {f["start"]}: '
@@ -492,173 +456,42 @@ class WhisperFixer:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
     # ═══════════════════════════════════════════════════════════
-    # Source 2b: Missing subtitle fill
+    # Helpers: region → cluster conversion (v5.3)
     # ═══════════════════════════════════════════════════════════
 
-    def fix_missing_subtitles(self, gaps=None) -> WhisperResult:
-        """Fill missing subtitles detected by VAD scan.
 
-        Full triage pipeline:
-          1. Extract gap audio → Whisper transcription
-          2. Triage: auto-keep ✅ / AI fragments 🤖 / auto-cut 🗑️
-          3. Returns WhisperResult (orchestrator writes SRT + report)
+def _regions_to_clusters(regions):
+    """Convert fix regions to cluster format for Tier 1 Whisper.
 
-        Returns WhisperResult with new_cues populated.
-        """
-        if gaps is None:
-            findings_path = os.path.join(self._temp_dir, 'findings.json')
-            if os.path.exists(findings_path):
-                try:
-                    with open(findings_path, 'r', encoding='utf-8') as f:
-                        findings = json.load(f)
-                    gaps = findings.get('missing_subtitles', {}).get(
-                        self._episode, [])
-                except Exception:
-                    gaps = []
-            else:
-                gaps = []
+    Expands region boundaries to include adjacent context cues
+    as acoustic context for better Whisper accuracy.
+    """
+    from fix.whisper_pipeline import GAP_SEC
 
-        if not gaps:
-            return WhisperResult.empty(source='missing_sub',
-                                       details=['No gaps to fill'])
+    clusters = []
+    for region in regions:
+        left = region.get('context_left')
+        right = region.get('context_right')
+        ss = left['start_s'] if left else max(0, region['start_s'] - GAP_SEC)
+        es = right['end_s'] if right else region['end_s'] + GAP_SEC
+        ss, es = min(ss, region['start_s']), max(es, region['end_s'])
 
-        if not self._video_path:
-            return WhisperResult(source='missing_sub', deleted=len(gaps),
-                                 details=['No video file available'])
+        clusters.append({
+            'ss': ss, 'es': es, 'dur': es - ss,
+            'garbled': region['cues_to_clear'],
+            'left_text': left['text'] if left else '',
+            'right_text': right['text'] if right else '',
+        })
+    return clusters
 
-        if not self._whisper_cli or not self._model:
-            return WhisperResult(source='missing_sub', deleted=len(gaps),
-                                 details=['Whisper not configured'])
 
-        print(f'[missing_sub] {self._episode}: {len(gaps)} gaps → '
-              f'Whisper fill + triage', file=sys.stderr)
-
-        cues = (self._session.load_cues()
-                or parse_srt(self._srt_path, mark_garbled=False,
-                             target_lang=self._target_lang))
-
-        tmpdir = tempfile.mkdtemp()
-        try:
-            ORIGINAL_MARKER = '(VAD检测到人声但无字幕)'
-
-            # Phase 1: Collect Whisper results as fix items
-            fix_items = []
-
-            for i, gap in enumerate(gaps):
-                ss = gap.get('start_s', 0)
-                es = gap.get('end_s', ss + 5.0)
-                dur = es - ss
-
-                if dur < 1.0:
-                    print(f'  [gap {i}] {ss:.1f}s–{es:.1f}s ({dur:.1f}s) — '
-                          f'too short, skipping', file=sys.stderr)
-                    continue
-                if dur > 60.0:
-                    print(f'  [gap {i}] {ss:.1f}s–{es:.1f}s ({dur:.1f}s) — '
-                          f'too long, skipping', file=sys.stderr)
-                    continue
-
-                start_tc = format_tc(ss)
-                end_tc = format_tc(es)
-                item = {
-                    'start': start_tc,
-                    'end': end_tc,
-                    'start_s': ss,
-                    'end_s': es,
-                    'original': ORIGINAL_MARKER,
-                    'replacement': None,
-                }
-
-                gap_wav = os.path.join(tmpdir, f'gap_{i:03d}.wav')
-                try:
-                    extract_audio_wav(self._video_path, gap_wav,
-                                     ss=ss, duration=dur)
-                except Exception as e:
-                    print(f'  [gap {i}] Audio extraction failed: {e}',
-                          file=sys.stderr)
-                    item['replacement'] = None
-                    fix_items.append(item)
-                    continue
-
-                whisper_segs = run_whisper(gap_wav, self._whisper_cli,
-                                          self._model, self._target_lang)
-
-                if whisper_segs:
-                    text = whisper_segs[0].get('text', '').strip()
-                    if text and is_valid_subtitle_text(text,
-                                                       self._target_lang):
-                        item['replacement'] = text
-                        print(f'  [gap {i}] {start_tc}–{end_tc} '
-                              f'→ "{text[:60]}"', file=sys.stderr)
-                    else:
-                        item['replacement'] = None
-                        print(f'  [gap {i}] {start_tc}–{end_tc} '
-                              f'→ [???] (Whisper: no valid text)',
-                              file=sys.stderr)
-                else:
-                    item['replacement'] = None
-                    print(f'  [gap {i}] {start_tc}–{end_tc} '
-                          f'→ [???] (Whisper: no output)',
-                          file=sys.stderr)
-
-                fix_items.append(item)
-
-            # Phase 2: Triage
-            auto_keep = []
-            ai_fragments = []
-
-            for f in fix_items:
-                replacement = f.get('replacement', '')
-
-                if not replacement:
-                    f['replacement'] = ORIGINAL_MARKER
-                    ai_fragments.append(f)
-                    continue
-
-                eval_text = replacement.strip()
-
-                if (meaningful_char_count(eval_text, self._target_lang) >= 2
-                        and looks_like_plausible_text(eval_text,
-                                                      self._target_lang)):
-                    auto_keep.append(f)
-                    continue
-
-                ai_fragments.append(f)
-
-            # Phase 3: Build new_cues data (orchestrator inserts into SRT)
-            new_cues = []
-            for f in auto_keep:
-                new_cues.append({
-                    'start': f['start'],
-                    'end': f['end'],
-                    'start_s': f['start_s'],
-                    'end_s': f['end_s'],
-                    'text': f.get('replacement', ORIGINAL_MARKER),
-                })
-
-            for f in ai_fragments:
-                text = f.get('replacement', ORIGINAL_MARKER)
-                new_cues.append({
-                    'start': f['start'],
-                    'end': f['end'],
-                    'start_s': f['start_s'],
-                    'end_s': f['end_s'],
-                    'text': text,
-                })
-
-            result = WhisperResult(source='missing_sub')
-            result.applied = len(auto_keep)
-            result.ai_review = len(ai_fragments)
-            result.auto_keep_fixes = auto_keep
-            result.ai_fragments = ai_fragments
-            result.new_cues = new_cues
-
-            print(f'[missing_sub] {self._episode}: {result.applied} '
-                  f'auto-keep ✅, {result.ai_review} → AI review 🤖',
-                  file=sys.stderr)
-
-            return result
-
-        finally:
-            import shutil
-            shutil.rmtree(tmpdir, ignore_errors=True)
+def _collect_cues_to_clear(regions):
+    """Collect all cues_to_clear from fix regions, deduplicated by start time."""
+    seen = set()
+    cues = []
+    for region in regions:
+        for c in region.get('cues_to_clear', []):
+            if c['start'] not in seen:
+                seen.add(c['start'])
+                cues.append(c)
+    return cues

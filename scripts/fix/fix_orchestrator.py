@@ -156,10 +156,6 @@ class Fixer:
         """Load current SRT cues into memory."""
         return self._session.load_cues()
 
-    def _has_missing_subtitles(self) -> bool:
-        """Backward compat for episode_workflow.py."""
-        return self._session.has_missing_subtitles()
-
     # ═══════════════════════════════════════════════════════════
     # Source 1: Reference comparison
     # ═══════════════════════════════════════════════════════════
@@ -243,31 +239,17 @@ class Fixer:
 
     def fix_by_whisper(self, *, separate_vocals: bool = True,
                        force_tier2: bool = False,
-                       skip_vad_clean: bool = False,
-                       detect_missing_dialogue: bool = True,
-                       missing_dialogue_min_gap: float = 3.0) -> FixReport:
-        """Run Whisper auto-fix pipeline.
+                       skip_vad_clean: bool = False) -> FixReport:
+        """Run Whisper auto-fix pipeline (v5.3: unified VAD-driven).
 
-        Delegates to WhisperFixer, then writes SRT + report from
-        the returned WhisperResult.
-
-        Returns FixReport.
+        Single call covers garbled cues + partial overlaps + missing
+        subtitles. Delegates to WhisperFixer, then writes SRT + report.
         """
         result = self._whisper_fixer.fix_by_whisper(
             separate_vocals=separate_vocals,
             force_tier2=force_tier2,
             skip_vad_clean=skip_vad_clean,
-            detect_missing_dialogue=detect_missing_dialogue,
-            missing_dialogue_min_gap=missing_dialogue_min_gap,
         )
-        return self._apply_whisper_result(result)
-
-    def fix_missing_subtitles(self, gaps=None) -> FixReport:
-        """Fill missing subtitles detected by VAD scan.
-
-        Delegates to WhisperFixer, then writes SRT + report.
-        """
-        result = self._whisper_fixer.fix_missing_subtitles(gaps)
         return self._apply_whisper_result(result)
 
     def _apply_whisper_result(self, result: WhisperResult) -> FixReport:
@@ -285,13 +267,18 @@ class Fixer:
             cut_starts = {f['start'] for f in result.auto_cuts}
             cues = [c for c in cues if c.get('start') not in cut_starts]
 
-        # Missing-sub new cues: insert into cue list
+        # v5.3: Delete cues_to_clear (overlapped cues from fix regions)
+        if result.cues_to_clear:
+            clear_starts = {c['start'] for c in result.cues_to_clear}
+            cues = [c for c in cues if c.get('start') not in clear_starts]
+
+        # New cues: insert into cue list (from missing-type regions)
         if result.new_cues:
             cues.extend(result.new_cues)
             cues.sort(key=lambda c: c.get('start_s', c.get('start', '')))
 
         # Write SRT
-        if result.auto_cuts or result.new_cues:
+        if result.auto_cuts or result.cues_to_clear or result.new_cues:
             write_srt(self._srt_path, cues)
 
         # Auto-keep: apply replacement text
@@ -305,10 +292,6 @@ class Fixer:
         if result.ai_fragments:
             self._fragment_processor.build_ai_fragments_json(
                 result.ai_fragments)
-
-        # Safety: convert remaining placeholders
-        if result.placeholder_count > 0:
-            self._session.convert_placeholders_to_markers()
 
         # ── Write report ──
         report = FixReport(source=result.source, tier=result.tier,
@@ -333,26 +316,15 @@ class Fixer:
                      'corrected': '(VAD已删除)', 'status': '🗑️'}
                     for f in result.auto_cuts
                 ])
-            # Missing-sub entries
-            if result.source == 'missing_sub':
-                ORIGINAL_MARKER = '(VAD检测到人声但无字幕)'
-                if result.auto_keep_fixes:
-                    upsert_entries(self._report_path, step='2', entries=[
-                        {'ep': self.episode, 'time': f['start'],
-                         'original': ORIGINAL_MARKER,
-                         'corrected': f.get('replacement', '')[:120],
-                         'status': '✅'}
-                        for f in result.auto_keep_fixes
-                    ])
-                if result.ai_fragments:
-                    upsert_entries(self._report_path, step='2.5', entries=[
-                        {'ep': self.episode, 'time': f['start'],
-                         'original': ORIGINAL_MARKER,
-                         'corrected': (f.get('replacement') or '')[:120],
-                         'status': '⬜'}
-                        for f in result.ai_fragments
-                    ])
-            elif result.ai_fragments:
+            if result.cues_to_clear:
+                upsert_entries(self._report_path, step='2', entries=[
+                    {'ep': self.episode, 'time': c.get('start', ''),
+                     'original': c.get('text', '')[:120],
+                     'corrected': '(VAD部分重叠—已合并到相邻修复区域，Whisper重录)',
+                     'status': '🗑️'}
+                    for c in result.cues_to_clear
+                ])
+            if result.ai_fragments:
                 upsert_entries(self._report_path, step='2.5', entries=[
                     {'ep': self.episode, 'time': f.get('start', ''),
                      'original': f.get('original', '')[:120],
@@ -372,20 +344,14 @@ class Fixer:
     # ═══════════════════════════════════════════════════════════
 
     def run_auto(self) -> FixReport:
-        """Run cascading auto-fix: whisper → missing-sub fill → AI context.
+        """Run cascading auto-fix: whisper fix with unified VAD-driven regions.
 
-        Priority:
-        1. If reference SRT exists in 参考字幕/ → inject as AI context
-        2. Whisper ASR → triage (auto-keep / AI fragments / auto-cut)
-        3. Missing subtitle fill (VAD gaps → Whisper → new cues)
-        4. AI fragments include reference_text for Claude to translate+correct
-        5. Unfixable items → [???] markers in SRT (review in Aegisub)
+        v5.3: Single fix_by_whisper() call covers garbled cues +
+        partial overlaps + missing subtitles in one pass.
 
         Returns combined FixReport.
         """
-        has_missing_subs = self._session.has_missing_subtitles()
-
-        if self._session.is_clean() and not has_missing_subs:
+        if self._session.is_clean():
             print(f'[{self.episode}] ✓ clean — nothing to fix',
                   file=sys.stderr)
             return FixReport(source='auto')
@@ -405,15 +371,10 @@ class Fixer:
                           file=sys.stderr)
                     break
 
-        # Whisper for garbled cues
-        if not self._session.is_clean() and self._video_path:
+        # Unified Whisper fix (garbled + partial overlap + missing in one pass)
+        if self._video_path:
             whisper_result = self.fix_by_whisper()
             report.merge(whisper_result)
-
-        # Missing subtitle fill
-        if has_missing_subs and self._video_path:
-            miss_result = self.fix_missing_subtitles()
-            report.merge(miss_result)
 
         print(f'\n[{self.episode}] Auto-fix complete: '
               f'{report.applied} applied, '

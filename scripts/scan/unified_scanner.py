@@ -186,9 +186,6 @@ LANG_LABELS = {
 # ═══════════════════════════════════════════════════════════════
 
 SUSPICIOUS_GAP_SEC = 20.0
-MISSING_SUBTITLE_MIN_GAP = 3.0
-MISSING_SUBTITLE_MERGE_GAP = 5.0
-MISSING_SUBTITLE_MAX_GAP = 45.0
 
 
 def _find_video_for_srt(srt_path, video_dir):
@@ -215,24 +212,21 @@ def _find_video_for_srt(srt_path, video_dir):
     return None
 
 
-def detect_missing_subtitles_for_episode(srt_path, video_path, tmp_dir,
-                                         min_gap=None, merge_gap=None,
-                                         max_gap=None):
-    """Detect speech segments without subtitle coverage (VAD-based).
+def extract_speech_timeline(srt_path, video_path, tmp_dir):
+    """Extract VAD speech timeline for an episode (v5.3: scan-only, no gaps).
+
+    Phase 1 does NOT detect gaps — that's now Phase 2's job via
+    build_fix_regions() which needs the full cue list with is_garbled
+    flags (not available until Phase 2 parses SRT with mark_garbled=True).
 
     Returns:
-        (gaps, speech_segs, stats):
-          gaps: [(start_s, end_s, duration), ...]
+        (speech_segs, stats):
           speech_segs: [(start_s, end_s), ...] full speech timeline
           stats: dict with stats
     """
-    min_gap = min_gap if min_gap is not None else MISSING_SUBTITLE_MIN_GAP
-    merge_gap = merge_gap if merge_gap is not None else MISSING_SUBTITLE_MERGE_GAP
-    max_gap = max_gap if max_gap is not None else MISSING_SUBTITLE_MAX_GAP
-
     cues = parse_subtitles(srt_path, mark_garbled=False)
     if not cues:
-        return [], [], {'error': 'No cues in subtitle file'}
+        return [], {'error': 'No cues in subtitle file'}
 
     vad_audio = os.path.join(tmp_dir, 'vad_full.wav')
     try:
@@ -240,37 +234,30 @@ def detect_missing_subtitles_for_episode(srt_path, video_path, tmp_dir,
     except Exception as e:
         print(f'[VAD scan] Audio extraction failed for '
               f'{os.path.basename(srt_path)}: {e}', file=sys.stderr)
-        return [], [], {'error': str(e)}
+        return [], {'error': str(e)}
 
     try:
-        from fix.whisper_pipeline import get_speech_timeline, find_missing_subtitle_gaps
+        from fix.whisper_pipeline import get_speech_timeline
     except ImportError as e:
         print(f'[VAD scan] Cannot import VAD functions: {e}', file=sys.stderr)
-        return [], [], {'error': str(e)}
+        return [], {'error': str(e)}
 
     speech_segs = get_speech_timeline(vad_audio)
     if not speech_segs:
-        return [], [], {'audio_duration_s': 0, 'speech_duration_s': 0,
-                       'speech_pct': 0, 'gap_count': 0, 'total_gap_duration_s': 0}
-
-    gaps = find_missing_subtitle_gaps(speech_segs, cues,
-                                       min_gap=min_gap, merge_gap=merge_gap,
-                                       max_gap=max_gap)
+        return [], {'audio_duration_s': 0, 'speech_duration_s': 0,
+                   'speech_pct': 0}
 
     speech_dur = sum(es - ss for ss, es in speech_segs)
     from lib.whisper_utils import get_audio_duration
     total_dur = get_audio_duration(vad_audio) or speech_dur
-    gap_dur = sum(es - ss for ss, es, _ in gaps)
 
     stats = {
         'audio_duration_s': round(total_dur, 1),
         'speech_duration_s': round(speech_dur, 1),
         'speech_pct': round(100 * speech_dur / max(total_dur, 1), 1),
-        'gap_count': len(gaps),
-        'total_gap_duration_s': round(gap_dur, 1),
     }
 
-    return gaps, speech_segs, stats
+    return speech_segs, stats
 
 
 def _compute_gap_statistics(cues):
@@ -548,22 +535,19 @@ def scan_all(target_dir, skip_oped=True, target_lang='ja',
 
     Returns:
         dict: {
-            'garbled_cues': [finding, ...],      # 所有文件汇总
-            'missing_subtitles': {ep: [gap, ...]},  # v5.0: VAD 有人声无字幕
+            'garbled_cues': [finding, ...],
             'per_episode_issues': {ep: [issue, ...]},
-            'summary': {...},
+            'summary': {..., 'vad_episodes_scanned': N},
         }
     """
     all_garbled = []
     all_issues = defaultdict(list)
     all_repeats = []
     all_terms = defaultdict(int)
-    all_missing_subtitles = {}   # v5.0: {ep: [gap, ...]}
-    all_gap_stats = {}           # v5.0: {ep: gap_statistics}
+    all_gap_stats = {}
     total_cues = 0
     files_scanned = 0
     vad_episodes_scanned = 0
-    vad_total_gaps = 0
 
     for fname, fpath in iter_ass_files(target_dir):
         ep = extract_file_id(fname)
@@ -588,8 +572,12 @@ def scan_all(target_dir, skip_oped=True, target_lang='ja',
     # ═══════════════════════════════════════════════════════════
     # v5.0: VAD 有人声无字幕检测
     # ═══════════════════════════════════════════════════════════
+    # v5.3: VAD speech timeline extraction (no gap detection)
+    # Gap/missing detection moved to Phase 2 build_fix_regions()
+    # which needs is_garbled flags not available at scan time.
+    # ═══════════════════════════════════════════════════════════
     if video_dir and not skip_vad and os.path.isdir(video_dir):
-        print(f'\n[VAD scan] Detecting missing subtitles '
+        print(f'\n[VAD scan] Extracting speech timelines '
               f'(video dir: {video_dir}) ...', file=sys.stderr)
 
         vad_tmp = tempfile.mkdtemp(prefix='vad_scan_')
@@ -605,12 +593,11 @@ def scan_all(target_dir, skip_oped=True, target_lang='ja',
 
                 print(f'  [{ep}] VAD scan ...', file=sys.stderr)
 
-                # Check cache first
                 cache_path = None
                 if vad_cache_dir:
                     cache_path = os.path.join(vad_cache_dir, f'{ep}_vad.json')
 
-                gaps, speech_segs, stats = detect_missing_subtitles_for_episode(
+                speech_segs, stats = extract_speech_timeline(
                     fpath, video_path, vad_tmp)
 
                 if 'error' in stats:
@@ -618,34 +605,9 @@ def scan_all(target_dir, skip_oped=True, target_lang='ja',
                     continue
 
                 vad_episodes_scanned += 1
-
-                if gaps:
-                    all_missing_subtitles[ep] = [
-                        {'start_s': round(ss, 2), 'end_s': round(es, 2),
-                         'duration': round(dur, 2)}
-                        for ss, es, dur in gaps
-                    ]
-                    vad_total_gaps += len(gaps)
-
-                    # Add missing_subtitle issues to per_episode_issues
-                    for ss, es, dur in gaps:
-                        all_issues[ep].append({
-                            'ep': ep,
-                            'start_s': round(ss, 2),
-                            'end_s': round(es, 2),
-                            'duration': round(dur, 2),
-                            'type': 'missing_subtitle',
-                            'original_text': '(VAD检测到人声但无对应字幕)',
-                        })
-
-                    print(f'  [{ep}] {len(gaps)} missing-subtitle gaps '
-                          f'({stats["total_gap_duration_s"]:.0f}s total), '
-                          f'speech: {stats["speech_pct"]:.0f}%',
-                          file=sys.stderr)
-                else:
-                    print(f'  [{ep}] No missing subtitles detected '
-                          f'(speech: {stats["speech_pct"]:.0f}%)',
-                          file=sys.stderr)
+                print(f'  [{ep}] {len(speech_segs)} speech segments '
+                      f'({stats["speech_pct"]:.0f}% of audio)',
+                      file=sys.stderr)
 
                 # Cache speech timeline for Phase 2 reuse
                 if cache_path and speech_segs:
@@ -655,15 +617,13 @@ def scan_all(target_dir, skip_oped=True, target_lang='ja',
             import shutil
             shutil.rmtree(vad_tmp, ignore_errors=True)
 
-        print(f'[VAD scan] {vad_episodes_scanned} episodes scanned, '
-              f'{vad_total_gaps} missing-subtitle gaps in '
-              f'{len(all_missing_subtitles)} episodes',
+        print(f'[VAD scan] {vad_episodes_scanned} episodes scanned',
               file=sys.stderr)
     elif video_dir and skip_vad:
         print(f'[VAD scan] --skip-vad: speech detection disabled',
               file=sys.stderr)
 
-    # 构建摘要 (v5.0)
+    # 构建摘要
     summary = {
         'files_scanned': files_scanned,
         'total_cues': total_cues,
@@ -671,19 +631,15 @@ def scan_all(target_dir, skip_oped=True, target_lang='ja',
         'repeat_count': len(all_repeats),
         'term_count': len(all_terms),
         'episodes_with_issues': len(all_issues),
-        # v5.0: VAD missing subtitle stats
         'vad_episodes_scanned': vad_episodes_scanned,
-        'missing_subtitle_gaps': vad_total_gaps,
-        'episodes_with_missing_subs': len(all_missing_subtitles),
     }
 
     return {
         'garbled_cues': all_garbled,
-        'missing_subtitles': all_missing_subtitles,   # v5.0
         'per_episode_issues': dict(all_issues),
         'repeats': all_repeats,
         'term_frequencies': dict(all_terms),
-        'gap_statistics': all_gap_stats,              # v5.0
+        'gap_statistics': all_gap_stats,
         'summary': summary,
     }
 
@@ -815,9 +771,9 @@ def main():
     print(f'文件: {s["files_scanned"]} | Cues: {s["total_cues"]} | '
           f'Garbled: {s["garbled_count"]} | Repeats: {s.get("repeat_count", 0)}',
           file=sys.stderr)
-    if s.get('missing_subtitle_gaps', 0) > 0:
-        print(f'有人声无字幕: {s["missing_subtitle_gaps"]} gaps '
-              f'in {s.get("episodes_with_missing_subs", 0)} episodes',
+    if s.get('vad_episodes_scanned', 0) > 0:
+        print(f'VAD speech timeline: {s["vad_episodes_scanned"]} episodes '
+              f'(gap detection → Phase 2)',
               file=sys.stderr)
     print(file=sys.stderr)
 

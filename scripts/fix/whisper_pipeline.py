@@ -242,40 +242,60 @@ def vad_delete_nonspeech(audio_path, cues, srt_path, target_lang='ja'):
 # ═══════════════════════════════════════════════════════════════
 
 # Placeholder text that triggers garbled classification (contains Latin chars)
-MISSING_SPEECH_MARKER = '⚠SPEECH'
+# ═══════════════════════════════════════════════════════════════
+# Unified fix region builder (v5.3)
+# ═══════════════════════════════════════════════════════════════
 
+def build_fix_regions(speech_segs, cues, target_lang='ja',
+                       min_overlap_s=0.3, min_gap_s=3.0, max_gap_s=45.0):
+    """Build unified fix regions from VAD speech segments.
 
-def find_missing_subtitle_gaps(speech_segs, cues, min_gap=3.0, merge_gap=5.0,
-                              max_gap=45.0):
-    """Find speech segments not covered by any subtitle cue.
+    Replaces BOTH build_clusters() AND find_missing_subtitle_gaps()
+    with a single speech-driven mapping. The VAD speech segment is the
+    atomic unit of dialogue — every fix region derives from it.
 
-    Only flags gaps BETWEEN two existing cues (not before first cue or after last).
-    This avoids false positives from OP/ED music with vocal elements.
+    For each VAD speech segment:
+      1. Find all cues that overlap with it
+      2. Classify:
+         - Speech fully covered by clean cues → skip (no issue)
+         - Speech overlaps ANY garbled cue → type 'garbled'
+         - Speech partially overlaps clean cues AND extends beyond
+           (≥ min_gap_s uncovered) → type 'partial_overlap'
+         - Speech has no cue coverage → type 'missing'
+      3. Record cues_to_clear for garbled + partial_overlap types
 
-    Nearby gaps within `merge_gap` seconds of each other are merged into a single
-    larger gap — producing one [???] placeholder per dialogue region, not one
-    per individual VAD fragment.
-
-    Gaps longer than `max_gap` are skipped — these are typically OP/ED songs,
-    long musical sequences, or eyecatch transitions where VAD misclassifies
-    singing/instrumental as speech.
+    Adjacent/overlapping regions are merged to avoid redundant Whisper
+    calls on the same dialogue.
 
     Args:
         speech_segs: [(start_s, end_s), ...] from WebRTC VAD
-        cues: list of cue dicts (remaining after non-speech deletion)
-        min_gap: minimum gap duration in seconds to create a placeholder
-        merge_gap: merge gaps separated by ≤ this many seconds
-        max_gap: skip gaps longer than this (prevents OP/ED false positives)
+        cues: list of cue dicts (must have is_garbled, start_s, end_s, text)
+        target_lang: language code for is_non_dialogue_marker check
+        min_overlap_s: minimum cue-speech overlap to be considered "overlapping"
+        min_gap_s: minimum uncovered speech duration to trigger partial_overlap
+        max_gap_s: skip speech segments longer than this (OP/ED songs)
 
     Returns:
-        [(start_s, end_s, duration), ...] gaps needing placeholder cues
+        list of fix region dicts:
+        [{
+            'start_s': float, 'end_s': float,
+            'type': 'garbled' | 'partial_overlap' | 'missing',
+            'cues_to_clear': [{start, end, start_s, end_s, text, line}, ...],
+            'garbled_cues': [...],     # subset with is_garbled=True
+            'clean_cues': [...],       # subset with is_garbled=False
+            'context_left': cue|None,  # nearest clean cue before region
+            'context_right': cue|None, # nearest clean cue after region
+        }]
     """
     if not cues or not speech_segs:
         return []
 
-    # Build covered intervals from cues, sorted by start time
-    covered = sorted([(c['start_s'], c['end_s']) for c in cues])
-    # Merge overlapping/nearby intervals (2s tolerance — dialogue pacing)
+    # ── Pre-processing ──
+    # Sort cues by start time and build index for fast lookup
+    sorted_cues = sorted(cues, key=lambda c: c['start_s'])
+
+    # Build covered intervals from all cues (for missing detection)
+    covered = [(c['start_s'], c['end_s']) for c in sorted_cues]
     merged = []
     for ss, es in covered:
         if merged and ss <= merged[-1][1] + 2.0:
@@ -283,113 +303,142 @@ def find_missing_subtitle_gaps(speech_segs, cues, min_gap=3.0, merge_gap=5.0,
         else:
             merged.append((ss, es))
 
-    # Only consider gaps BETWEEN cues (inter-cue gaps).
-    # Speech before the first cue or after the last cue is usually OP/ED music.
     first_cue_s = merged[0][0] if merged else 0
     last_cue_e = merged[-1][1] if merged else 0
 
-    # Find speech segments not covered by any merged interval
-    raw_gaps = []
+    # ── Build regions per speech segment ──
+    raw_regions = []
+
     for ss, es in speech_segs:
-        # Skip speech entirely outside the subtitle range
+        # Skip speech entirely outside subtitle range (OP/ED music)
         if es <= first_cue_s or ss >= last_cue_e:
             continue
+        # Clamp to inter-cue range
+        ss = max(ss, first_cue_s)
+        es = min(es, last_cue_e)
 
-        # Find uncovered portion of this speech segment
-        uncovered_start = max(ss, first_cue_s)
-        for cs, ce in merged:
-            if ce <= uncovered_start:
-                continue
-            if cs > uncovered_start:
-                # Gap from uncovered_start to cs
-                capped_end = min(cs, last_cue_e)
-                gap_dur = capped_end - uncovered_start
-                if gap_dur >= min_gap:
-                    raw_gaps.append((uncovered_start, capped_end, gap_dur))
-            uncovered_start = max(uncovered_start, ce)
-            if uncovered_start >= es:
-                break
-        # Remaining tail (only if within subtitle range)
-        if uncovered_start < min(es, last_cue_e):
-            gap_dur = min(es, last_cue_e) - uncovered_start
-            if gap_dur >= min_gap:
-                raw_gaps.append((uncovered_start, min(es, last_cue_e), gap_dur))
+        dur = es - ss
+        # Skip very long segments (OP/ED songs)
+        if dur > max_gap_s:
+            continue
 
-    # ── Merge nearby gaps to avoid placeholder spam ──
-    # Consecutive VAD fragments within the same inter-cue region
-    # should be a single [???] marker, not one per fragment.
-    if not raw_gaps:
+        # Find overlapping cues
+        overlaps = []
+        for cue in sorted_cues:
+            cue_ss, cue_es = cue['start_s'], cue['end_s']
+            overlap = min(cue_es, es) - max(cue_ss, ss)
+            if overlap >= min_overlap_s:
+                overlaps.append(cue)
+
+        # Classify
+        garbled_in_overlaps = [c for c in overlaps if c.get('is_garbled')]
+        clean_in_overlaps = [c for c in overlaps if not c.get('is_garbled')]
+
+        if not overlaps:
+            # No cue at all → missing subtitle
+            raw_regions.append({
+                'start_s': ss, 'end_s': es,
+                'type': 'missing',
+                'cues_to_clear': [],
+                'garbled_cues': [],
+                'clean_cues': [],
+            })
+            continue
+
+        if garbled_in_overlaps:
+            # Has garbled cues → fix them (and any clean cues in same utterance)
+            cues_to_clear = overlaps  # Clear all: garbled + clean partials
+            raw_regions.append({
+                'start_s': ss, 'end_s': es,
+                'type': 'garbled',
+                'cues_to_clear': cues_to_clear,
+                'garbled_cues': garbled_in_overlaps,
+                'clean_cues': clean_in_overlaps,
+            })
+            continue
+
+        # No garbled cues. Check for partial overlap (speech extends beyond cues)
+        covered_start = min(c['start_s'] for c in overlaps)
+        covered_end = max(c['end_s'] for c in overlaps)
+        uncovered_before = covered_start - ss
+        uncovered_after = es - covered_end
+        total_uncovered = max(0, uncovered_before) + max(0, uncovered_after)
+
+        if total_uncovered >= min_gap_s:
+            # Speech meaningfully extends beyond existing cues → partial overlap
+            raw_regions.append({
+                'start_s': ss, 'end_s': es,
+                'type': 'partial_overlap',
+                'cues_to_clear': overlaps,
+                'garbled_cues': [],
+                'clean_cues': clean_in_overlaps,
+            })
+        # else: speech is well-covered by clean cues → skip
+
+    if not raw_regions:
         return []
 
-    raw_gaps.sort(key=lambda g: g[0])
-    merged_gaps = [raw_gaps[0]]
-    for ss, es, dur in raw_gaps[1:]:
-        prev_ss, prev_es, prev_dur = merged_gaps[-1]
-        if ss <= prev_es + merge_gap:
-            # Merge into previous gap
-            merged_gaps[-1] = (prev_ss, max(prev_es, es),
-                              max(prev_es, es) - prev_ss)
+    # ── Merge adjacent/overlapping regions ──
+    raw_regions.sort(key=lambda r: r['start_s'])
+    merged_regions = [dict(raw_regions[0])]
+
+    for r in raw_regions[1:]:
+        prev = merged_regions[-1]
+        # Merge if overlapping or within 2s
+        if r['start_s'] <= prev['end_s'] + 2.0:
+            # Expand time range
+            prev['end_s'] = max(prev['end_s'], r['end_s'])
+            # Merge type: garbled > partial_overlap > missing
+            type_rank = {'garbled': 3, 'partial_overlap': 2, 'missing': 1}
+            if type_rank.get(r['type'], 0) > type_rank.get(prev['type'], 0):
+                prev['type'] = r['type']
+            # Union cues_to_clear
+            seen_starts = {c['start'] for c in prev['cues_to_clear']}
+            for c in r['cues_to_clear']:
+                if c['start'] not in seen_starts:
+                    seen_starts.add(c['start'])
+                    prev['cues_to_clear'].append(c)
+            # Union garbled_cues
+            seen_garbled = {c['start'] for c in prev['garbled_cues']}
+            for c in r['garbled_cues']:
+                if c['start'] not in seen_garbled:
+                    seen_garbled.add(c['start'])
+                    prev['garbled_cues'].append(c)
+            # Union clean_cues
+            seen_clean = {c['start'] for c in prev['clean_cues']}
+            for c in r['clean_cues']:
+                if c['start'] not in seen_clean:
+                    seen_clean.add(c['start'])
+                    prev['clean_cues'].append(c)
         else:
-            merged_gaps.append((ss, es, dur))
+            merged_regions.append(dict(r))
 
-    # ── Filter by max_gap: skip very long gaps (OP/ED music) ──
-    filtered = []
-    for ss, es, _ in merged_gaps:
-        dur = es - ss
-        if dur <= max_gap:
-            filtered.append((ss, es, dur))
-    return filtered
+    # ── Attach context cues (nearest clean neighbor before/after) ──
+    for region in merged_regions:
+        region['context_left'] = None
+        region['context_right'] = None
 
+        # Find all cues that are NOT in cues_to_clear
+        clear_starts = {c['start'] for c in region['cues_to_clear']}
+        clean_context_cues = [c for c in sorted_cues
+                             if c['start'] not in clear_starts
+                             and not c.get('is_garbled')
+                             and c.get('text', '').strip()
+                             and not is_non_dialogue_marker(c['text'], target_lang)]
 
-def add_placeholder_cues(gaps, cues, srt_path):
-    """Add placeholder cues for missing dialogue. Modifies SRT in-place.
+        # Left context: last clean cue ending before this region
+        for c in reversed(clean_context_cues):
+            if c['end_s'] <= region['start_s'] + 2.0:
+                region['context_left'] = c
+                break
 
-    Placeholder text '⚠SPEECH' contains Latin chars → classified as garbled
-    → automatically enters Whisper Tier 1/2 for transcription.
+        # Right context: first clean cue starting after this region
+        for c in clean_context_cues:
+            if c['start_s'] >= region['end_s'] - 2.0:
+                region['context_right'] = c
+                break
 
-    Args:
-        gaps: [(start_s, end_s, dur), ...] from find_missing_subtitle_gaps
-        cues: current cue list (to append to)
-        srt_path: SRT file to write
-
-    Returns:
-        updated cues list with placeholders inserted
-    """
-    if not gaps:
-        return cues
-
-    # Create placeholder cues
-    placeholders = []
-    for ss, es, dur in gaps:
-        # Format timestamps as SRT timecodes
-        start_ts = format_tc(ss)
-        end_ts = format_tc(es)
-        placeholders.append({
-            'start': start_ts,
-            'end': end_ts,
-            'start_s': ss,
-            'end_s': es,
-            'text': MISSING_SPEECH_MARKER,
-            'line': None,
-            'is_garbled': True,
-            'garbled_type': 'garbled',
-            'is_placeholder': True,
-        })
-
-    # Insert and sort by start time
-    all_cues = cues + placeholders
-    all_cues.sort(key=lambda c: c['start_s'])
-
-    # Write updated SRT
-    write_srt(srt_path, all_cues)
-
-    print(f'[VAD] +{len(placeholders)} placeholder cues for missing dialogue:',
-          file=sys.stderr)
-    for p in placeholders:
-        print(f'  [{p["start"]}] ⚠SPEECH ({p["end_s"]-p["start_s"]:.1f}s)',
-              file=sys.stderr)
-
-    return all_cues
+    return merged_regions
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -834,11 +883,12 @@ def main():
             extract_audio_wav(args.video, vad_audio)
             cues, deleted, speech_segs = vad_delete_nonspeech(vad_audio, cues, args.srt)
             deleted_count = len(deleted)
-            # Optional: detect speech without subtitles → placeholder cues
+            # Optional: detect speech without subtitles → fix regions
             if args.detect_missing_dialogue:
-                gaps = find_missing_subtitle_gaps(speech_segs, cues,
-                                                   min_gap=args.missing_dialogue_min_gap)
-                cues = add_placeholder_cues(gaps, cues, args.srt)
+                regions = build_fix_regions(speech_segs, cues)
+                if regions:
+                    print(f'[VAD] {len(regions)} fix regions detected '
+                          f'(garbled + partial + missing)', file=sys.stderr)
         else:
             print('[VAD] --no-vad-clean: skipping speech detection', file=sys.stderr)
 

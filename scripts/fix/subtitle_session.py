@@ -192,21 +192,6 @@ class SubtitleSession:
                                    target_lang=self.target_lang)
         return self._cues
 
-    # ── Missing subtitle check ──
-
-    def has_missing_subtitles(self) -> bool:
-        """Check if findings.json has missing_subtitles for this episode."""
-        findings_path = os.path.join(self.temp_dir, 'findings.json')
-        if not os.path.exists(findings_path):
-            return False
-        try:
-            with open(findings_path, 'r', encoding='utf-8') as f:
-                findings = json.load(f)
-            gaps = findings.get('missing_subtitles', {}).get(self.episode, [])
-            return len(gaps) > 0
-        except Exception:
-            return False
-
     # ── Reference subtitle context ──
 
     def load_ref_cues(self):
@@ -244,34 +229,6 @@ class SubtitleSession:
         if best_text and len(best_text) > max_chars:
             best_text = best_text[:max_chars] + '…'
         return best_text
-
-    # ── Placeholder safety net ──
-
-    def convert_placeholders_to_markers(self) -> int:
-        """Convert any remaining ⚠SPEECH placeholders in SRT to [???].
-
-        This is a safety net — placeholders should have been handled by
-        the triage, but edge cases can leave residuals.
-
-        Returns count of converted markers.
-        """
-        if not self.srt_path or not os.path.exists(self.srt_path):
-            return 0
-        try:
-            with open(self.srt_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            count = content.count('⚠SPEECH')
-            if count > 0:
-                content = content.replace('⚠SPEECH', '[???]')
-                with open(self.srt_path, 'w', encoding='utf-8') as f:
-                    f.write(content)
-                print(f'[safety] {count} ⚠SPEECH → [???] '
-                      f'in {os.path.basename(self.srt_path)}',
-                      file=sys.stderr)
-            return count
-        except Exception as e:
-            print(f'[safety] Placeholder scan failed: {e}', file=sys.stderr)
-            return 0
 
     # ── Generic lookup helpers ──
 

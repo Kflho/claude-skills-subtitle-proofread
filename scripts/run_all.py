@@ -221,11 +221,6 @@ def step_fix_episodes(project_dir, lang, resources,
         selected = episodes
     elif findings:
         selected = sorted(findings.get('per_episode_issues', {}).keys())
-        # v5.0: Also include episodes with missing_subtitles but no garbled cues
-        missing_subs = findings.get('missing_subtitles', {})
-        for ep in missing_subs:
-            if ep not in selected and missing_subs[ep]:
-                selected.append(ep)
         selected = sorted(selected)
     else:
         # No findings — try to find all subtitle files in target
@@ -253,16 +248,13 @@ def step_fix_episodes(project_dir, lang, resources,
         print(f'[fix] First: {selected[0]}, Last: {selected[-1]}', file=sys.stderr)
 
     # --skip-if-clean: fast pre-check (Fixer.is_clean() is cheap — no audio/ffmpeg)
-    # v5.0: Don't skip episodes that have missing_subtitles even if garbled-clean
     if skip_if_clean:
         from fix.fix_orchestrator import Fixer
-        missing_subs = (findings or {}).get('missing_subtitles', {})
         clean_eps = []
         for ep in selected:
             try:
                 fixer = Fixer(ep, project_dir, target_lang=lang, srt_dir=target_dir)
-                has_missing = bool(missing_subs.get(ep, []))
-                if fixer.is_clean() and not has_missing:
+                if fixer.is_clean():
                     clean_eps.append(ep)
             except Exception:
                 pass
@@ -1045,9 +1037,8 @@ def _print_progress(project_dir, label='Progress'):
         eps_with = [ep for ep, v in per_ep.items() if v]
         print(f'  Episodes with issues: {len(eps_with)}/{len(per_ep)}', file=sys.stderr)
         print(f'  Garbled cues:        {s.get("garbled_count", "?")}', file=sys.stderr)
-        if s.get('missing_subtitle_gaps'):
-            print(f'  Missing subtitles:   {s["missing_subtitle_gaps"]} gaps '
-                  f'in {s.get("episodes_with_missing_subs", "?")} episodes',
+        if s.get('vad_episodes_scanned'):
+            print(f'  VAD speech scan:     {s["vad_episodes_scanned"]} episodes',
                   file=sys.stderr)
         if s.get('repeat_count'):
             print(f'  Repeat patterns:     {s["repeat_count"]}', file=sys.stderr)
