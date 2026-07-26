@@ -373,7 +373,9 @@ def find_video(project_dir, episode, video_dir=None):
         if not os.path.isdir(vdir):
             continue
         for fname in os.listdir(vdir):
-            if ep_num in fname and fname.lower().endswith(exts):
+            # Match episode number with word boundaries to avoid hash substring false positives
+            # e.g. "192" should match "鉄腕アトム - 192 -" but not "C319227A"
+            if fname.lower().endswith(exts) and re.search(rf'(?<!\d){ep_num}(?!\d)', fname):
                 return os.path.join(vdir, fname)
 
     return None
