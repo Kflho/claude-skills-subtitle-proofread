@@ -13,7 +13,9 @@ description: >
 
 **资源驱动**：有什么用什么。有视频+Whisper→修复乱码+补全缺字幕；有参考字幕→注入 AI 校对上下文。缺资源也能残血运行——跳过缺失步骤，剩余步骤照常。
 
-> v5.0: Phase 1 新增 VAD 有人声无字幕检测（需 `--video-dir`），作为第一类错误与乱码并列。详见 [references/architecture.md](references/architecture.md)。
+> v5.2: Phase 3 新增 `oped_fill.py`（三步全API空白行填充：边界检测→器乐分类→翻译模板）
+> + `oped_fixer.py` 集成 `--detect-boundaries` API 边界检测（替代硬编码 95s/120s）。
+> 详见 [references/architecture.md](references/architecture.md)。
 
 ## 🔥 快速上手：专名校对
 
@@ -56,7 +58,7 @@ python "<scripts-dir>/batch_classify.py" --limit 3
 
 ### ASS 格式项目
 
-本 skill 同时支持 **SRT** 和 **ASS** 两种格式。所有工具通过 `parse_subtitles()`/`write_subtitles()` 自动检测格式，无需手动转换。
+本 skill 同时支持 **SRT** 和 **ASS** 两种格式。所有工具通过 `read_subtitles()`/`write_subtitles()`（`lib.subtitle_io`）或 `parse_subtitles()`/`write_srt()`（`lib.whisper_utils`）自动检测格式，无需手动转换。
 
 > **注意**：如果项目是 ASS 格式，`--input-dir` 指向包含 `.ass` 文件的目录即可。Pipeline 会像处理 SRT 一样处理 ASS，输出保持 ASS 格式。
 
@@ -181,6 +183,23 @@ python "<scripts-dir>/nouns/find_suspect_nouns.py" \
   --target-dir "<中文翻译>" --project-lang zh
 ```
 
+**OP/ED 专项工具**（独立于 pipeline，可单独调用）
+
+```bash
+# oped_fixer: 跨集文本聚类 + 统一已有 OP/ED 文本
+# --detect-boundaries 用 API 检测边界（替代硬编码），--auto-only 仅清理器乐幻觉
+python "<scripts-dir>/fix/oped_fixer.py" "<SUBTITLE_DIR>" \
+  --lang zh --detect-boundaries --auto-only -o temp/scans/oped_fixes.json
+
+# oped_fill: 三步全API空白行填充（需 --video-dir 提取音频）
+# Step1: API边界检测 → Step2: API器乐/人声分类 → Step3: API翻译+模板填充
+python "<scripts-dir>/fix/oped_fill.py" "<SUBTITLE_DIR>" \
+  --video-dir "<VIDEO_DIR>" --lang zh --dry-run
+
+# API 边界检测（独立测试）
+python "<scripts-dir>/lib/oped_detect.py" "<SUBTITLE_DIR>" --lang zh --dry-run
+```
+
 **Phase 4：AI 润色**（--lang zh 项目可选）
 
 ```bash
@@ -298,7 +317,8 @@ Phase 2: Triage
 
 Phase 3: Unify
   ├─ Suspect noun search: full-scan (no cap), jieba pre-primed with known names
-  ├─ OP/ED fixer: cross-episode clustering → instrumental auto-clean / vocal AI review
+  ├─ OP/ED fixer (oped_fixer.py): cross-episode text clustering → instrumental auto-clean / vocal AI review
+  ├─ OP/ED filler (oped_fill.py): 3-step API pipeline (boundary detect → classify instrumental/vocal → translate + fill blank cues)
   ├─ Noun variant detection → unified candidates.json (全量，AI 逐条审查)
   └─ Deliver: apply all fixes → [???] markers written to SRT for Aegisub review
 
@@ -362,11 +382,33 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 
 ### OP/ED 审查
 
-**触发**: `[oped] AI review candidates` + `vocal_clusters > 0`
+两个互补工具，处理 OP/ED 区域的不同问题：
+
+| 工具 | 处理对象 | 数据来源 | 输出 |
+|------|---------|---------|------|
+| `oped_fixer.py` | **已有文本的 cue**（幻觉、变体） | SRT 文本跨集聚类 | 统一为 canonical / 器乐幻觉→[音楽] |
+| `oped_fill.py` | **空白行 cue**（无文本） | 视频音频→Whisper→LLM | 填入歌词翻译 / 保持空白（器乐） |
+
+**oped_fixer 触发**: `[oped] AI review candidates` + `vocal_clusters > 0`
 
 1. 读 `temp/scans/oped_ai_review.json`
 2. 填每个 candidate 的 `canonical`（`__INSTRUMENTAL__` = 器乐）
 3. 运行：`python run_all.py --apply-ai-review --video-dir "<VIDEO_DIR>"`
+
+**oped_fill 用法**（三步全 API，不需人工介入）：
+
+```bash
+# dry-run 预览（不改文件，不调 Whisper）
+python "<scripts-dir>/fix/oped_fill.py" "<SUBTITLE_DIR>" \
+  --video-dir "<VIDEO_DIR>" --lang zh --dry-run
+
+# 跳过 API 边界检测（用默认值 180s）
+python "<scripts-dir>/fix/oped_fill.py" "<SUBTITLE_DIR>" \
+  --video-dir "<VIDEO_DIR>" --lang zh --skip-step1
+```
+
+**执行顺序**：先 `oped_fill` 填空白 → 再 `oped_fixer` 统一文本变体。
+**边界检测**：两个工具都支持 `--detect-boundaries`（API 语义分析 cue 列表）和手动 `--op-boundary`/`--ed-boundary`。
 
 ### AI 润色（--lang zh）
 
@@ -416,6 +458,8 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 | `LLM_MODEL` (env) | Override default model. Current default: `deepseek-v4-pro`. Use `--model` for per-run override. |
 | `--source-lang <LANG>` | translate_srt.py: force source language (ja/ru/zh). Default: auto-detect. |
 | `--mappings <JSON>` | translate_srt.py: path to noun_mappings.json (preferred over --glossary) |
+| `--detect-boundaries` | oped_fixer/oped_fill: use API (LLM) to detect OP/ED boundaries from cue patterns |
+| `--skip-step1` | oped_fill: skip API boundary detection, use --op-boundary/--ed-boundary defaults |
 
 > `--apply-ai-review` 是后处理快速路径，不能和 full run 一起用。
 > 翻译工具完整参数见 [references/translation.md](references/translation.md)。
