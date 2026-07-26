@@ -219,9 +219,16 @@ def detect_whisper_cpp_version(whisper_cli=None):
 
 def _to_seconds(tc):
     """Timecode string → float seconds."""
+    if not tc or not tc.strip():
+        return 0.0
     tc = tc.replace(',', '.').replace('-', ':')
     parts = tc.split(':')
-    return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+    if len(parts) < 3:
+        return 0.0
+    try:
+        return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+    except (ValueError, IndexError):
+        return 0.0
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -392,6 +399,11 @@ def _transcribe_whisper_cpp(audio_path, model_path, language,
 
         ts_from = ts.get('from', ts.get('start', '00:00:00,000'))
         ts_to = ts.get('to', ts.get('end', '00:00:08,000'))
+
+        # Skip segments with empty/missing timestamps
+        if (isinstance(ts_from, str) and not ts_from.strip()) or \
+           (isinstance(ts_to, str) and not ts_to.strip()):
+            continue
 
         # Convert to seconds if needed (handle both string timecodes and float seconds)
         if isinstance(ts_from, str):
