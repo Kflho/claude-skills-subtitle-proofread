@@ -216,6 +216,27 @@ python "<scripts-dir>/whisper_batch_transcribe.py" \
 > 输出：Whisper 自带 VAD 分段，直接生成完整 SRT。
 > **视频匹配**：`find_video()` 使用数字边界正则 `(?<!\d)N(?!\d)` 匹配集号，避免哈希中的数字子串误匹配（如 "192" 匹配到 "[C319227A]"）。
 
+**Whisper 切段修复**（全量翻译后补 `[???]` 标记的 cue）
+
+全片 Whisper 在多人争吵/对话密集场景会把多句合并成一条长 cue，导致 VAD 分段失准、输出乱码。LLM 无力翻译乱码时标 `[???]`。
+`whisper_spot_fix.py` 对指定时间轴切段单独重跑 Whisper + 翻译，输出干净的中文参考：
+
+```bash
+# 单段
+python "<scripts-dir>/whisper_spot_fix.py" EP001 --start 24:35 --end 24:44
+
+# 多段
+python "<scripts-dir>/whisper_spot_fix.py" EP042 --spots "12:10-12:18,18:30-18:42"
+
+# 仅日文（不调翻译 API，手动判断）
+python "<scripts-dir>/whisper_spot_fix.py" EP001 --start 24:35 --end 24:44 --no-translate
+```
+
+> 原理：短音频窗口让 Whisper 内部 VAD 分段更准确，避免全片模式下长 cue 合并导致的乱码。
+> 输出 JA（Whisper 干净日文）+ ZH（LLM 翻译），供人工校对参考。
+> 使用 `--spots` 可一次指定多段，`--padding` 控制切段时间轴外扩秒数（默认 3s）。
+> `--model`/`--base-url` 覆盖翻译 API，默认使用 `LLM_MODEL`/`LLM_BASE_URL`。
+
 **Whisper 幻觉重复**（已知问题，翻译阶段处理）
 
 Whisper 在音乐/噪声段会产生幻觉重复（连续多条 cue 文本高度相似甚至完全相同）。
