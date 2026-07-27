@@ -237,6 +237,9 @@ python "<scripts-dir>/whisper_spot_fix.py" EP001 --start 24:35 --end 24:44 --no-
 > 使用 `--spots` 可一次指定多段，`--padding` 控制切段时间轴外扩秒数（默认 3s）。
 > `--model`/`--base-url` 覆盖翻译 API，默认使用 `LLM_MODEL`/`LLM_BASE_URL`。
 
+**AI 响应规范**：用户发送需要修复的字幕行时，Claude 应同时附上该 cue **前后各 1-2 句的现有翻译**作为上下文对照，再给出切段 Whisper 参考。这样用户一眼能看出：① 当前翻译是否正确 ② 修复后的句子如何嵌入上下文。
+**时间轴**：输出时使用用户提供的字幕时间轴，不要用 Whisper 自身的时间戳。用户已经对好轴。
+
 **Whisper 幻觉重复**（已知问题，翻译阶段处理）
 
 Whisper 在音乐/噪声段会产生幻觉重复（连续多条 cue 文本高度相似甚至完全相同）。

@@ -1,7 +1,5 @@
 # Subtitle Proofread — Claude Code Skill
 
-<!-- AI: 此文件是 GitHub 首页，不是 skill 入口。请读 SKILL.md。 -->
-
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Skill-6C4DFF)](https://claude.com/claude-code)
 [![Python](https://img.shields.io/badge/Python-3.12+-blue)](https://python.org)
 [![License](https://img.shields.io/badge/License-MIT-green)](./LICENSE)
@@ -54,34 +52,86 @@ git clone https://github.com/Kflho/claude-skills-subtitle-proofread.git \
 
 ---
 
-## 它做什么
+## 核心能力
 
+### 翻译（translate_srt.py）
+
+日→中批量翻译，OpenAI 兼容 API。核心特性：
+
+- **集内并行**：所有 batch 同时发出（ThreadPoolExecutor），上下文用日文原文（预计算，零依赖），193 集约 10 分钟
+- **专名一致**：`--mappings noun_mappings.json` 预替换 ja→zh 专名，翻译前统一译法
+- **集数过滤**：`--episodes/-e`（范围）、`--start-from`（从第 N 集开始），照搬 `run_all.py` 逻辑
+- **OP/ED 控制**：`--skip-oped` 跳过片头片尾检测（无 OP/ED 的作品）
+- **模型选择**：`LLM_MODEL` env 或 `--model` CLI 覆盖
+
+```bash
+# 全量翻译（带专名映射，跳过 OP/ED）
+python translate_srt.py --input-dir 日文源/ --output-dir 中文/ \
+  --mappings noun_mappings.json --skip-oped
+
+# 只翻译指定范围
+python translate_srt.py --input-dir 日文源/ --output-dir 中文/ \
+  --mappings noun_mappings.json -e EP076-EP193
 ```
-你的字幕 ──→ Phase 1 扫描 ──→ Phase 2 修复 ──→ Phase 3 统一 ──→ 干净字幕 + 审查报告
- (SRT/ASS)    (只读，不改文件)   (Whisper + AI)    (名词 + OP/ED)
+
+### 从视频生成字幕（whisper_batch_transcribe.py）
+
+无需已有字幕，直接从视频 Whisper 转录生成 SRT：
+
+```bash
+python whisper_batch_transcribe.py --video-dir "视频/" --output-dir "字幕/" --lang ja
 ```
 
-| 阶段 | 做什么 | AI 管什么 |
-|------|--------|-----------|
-| **Phase 1** Scan | 扫描全部字幕，检测乱码 + 统计词频 + 生成术语表 | 术语表 borderline 审查（≤20条） |
-| **Phase 2** Triage | VAD → Whisper → 自动分类（auto-keep / auto-cut / AI补全） | 碎片补全（🤖 配对判断） |
-| **Phase 3** Unify | OP/ED 一致性、专名变体检测、自动分类、批量应用 | 专名判断（迭代收敛：12→6→3→0） |
+> 视频匹配使用数字边界正则 `(?<!\d)N(?!\d)`，避免哈希子串误匹配（如 "192" 匹配 "[C319227A]"）。
 
-**资源驱动，缺了也能跑**：有视频+Whisper → 完整修复；只有字幕 → 跳过音频步骤，扫描+统一专名照样跑。
+### 切段修复（whisper_spot_fix.py）🆕
+
+全片 Whisper 在多人争吵/对话密集场景会把多句合并成一条长 cue，VAD 失准导致乱码。`whisper_spot_fix.py` 对指定时间轴切段单独重跑 Whisper + 翻译，输出干净参考：
+
+```bash
+# 单段
+python whisper_spot_fix.py EP001 --start 24:35 --end 24:44
+
+# 多段
+python whisper_spot_fix.py EP042 --spots "12:10-12:18,18:30-18:42"
+
+# 仅日文（不调翻译 API）
+python whisper_spot_fix.py EP001 --start 24:35 --end 24:44 --no-translate
+```
+
+> 原理：短音频窗口让 Whisper 内部 VAD 分段更准确，避免全片模式下长 cue 合并。
+> 输出 JA（Whisper 干净日文）+ ZH（LLM 翻译）。
+
+### Whisper 幻觉重复
+
+Whisper 在音乐/噪声段会产生幻觉重复（连续多条 cue 文本高度相似）。切片重跑方案已验证无效（`fix_repeated_cues.py` 已弃用）。正确做法是在翻译阶段由 LLM 根据上下文判断。
+
+### 专名审查（Phase B）
+
+翻译前自动扫描词频 → 生成专名表 → AI 审查填写 ja→zh 映射 → 翻译时自动替换：
+
+```bash
+# 扫描 + 生成词表
+python unified_scanner.py --target-dir 日文源/ --build-glossary --project-lang ja
+# 生成映射模板
+python build_glossary.py --findings findings.json --mappings-output noun_mappings.json
+# 🤖 AI 审查 → 填写 noun_mappings.json → 翻译时 --mappings 注入
+```
+
+支持 AI 预搜索专名（`--ai-nouns`）、自动清理普通词（`auto_clean_glossary.py`）、预分类（`auto_classify.py`）。
 
 ---
 
 ## 实际效果
 
-用 193 集日语动画测试了完整流程：
+用 193 集日语动画（1963 版《铁腕阿童木》）测试了完整流程：
 
 | 指标 | 数值 |
 |------|------|
-| 总 cue 数 | 78,259 |
-| 检测到乱码 | 3,673（107 集） |
-| OP/ED 自动清理 | 171 条 |
-| 专名统一 | 76 条规则，覆盖 59 集 |
-| 最终待处理 | **0** ⬜ |
+| 视频 → 日文字幕 | 193 集，53,079 cues（Whisper kotoba-v2.0-q5_0） |
+| 专名映射 | 199 条 ja→zh（基于官方中文标题 + 萌娘百科 + Wikipedia 验证） |
+| 日→中翻译 | 193 集全量，集内并行 ~10 分钟 |
+| 翻译质量 | 零 `[???]` 自动产出，~2 行/集假名残留（专名未映射为主） |
 
 ---
 
@@ -94,7 +144,7 @@ git clone https://github.com/Kflho/claude-skills-subtitle-proofread.git \
 | 扫描字幕文件，检测乱码字符 | 判断 Whisper 输出是不是合理的日语 |
 | VAD + Whisper 重转录 | 补全拉丁污染片段 |
 | Jamdict 查词典 | 决定一个词是专名还是普通词 |
-| 批量替换 | 判断人名变体（`ヒゲオヤジ` vs `ヒゲおやじ`） |
+| 批量替换 | 审查 199 条专名词表 + 确定中文译名 |
 
 Claude 填补了脚本够不到的 gap — 负责所有需要理解和判断的决策。
 
@@ -107,15 +157,17 @@ Claude 填补了脚本够不到的 gap — 负责所有需要理解和判断的�
 ├── README.md                 ← GitHub 首页（你在这里）
 ├── references/               ← AI 参考文档
 │   ├── interventions.md      ←   AI 介入判断规则
-│   ├── first-run.md             ←   初始化向导
-│   ├── phase1-scan.md        ←   Phase 1 扫描命令
-│   ├── phase2-triage.md      ←   Phase 2 Whisper 修复命令
-│   ├── phase3-unify.md       ←   Phase 3 专名统一 + 交付命令
-│   ├── full-mode.md          ←   参考字幕完整工作流
+│   ├── first-run.md          ←   初始化向导
+│   ├── translation.md        ←   翻译工具完整参数
+│   ├── batch-review.md       ←   大规模专名审查
+│   ├── workflows.md          ←   典型工作流场景
 │   └── architecture.md       ←   脚本架构与数据流
-├── scripts/                  ← Python 工具链（~13,500 行）
+├── scripts/                  ← Python 工具链
 │   ├── run_all.py            ←   流水线编排器
-│   ├── scan/                 ←   Phase 1：乱码扫描
+│   ├── translate_srt.py      ←   日→中批量翻译（集内并行）
+│   ├── whisper_batch_transcribe.py ← 视频→SRT 批量转录
+│   ├── whisper_spot_fix.py   ←   🆕 切段 Whisper + 翻译修复
+│   ├── scan/                 ←   Phase 1：乱码扫描 + 词频
 │   ├── fix/                  ←   Phase 2：Whisper + 分类
 │   ├── nouns/                ←   Phase 3：专名 + 词典
 │   ├── apply/                ←   修复应用
@@ -128,9 +180,10 @@ Claude 填补了脚本够不到的 gap — 负责所有需要理解和判断的�
 
 ## 支持的语言
 
-- **日语** (ja) — 完整：乱码检测 + Jamdict 词典 + 专名分类
+- **日语** (ja) — 完整：乱码检测 + Jamdict 词典 + 专名分类 + 日→中翻译
 - **中文** (zh) — 完整：乱码检测 + 繁简映射 + 拼音检测
-- **英文** (en) — 基础
+- **俄语** (ru) — 翻译支持（ru→zh）
+- **其他** — 翻译支持（任意→zh），无词典辅助
 
 > **不适用场景**：不替代专业字幕软件（无时间轴编辑/翻译记忆/协作）、不做翻译本身、不做从零开始的字幕制作。
 
