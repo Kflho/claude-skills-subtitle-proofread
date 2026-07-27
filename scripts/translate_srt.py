@@ -614,12 +614,45 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
 
 
 # ═══════════════════════════════════════════════════════════════
+# Episode filtering (same logic as run_all.py)
+# ═══════════════════════════════════════════════════════════════
+
+def _parse_episodes(arg):
+    """Parse --episodes argument into a list of episode IDs.
+
+    Supports: 'EP001-EP010', 'EP001,EP005,EP010', '1-10', '1,5,10', None (all)
+    """
+    if not arg:
+        return None
+    episodes = []
+    for part in arg.split(','):
+        part = part.strip()
+        if '-' in part:
+            a, b = part.split('-', 1)
+            a = int(re.sub(r'\D', '', a))
+            b = int(re.sub(r'\D', '', b))
+            episodes.extend(f'EP{i:03d}' for i in range(a, b + 1))
+        else:
+            num = int(re.sub(r'\D', '', part))
+            episodes.append(f'EP{num:03d}')
+    return sorted(set(episodes))
+
+
+def _filter_by_start(episodes, start_from):
+    """Only keep episodes >= start_from."""
+    if not start_from:
+        return episodes
+    start_ep = f'EP{int(re.sub(r"\D", "", start_from)):03d}'
+    return [ep for ep in episodes if ep >= start_ep]
+
+
+# ═══════════════════════════════════════════════════════════════
 # Directory batch processing
 # ═══════════════════════════════════════════════════════════════
 
 def translate_dir(input_dir, output_dir, glossary_str, ja_to_zh,
                   api_key, model, base_url, dry_run=False, source_lang=None,
-                  skip_oped=False):
+                  skip_oped=False, episodes=None, start_from=None):
     """Translate all SRT/ASS files in a directory."""
     if not os.path.isdir(input_dir):
         print(f'ERROR: {input_dir} not found', file=sys.stderr)
@@ -633,6 +666,21 @@ def translate_dir(input_dir, output_dir, glossary_str, ja_to_zh,
     if not srt_files:
         print(f'ERROR: No SRT/ASS files found in {input_dir}', file=sys.stderr)
         sys.exit(1)
+
+    print(f'{len(srt_files)} files found', file=sys.stderr)
+
+    # Episode filter
+    if episodes:
+        ep_set = set(episodes)
+        srt_files = [f for f in srt_files
+                     if any(f.startswith(ep) for ep in ep_set)]
+    if start_from:
+        start_ep = f'EP{int(re.sub(r"\D", "", start_from)):03d}'
+        srt_files = [f for f in srt_files if f[:6] >= start_ep]
+
+    if not srt_files:
+        print('No files to translate after filtering.', file=sys.stderr)
+        return
 
     print(f'{len(srt_files)} files to translate', file=sys.stderr)
 
@@ -706,6 +754,10 @@ def main():
                         help='Source language (default: auto-detect from cues)')
     parser.add_argument('--skip-oped', action='store_true',
                         help='Skip OP/ED detection and pre-translation')
+    parser.add_argument('--episodes', '-e', default=None,
+                        help='Episodes to translate: EP001-EP010, EP001,EP005, 1-10, 1,5')
+    parser.add_argument('--start-from', default=None,
+                        help='Start from this episode (e.g., EP050 or 50)')
     args = parser.parse_args()
 
     # API key（LLM_API_KEY 优先，回退到 POLISH_API_KEY）
@@ -742,10 +794,13 @@ def main():
                        source_lang=args.source_lang)
     # Directory mode
     elif args.input_dir:
+        episodes = _parse_episodes(args.episodes) if args.episodes else None
         translate_dir(args.input_dir, args.output_dir, glossary_str, ja_to_zh,
                       api_key, model, base_url, dry_run=args.dry_run,
                       source_lang=args.source_lang,
-                      skip_oped=args.skip_oped)
+                      skip_oped=args.skip_oped,
+                      episodes=episodes,
+                      start_from=args.start_from)
     else:
         parser.print_help()
         sys.exit(1)
