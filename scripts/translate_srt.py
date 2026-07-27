@@ -2,17 +2,18 @@
 """SRT/ASS batch translator — Japanese → Chinese via OpenAI-compatible API.
 
 Features:
-- OP/ED pre-translate: detect + translate once, apply to all episodes
+- OP/ED pre-translate: detect + translate once, apply to all episodes (--skip-oped to disable)
 - Proper noun pre-replace: ja→zh mapping from glossary before translation
-- Polish-merged prompt: translation + polish in one pass (no separate Phase 4)
-- Batch processing: 10 cues/batch with ±3 cue context window
+- Batch processing: N cues/batch with ±3 cue JA context window (pre-computed → fully parallel)
+- Intra-episode parallelism: all batches submitted concurrently (ThreadPoolExecutor)
 
 Usage:
   # Single file
   python translate_srt.py --input EP001.srt --output 中文/EP001.srt
 
-  # Batch directory
-  python translate_srt.py --input-dir AI审查后/ --output-dir 中文翻译后/
+  # Batch directory (with proper noun mappings, skip OP/ED)
+  python translate_srt.py --input-dir AI审查后/ --output-dir 中文翻译后/ \
+    --mappings noun_mappings.json --skip-oped
 
   # With glossary (proper nouns + OP/ED)
   python translate_srt.py --input-dir AI审查后/ --output-dir 中文翻译后/ \\
@@ -35,6 +36,7 @@ import sys
 import time
 import urllib.request
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import lib._path  # noqa: F401
 from lib.whisper_utils import parse_subtitles, write_subtitles, OP_BOUNDARY_SEC, ED_BOUNDARY_SEC
@@ -126,10 +128,10 @@ def _build_system_prompt(source_lang):
     return base
 
 
-USER_TEMPLATE = """上下文（前面已翻译的字幕）：
+USER_TEMPLATE = """上下文（前几条日文原文，帮助理解语流）：
 {context_before}
 
-本次要翻译的字幕：
+本次要翻译的字幕（日文）：
 {targets}
 
 固定译名参考（必须使用）：
@@ -473,21 +475,21 @@ def _parse_json_response(response):
     return None
 
 
-def _translate_batch(cues, api_key, model, base_url, glossary_str, context_texts=None, source_lang='ja'):
+def _translate_batch(cues, api_key, model, base_url, glossary_str, ja_context=None, source_lang='ja'):
     """Translate one batch of cues. Returns list of translated text or None.
 
     Args:
         cues: list of cue dicts to translate
-        context_texts: optional list of already-translated strings for context
+        ja_context: optional list of JA original cue dicts from preceding batch (pre-computed)
         source_lang: detected source language ('ja', 'ru', 'zh', 'other')
     """
     texts = [c['text'] if isinstance(c, dict) else str(c) for c in cues]
 
-    # Context: up to 3 already-translated cues from previous batch
+    # Context: up to 3 JA original cues from previous batch (pre-computed, no dependency)
     context_before = ''
-    if context_texts:
-        recent = context_texts[-3:]
-        context_before = '\n'.join(f'{i+1}. {t}' for i, t in enumerate(recent) if t)
+    if ja_context:
+        recent = ja_context[-3:]
+        context_before = '\n'.join(f'{i+1}. {c["text"]}' for i, c in enumerate(recent) if c.get('text'))
 
     targets = '\n'.join(f'{i+1}. {t}' for i, t in enumerate(texts) if t)
 
@@ -549,11 +551,10 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
     if noun_replaced:
         print(f'  {fname}: noun pre-replaced {noun_replaced} occurrences', file=sys.stderr)
 
-    # Step 3: Batch translate remaining cues
+    # Step 3: Batch translate remaining cues (intra-episode parallel)
     translated = 0
     failed = 0
     result_cues = list(cues)
-    translated_context = []  # track recently translated texts for context
 
     if dry_run:
         print(f'  {fname}: {total} cues (dry-run, no API calls)', file=sys.stderr)
@@ -562,47 +563,45 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
     print(f'  {fname}: {total} cues (OP/ED: {oped_replaced}, nouns: {noun_replaced})',
           file=sys.stderr)
 
-    # Process in batches, passing context from previous batch
+    # Build batch list with pre-computed JA context (no dependency on translation order)
+    batches = []
     for i in range(0, total, BATCH_SIZE):
-        batch = cues[i:i + BATCH_SIZE]
-
-        # Skip single-cue batches (no meaningful context)
-        if len(batch) < 1:
+        batch_cues = cues[i:i + BATCH_SIZE]
+        if len(batch_cues) < 1:
             continue
+        # JA context: up to 3 cues immediately before this batch (original Japanese)
+        ja_ctx = cues[max(0, i - 3):i]
+        batches.append((i, batch_cues, ja_ctx))
 
-        result = _translate_batch(batch, api_key, model, base_url, glossary_str,
-                                  context_texts=translated_context, source_lang=source_lang)
-
-        if result:
-            for j, translated_text in enumerate(result):
-                if j < len(batch) and translated_text and translated_text != batch[j]['text']:
-                    result_cues[i + j]['text'] = translated_text
-                    translated += 1
-            translated_context = [c['text'] for c in result_cues[max(0, i-3):i+len(batch)]
-                                  if c['text']]
-        else:
-            # Retry once — common failure is malformed JSON, not API error
-            print(f'\n    [retry] batch {i//BATCH_SIZE+1}', file=sys.stderr)
+    # Submit all batches in parallel
+    def _translate_one(idx_batch):
+        """Translate a single batch with retry. Returns (batch_idx, result_list_or_None)."""
+        batch_idx, batch_cues, ja_ctx = idx_batch
+        result = _translate_batch(batch_cues, api_key, model, base_url, glossary_str,
+                                  ja_context=ja_ctx, source_lang=source_lang)
+        if result is None:
             time.sleep(1)
-            result = _translate_batch(batch, api_key, model, base_url, glossary_str,
-                                      context_texts=translated_context, source_lang=source_lang)
+            result = _translate_batch(batch_cues, api_key, model, base_url, glossary_str,
+                                      ja_context=ja_ctx, source_lang=source_lang)
+        return batch_idx, batch_cues, result
+
+    print(f'    [{len(batches)} batches in parallel]', end='', file=sys.stderr)
+
+    with ThreadPoolExecutor(max_workers=min(len(batches), 16)) as executor:
+        futures = {executor.submit(_translate_one, b): b[0] for b in batches}
+        for future in as_completed(futures):
+            batch_idx, batch_cues, result = future.result()
             if result:
                 for j, translated_text in enumerate(result):
-                    if j < len(batch) and translated_text and translated_text != batch[j]['text']:
-                        result_cues[i + j]['text'] = translated_text
+                    if j < len(batch_cues) and translated_text and translated_text != batch_cues[j]['text']:
+                        result_cues[batch_idx + j]['text'] = translated_text
                         translated += 1
-                translated_context = [c['text'] for c in result_cues[max(0, i-3):i+len(batch)]
-                                      if c['text']]
             else:
-                failed += len(batch)
-
-        # Progress indicator
-        done = min(i + BATCH_SIZE, total)
-        pct = done * 100 // total
-        print(f'\r    [{done}/{total}] {pct}%', end='', file=sys.stderr)
-
-        if i + BATCH_SIZE < total:
-            time.sleep(DELAY)
+                failed += len(batch_cues)
+            # Progress: count completed futures
+            done = len([f for f in futures if f.done()])
+            pct = done * 100 // len(batches)
+            print(f'\r    [{done}/{len(batches)} batches] {pct}%', end='', file=sys.stderr)
 
     print(file=sys.stderr)
 
