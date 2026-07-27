@@ -214,6 +214,7 @@ python "<scripts-dir>/whisper_batch_transcribe.py" \
 
 > 适用：没有任何字幕文件，或已有字幕质量太差不值得修复。
 > 输出：Whisper 自带 VAD 分段，直接生成完整 SRT。
+> **视频匹配**：`find_video()` 使用数字边界正则 `(?<!\d)N(?!\d)` 匹配集号，避免哈希中的数字子串误匹配（如 "192" 匹配到 "[C319227A]"）。
 
 **Whisper 幻觉重复**（已知问题，翻译阶段处理）
 
@@ -232,6 +233,15 @@ Whisper 在音乐/噪声段会产生幻觉重复（连续多条 cue 文本高度
 ```bash
 python "<scripts-dir>/polish_zh.py" --input-dir "<SUBTITLE_DIR>"
 ```
+
+### 翻译并行机制（v2）
+
+`translate_srt.py` 支持**集内 batch 并行**：
+- 每个 batch 的上下文用**日文原文**（前 3 条 cue），无需等翻译结果
+- 所有 batch 通过 `ThreadPoolExecutor` 同时发出（max_workers=min(batches, 16)）
+- 每集从 ~40s（串行）降至 ~3s（并行），193 集约 10 分钟
+
+> 上下文用日文原文优于中文翻译结果——LLM 本身做日→中翻译，看原文更能理解语流。
 
 ### LLM API 配置
 
@@ -491,6 +501,8 @@ python "<scripts-dir>/fix/oped_fill.py" "<SUBTITLE_DIR>" \
 | `LLM_MODEL` (env) | Override default model. Current default: `deepseek-v4-pro`. Use `--model` for per-run override. |
 | `--source-lang <LANG>` | translate_srt.py: force source language (ja/ru/zh). Default: auto-detect. |
 | `--mappings <JSON>` | translate_srt.py: path to noun_mappings.json (preferred over --glossary) |
+| `--skip-oped` | translate_srt.py: skip OP/ED detection and pre-translation (use for shows without OP/ED) |
+| `--batch N` | translate_srt.py: cues per batch (default: 10). Larger = less API calls but slower parallelism |
 | `--detect-boundaries` | oped_fixer/oped_fill: use API (LLM) to detect OP/ED boundaries from cue patterns |
 | `--skip-step1` | oped_fill: skip API boundary detection, use --op-boundary/--ed-boundary defaults |
 
