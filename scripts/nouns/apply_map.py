@@ -27,6 +27,11 @@ Usage:
   # 导出 ja→zh 预替换表（供 translate_srt --mappings 幻觉控制）
   python nouns/apply_map.py temp/noun_map.json --target-dir 260806 \
       --emit-mappings temp/noun_map_ja_to_zh.json
+
+  # 生成逐集 AI 审查清单（实际统一项；与人工清单同格式）
+  #   - [x] 01集：御茶水博士（茶水博士）、阿童木（铁腕阿童木）
+  python nouns/apply_map.py temp/noun_map.json --target-dir 260806 \
+      --apply --emit-checklist temp/ai_review_checklist.txt
 """
 
 import argparse
@@ -88,9 +93,9 @@ def _apply_to_text(text, repls):
 
 
 def _process_srt(path, file_repls, apply):
-    """处理单个文件。file_repls: {canonical: [(regex, canonical), ...]}。
+    """处理单个文件。file_repls: {canonical: [(variant, regex), ...]}。
 
-    Returns: (file, 替换总数, {canonical: 次数})。
+    Returns: (file, 替换总数, {canonical: 次数}, {canonical: {variant: 次数}})。
     """
     with open(path, 'rb') as f:
         raw = f.read()
@@ -107,6 +112,7 @@ def _process_srt(path, file_repls, apply):
     lines = content.splitlines(keepends=False)
 
     counts = {c: 0 for c in file_repls}
+    variants = {c: {} for c in file_repls}
     out_lines = []
     for line in lines:
         stripped = line.strip()
@@ -117,10 +123,12 @@ def _process_srt(path, file_repls, apply):
             out_lines.append(line)
             continue
         new_line = line
-        for canonical, repls in file_repls.items():
-            for regex in repls:
+        for canonical, pairs in file_repls.items():
+            for variant, regex in pairs:
                 new_line, n = _apply_to_text(new_line, {regex: canonical})
                 counts[canonical] += n
+                if n:
+                    variants[canonical][variant] = variants[canonical].get(variant, 0) + n
         out_lines.append(new_line)
 
     total = sum(counts.values())
@@ -129,18 +137,22 @@ def _process_srt(path, file_repls, apply):
         with open(path, 'wb') as f:
             f.write(b'\xef\xbb\xbf' if bom else b'')
             f.write(new_content.encode('utf-8'))
-    return os.path.basename(path), total, counts
+    return os.path.basename(path), total, counts, variants
 
 
 def run_map(noun_map, target_dir, dry_run=True):
-    """把 map 应用到 target_dir。返回报告字符串。"""
+    """把 map 应用到 target_dir。
+
+    Returns: (报告字符串, per_episode_variants)。
+    per_episode_variants: {ep: {canonical: {variant: 次数}}}（只含实际发生替换的变体）。
+    """
     files = _index_files(target_dir)
     if not files:
         print(f'[apply_map] 警告：{target_dir} 无字幕文件', file=sys.stderr)
-        return ''
+        return '', {}
 
     # 为每个文件预构建替换表
-    file_repls = {}   # path → {canonical: [regex, ...]}
+    file_repls = {}   # path → {canonical: [(variant, regex), ...]}
     scope_used = {}   # canonical → scope
     skipped = []
     for canonical, entry in noun_map.items():
@@ -159,13 +171,20 @@ def run_map(noun_map, target_dir, dry_run=True):
             target_files = list(files.values())
         for path in target_files:
             repls = file_repls.setdefault(path, {})
-            repls[canonical] = [_build_repl(v, canonical) for v in variants]
+            repls[canonical] = [(v, _build_repl(v, canonical)) for v in variants]
 
     # 逐文件处理
     per_file = {}
+    per_episode_variants = {}
+    ep_by_path = {p: ep for ep, p in files.items()}
     for path, repls in sorted(file_repls.items()):
-        fname, total, counts = _process_srt(path, repls, apply=not dry_run)
+        fname, total, counts, variants = _process_srt(path, repls, apply=not dry_run)
         per_file[fname] = (total, counts)
+        if total > 0 and path in ep_by_path:
+            per_episode_variants[ep_by_path[path]] = {
+                c: {v: n for v, n in vc.items() if n > 0}
+                for c, vc in variants.items()
+            }
 
     # 汇总报告
     report = []
@@ -185,7 +204,31 @@ def run_map(noun_map, target_dir, dry_run=True):
     for canonical, why in skipped:
         report.append(f'  ⚠ {canonical}: {why}')
 
-    return '\n'.join(report) + '\n'
+    return '\n'.join(report) + '\n', per_episode_variants
+
+
+def emit_checklist(per_episode_variants, out_path):
+    """生成逐集 AI 审查清单（与人工清单同格式）。
+
+    格式：`- [x] NN集：规范名（变体、变体）、规范名（变体）`
+    只含实际发生替换的集。规范名按替换数降序，变体 `、` 连接。
+    Returns: 行列表。
+    """
+    lines = []
+    for ep in sorted(per_episode_variants):
+        num = int(re.sub(r'\D', '', str(ep)))
+        canonicals = per_episode_variants[ep]
+        segments = []
+        for canonical in sorted(canonicals, key=lambda c: -sum(canonicals[c].values())):
+            variants = sorted(canonicals[canonical],
+                              key=lambda v: -canonicals[canonical][v])
+            segments.append(f'{canonical}（{"、".join(variants)}）')
+        lines.append(f'- [x] {num:02d}集：{"、".join(segments)}')
+    if lines and out_path:
+        os.makedirs(os.path.dirname(out_path) or '.', exist_ok=True)
+        with open(out_path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(lines) + '\n')
+    return lines
 
 
 def emit_ja_to_zh(noun_map, out_path, merge_with=None):
@@ -217,6 +260,8 @@ def main():
     ap.add_argument('--emit-mappings', help='导出 ja→zh 预替换表到该路径')
     ap.add_argument('--merge-existing',
                     help='--emit-mappings 时合并已有的 ja→zh 映射（如 temp/noun_mappings.json）')
+    ap.add_argument('--emit-checklist', help='生成逐集 AI 审查清单到该路径'
+                    '（与 --apply 同用=记录实际统一项，与 --dry-run 同用=预览将统一项）')
     args = ap.parse_args()
 
     with open(args.map_path, 'r', encoding='utf-8') as f:
@@ -227,7 +272,12 @@ def main():
                       merge_with=args.merge_existing)
         return
 
-    print(run_map(noun_map, args.target_dir, dry_run=not args.apply))
+    report, per_episode_variants = run_map(
+        noun_map, args.target_dir, dry_run=not args.apply)
+    print(report)
+    if args.emit_checklist:
+        lines = emit_checklist(per_episode_variants, args.emit_checklist)
+        print(f'[apply_map] 清单 {len(lines)} 集 → {args.emit_checklist}')
 
 
 if __name__ == '__main__':

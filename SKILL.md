@@ -67,6 +67,19 @@ python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json \
   --emit-mappings temp/noun_map_ja_to_zh.json --merge-existing temp/noun_mappings.json
 ```
 
+**第 4 步：清单记录**（apply 后生成逐集 AI 审查记录，格式与人工清单一致）：
+
+```bash
+# --apply 时同跑：记录实际统一项 → 逐集清单
+python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json \
+  --target-dir "<中文翻译>" --apply --emit-checklist temp/ai_review_checklist.txt
+```
+
+清单行格式（人工清单同款）：
+`- [x] NN集：规范名（变体、变体）、规范名（变体）` —— 只记实际发生替换的集，
+`[x]` 表示 AI 已审查。生成后把行追加到项目清单（如 `字幕翻译.md`）的 `## ai 审查`
+版块；`## 人工审查` 版块不动。
+
 **数据流**：
 
 | 产物 | 内容 | 用途 |
@@ -685,6 +698,7 @@ python "<scripts-dir>/fix/oped_fill.py" "<SUBTITLE_DIR>" \
 | `--extract-nouns` | translate_srt.py: 翻译后提取专名实体 → temp/nouns/extracted_EP###.json |
 | `--extract-dir <DIR>` | translate_srt.py / extractor.py: sidecar 输出目录（默认 temp/nouns） |
 | `--emit-mappings` | apply_map.py: 导出 ja→zh 幻觉控制表（`--merge-existing` 并入旧表） |
+| `--emit-checklist <PATH>` | apply_map.py: 生成逐集 AI 审查清单（`- [x] NN集：规范名（变体）`；与 `--apply` 同用=记录实际统一项） |
 
 > `--apply-ai-review` 是后处理快速路径，不能和 full run 一起用。
 > 翻译工具完整参数见 [references/translation.md](references/translation.md)。
