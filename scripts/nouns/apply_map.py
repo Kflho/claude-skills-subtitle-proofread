@@ -55,6 +55,10 @@ def _build_repl(variant, canonical):
       （御茶水博士 里的 茶水博士 前有 御 → 不匹配，防 御茶水博士博士）
     - 变体是标准名前缀（乌拉尔→乌拉尔号）：匹配变体但后面不是 suffix
       （乌拉尔号 里的 乌拉尔 后有 号 → 不匹配，防 乌拉尔号号）
+    - 变体是标准名近似（多里安→多利安博士，非精确前后缀）：匹配变体但后面不是
+      标准名的 ≥2 字真后缀（多里安博士 里的 多里安 后有 博士 → 不匹配，
+      防 多利安博士博士）。近似音译变体（里≠利）走裸匹配时会吞掉文本中
+      "变体+标准名尾部"，这里用标准名全部真后缀负向预测拦截。
     """
     if canonical.endswith(variant) and len(canonical) > len(variant):
         prefix = canonical[:-len(variant)]
@@ -62,6 +66,12 @@ def _build_repl(variant, canonical):
     if canonical.startswith(variant) and len(canonical) > len(variant):
         suffix = canonical[len(variant):]
         return re.compile(re.escape(variant) + r'(?!' + re.escape(suffix) + r')')
+    # 裸匹配分支：标准名全部 ≥2 字真后缀，去重后按长度降序
+    suffixes = sorted({canonical[i:] for i in range(1, len(canonical))
+                       if len(canonical[i:]) >= 2}, key=len, reverse=True)
+    if suffixes:
+        alt = '|'.join(re.escape(s) for s in suffixes)
+        return re.compile(re.escape(variant) + r'(?!' + alt + r')')
     return re.compile(re.escape(variant))
 
 
