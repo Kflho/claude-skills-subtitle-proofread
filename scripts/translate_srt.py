@@ -518,14 +518,22 @@ def _translate_batch(cues, api_key, model, base_url, glossary_str, ja_context=No
 def translate_file(input_path, output_path, glossary_str, ja_to_zh,
                    api_key, model, base_url,
                    op_zh=None, ed_zh=None, op_texts=None, ed_texts=None,
-                   dry_run=False, source_lang=None):
+                   dry_run=False, source_lang=None,
+                   extract_nouns=False, extract_dir=None):
     """Translate a single subtitle file (SRT or ASS).
+
+    Args:
+        extract_nouns: 翻译后调用专名提取（nouns.extractor），写 sidecar JSON。
+        extract_dir: sidecar 输出目录（默认 temp/nouns）。
 
     Returns (total, translated, failed).
     """
     cues = parse_subtitles(input_path, mark_garbled=False)
     total = len(cues)
     fname = os.path.basename(input_path)
+
+    # 快照原始日文（apply_noun_pre_replace 会原地改 cues，需在预替换前保存）
+    ja_snapshot = [{'text': c.get('text', '')} for c in cues]
 
     if total == 0:
         print(f'  {fname}: 0 cues (empty)', file=sys.stderr)
@@ -610,6 +618,27 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
         os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
         write_subtitles(output_path, result_cues, template_path=input_path)
 
+    # 专名提取（与翻译共用同一核心：nouns/extractor.extract_names）
+    if extract_nouns and not dry_run and translated > 0:
+        try:
+            import nouns.extractor as _extractor
+            entities = _extractor.extract_names(
+                ja_snapshot, result_cues, api_key=api_key, model=model,
+                base_url=base_url, quiet=True)
+            if entities and extract_dir:
+                os.makedirs(extract_dir, exist_ok=True)
+                m = re.search(r'(\d{1,3})', fname)
+                ep_id = f'EP{int(m.group(1)):03d}' if m else 'EP'
+                out_path = os.path.join(extract_dir, f'extracted_{ep_id}.json')
+                with open(out_path, 'w', encoding='utf-8') as f:
+                    json.dump({'episode': ep_id, 'entities': entities},
+                              f, ensure_ascii=False, indent=2)
+                print(f'  {fname}: 专名提取 {len(entities)} 实体 → '
+                      f'{os.path.relpath(out_path)}', file=sys.stderr)
+        except Exception as e:
+            print(f'  {fname}: 专名提取失败（不影响翻译结果）: {e}',
+                  file=sys.stderr)
+
     return total, translated + oped_replaced, failed
 
 
@@ -652,7 +681,8 @@ def _filter_by_start(episodes, start_from):
 
 def translate_dir(input_dir, output_dir, glossary_str, ja_to_zh,
                   api_key, model, base_url, dry_run=False, source_lang=None,
-                  skip_oped=False, episodes=None, start_from=None):
+                  skip_oped=False, episodes=None, start_from=None,
+                  extract_nouns=False, extract_dir=None):
     """Translate all SRT/ASS files in a directory."""
     if not os.path.isdir(input_dir):
         print(f'ERROR: {input_dir} not found', file=sys.stderr)
@@ -711,6 +741,7 @@ def translate_dir(input_dir, output_dir, glossary_str, ja_to_zh,
             op_zh=op_zh, ed_zh=ed_zh,
             op_texts=op_texts, ed_texts=ed_texts,
             dry_run=dry_run, source_lang=source_lang,
+            extract_nouns=extract_nouns, extract_dir=extract_dir,
         )
 
         grand_total += total
@@ -758,6 +789,10 @@ def main():
                         help='Episodes to translate: EP001-EP010, EP001,EP005, 1-10, 1,5')
     parser.add_argument('--start-from', default=None,
                         help='Start from this episode (e.g., EP050 or 50)')
+    parser.add_argument('--extract-nouns', action='store_true',
+                        help='翻译后提取专名实体（nouns/extractor.py 核心），写 sidecar JSON')
+    parser.add_argument('--extract-dir', default='temp/nouns',
+                        help='专名提取 sidecar 输出目录（默认 temp/nouns）')
     args = parser.parse_args()
 
     # API key（LLM_API_KEY 优先，回退到 POLISH_API_KEY）
@@ -791,7 +826,9 @@ def main():
             args.output = os.path.join(args.output_dir, f'{base}.srt')
         translate_file(args.input, args.output, glossary_str, ja_to_zh,
                        api_key, model, base_url, dry_run=args.dry_run,
-                       source_lang=args.source_lang)
+                       source_lang=args.source_lang,
+                       extract_nouns=args.extract_nouns,
+                       extract_dir=args.extract_dir)
     # Directory mode
     elif args.input_dir:
         episodes = _parse_episodes(args.episodes) if args.episodes else None
@@ -800,7 +837,9 @@ def main():
                       source_lang=args.source_lang,
                       skip_oped=args.skip_oped,
                       episodes=episodes,
-                      start_from=args.start_from)
+                      start_from=args.start_from,
+                      extract_nouns=args.extract_nouns,
+                      extract_dir=args.extract_dir)
     else:
         parser.print_help()
         sys.exit(1)
