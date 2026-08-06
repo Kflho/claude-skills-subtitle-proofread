@@ -32,9 +32,9 @@ Usage:
   python nouns/aggregate.py --map temp/noun_map.json \
       --extracted temp/nouns/extracted_EP001.json -o temp/noun_map.json
 
-  # 批量：合并 temp/nouns/ 下所有 extracted_*.json
-  python nouns/aggregate.py --map temp/noun_map.json --extracted-dir temp/nouns \
-      -o temp/noun_map.json --batch
+  # 批量：合并 temp/nouns/ 下所有 extracted_*.json（每次调用按集顺序增量并入）
+  python nouns/aggregate.py --map temp/noun_map.json \
+      --extracted-dir temp/nouns -o temp/noun_map.json
 """
 
 import argparse

@@ -568,9 +568,60 @@ python "<scripts-dir>/fix/oped_fill.py" "<SUBTITLE_DIR>" \
 | `--batch N` | translate_srt.py: cues per batch (default: 10). Larger = less API calls but slower parallelism |
 | `--detect-boundaries` | oped_fixer/oped_fill: use API (LLM) to detect OP/ED boundaries from cue patterns |
 | `--skip-step1` | oped_fill: skip API boundary detection, use --op-boundary/--ed-boundary defaults |
+| `--extract-nouns` | translate_srt.py: 翻译后提取专名实体 → temp/nouns/extracted_EP###.json |
+| `--extract-dir <DIR>` | translate_srt.py / extractor.py: sidecar 输出目录（默认 temp/nouns） |
+| `--emit-mappings` | apply_map.py: 导出 ja→zh 幻觉控制表（`--merge-existing` 并入旧表） |
 
 > `--apply-ai-review` 是后处理快速路径，不能和 full run 一起用。
 > 翻译工具完整参数见 [references/translation.md](references/translation.md)。
+
+### 专名提取 → 聚合 → 应用（AI 驱动，推荐新流程）
+
+> **为什么重设计**：旧词典扫描法（unified_scanner → build_glossary → noun_mappings.json）
+> 从 8009 个词频里挑 367 个映射，噪声大（多为 Whisper 幻觉）。新流程让 AI 在翻译过程
+> 中直接从真实文本挑专名实体，脚本只做 AI 决策的**便利执行工具**，不做决策本身。
+
+**三步闭环**（共享核心 `extract_names(ja_cues, zh_cues)`，翻译流程内 + 独立 CLI 同一实现）：
+
+```bash
+cd "<project-root>"
+
+# 1. 提取（翻译时自动，或独立跑已翻译文件）
+#    翻译时：translate_srt.py --extract-nouns → temp/nouns/extracted_EP###.json
+python "<scripts-dir>/nouns/extractor.py" \
+  --ja-dir "<日文源>" --zh-dir "<中文翻译>" -e EP001-EP005 -o temp/nouns
+
+# 2. 聚合 → running-map（增量合并，AI 判定 merge/new/ignore）
+python "<scripts-dir>/nouns/aggregate.py" \
+  --map temp/noun_map.json --extracted-dir temp/nouns -o temp/noun_map.json
+
+# 3. 应用（先 dry-run 预览 → 🤖 AI 审查 map → --apply）
+python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json \
+  --target-dir "<中文翻译>" --dry-run
+python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json \
+  --target-dir "<中文翻译>" --apply
+# 导出 ja→zh 幻觉控制表（供 translate_srt --mappings）
+python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json \
+  --target-dir "<中文翻译>" \
+  --emit-mappings temp/noun_map_ja_to_zh.json --merge-existing temp/noun_mappings.json
+```
+
+**数据流**：
+
+| 产物 | 内容 | 用途 |
+|------|------|------|
+| `temp/nouns/extracted_EP###.json` | 每集专名实体 `{ja_forms(含幻觉), zh_forms(含变体), count, samples}` | 聚合输入 |
+| `temp/noun_map.json` | running-map `{标准名: {ja_forms, zh_variants, episodes, scope}}` | AI 审查后应用 |
+| `temp/noun_map_ja_to_zh.json` | ja→zh 幻觉控制表 | translate_srt `--mappings` |
+
+**scope 语义**（apply_map 使用）：
+- `global`（主要角色 / episodes≥2）→ 跨全集统一
+- `per_episode` → 仅该标准名出现的集
+- `auto` → episodes≥2 → global；=1 → per_episode
+
+**AI 审查点（不可跳过）**：dry-run 输出的待改项、map 中的标准名与 scope。
+先审查 `temp/noun_map.json`（删误判变体、修正标准名、定 scope），再 `--apply`。
+> 例：提取可能把标题"铁腕阿童木"并入"阿童木"变体——审查时删掉即可。
 
 ### 专名统一审查（独立工具）
 
