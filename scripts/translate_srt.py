@@ -622,16 +622,18 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
     if extract_nouns and not dry_run and translated > 0:
         try:
             import nouns.extractor as _extractor
+            stats = {}
             entities = _extractor.extract_names(
                 ja_snapshot, result_cues, api_key=api_key, model=model,
-                base_url=base_url, quiet=True)
-            if entities and extract_dir:
+                base_url=base_url, quiet=True, stats=stats)
+            if extract_dir:
                 os.makedirs(extract_dir, exist_ok=True)
                 m = re.search(r'(\d{1,3})', fname)
                 ep_id = f'EP{int(m.group(1)):03d}' if m else 'EP'
                 out_path = os.path.join(extract_dir, f'extracted_{ep_id}.json')
                 with open(out_path, 'w', encoding='utf-8') as f:
-                    json.dump({'episode': ep_id, 'entities': entities},
+                    json.dump({'episode': ep_id, 'entities': entities,
+                               'chunks': stats},
                               f, ensure_ascii=False, indent=2)
                 print(f'  {fname}: 专名提取 {len(entities)} 实体 → '
                       f'{os.path.relpath(out_path)}', file=sys.stderr)

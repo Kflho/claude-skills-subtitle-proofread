@@ -19,11 +19,28 @@ Whisper 幻觉变体（ja 侧）与中文译法变体（zh 侧），供跨集聚
       "samples": ["アトム、来てくれ！| 阿童木，过来！"]
     }
 
+sidecar 含提取健康度（供续跑/恢复）：
+    {
+      "episode": "EP001",
+      "entities": [...],
+      "chunks": {"chunks_total": 3, "chunks_failed": 0}
+    }
+    chunks_failed > 0 表示该集有 chunk LLM 调用失败（Whisper 幻觉压制下
+    可能漏实体），--resume 会重跑这些集；chunk 空结果（成功但无实体）不算失败。
+
+续跑/恢复（防止并发限速导致 ~17% 集静默漏提取）：
+  python nouns/extractor.py --ja-dir ... --zh-dir ... -o temp/nouns --resume
+      # 跳过健康 sidecar，只跑缺失/失败集（上次中断后接着跑）
+  python nouns/extractor.py --ja-dir ... --zh-dir ... -o temp/nouns --status
+      # 只打印健康度报告（✅健康 / ⚠失败 / ⬜未提取），不调 LLM
+
 Usage (standalone):
   python nouns/extractor.py --ja-dir 日语参考字幕 --zh-dir 260806 \
       -e EP001-EP005 -o temp/nouns
   python nouns/extractor.py --ja-dir 日语参考字幕 --zh-dir 260806 \
       --episodes EP151 --output temp/nouns
+  python nouns/extractor.py --ja-dir 日语参考字幕 --zh-dir 260806 \
+      -o temp/nouns --resume
 """
 
 import argparse
@@ -150,7 +167,11 @@ def _normalize_forms(forms):
 
 
 def _extract_chunk(pairs, api_key, model, base_url, chunk_no, chunk_total):
-    """对一批 cue 对调用 LLM，返回该批的实体列表（失败返回 []）。"""
+    """对一批 cue 对调用 LLM。
+
+    Returns: (实体列表, 是否成功)。LLM 调用失败 → ([], False)；
+    成功但无实体 → ([], True)。两者语义不同，供恢复流程区分。
+    """
     user_msg = _render_pairs(pairs)
     messages = [
         {'role': 'system', 'content': EXTRACT_SYSTEM_PROMPT},
@@ -159,9 +180,9 @@ def _extract_chunk(pairs, api_key, model, base_url, chunk_no, chunk_total):
     ]
     response = call_chat(messages, api_key=api_key, model=model, base_url=base_url)
     if not response:
-        return []
+        return [], False
     arr = _extract_entities_from_response(response)
-    return arr
+    return arr, True
 
 
 def _extract_entities_from_response(response):
@@ -233,13 +254,15 @@ def _merge_entities(entities):
 
 
 def extract_names(ja_cues, zh_cues, api_key=None, model=None, base_url=None,
-                  chunk_size=DEFAULT_CHUNK_SIZE, quiet=False):
+                  chunk_size=DEFAULT_CHUNK_SIZE, quiet=False, stats=None):
     """从对齐的日文/中文 cue 列表提取专名实体。
 
     Args:
         ja_cues: 日文 cue 列表（parse_subtitles 输出，每项含 'text'）。
         zh_cues: 中文 cue 列表，与 ja_cues 按索引对齐。
         chunk_size: 每批 cue 对数量。
+        stats: 可选 dict。非 None 时填入 {'chunks_total', 'chunks_failed'}，
+            供调用方记录提取健康度（--resume 恢复依据）。
 
     Returns:
         实体列表（见模块 docstring）。LLM 全部失败时返回空列表。
@@ -247,19 +270,26 @@ def extract_names(ja_cues, zh_cues, api_key=None, model=None, base_url=None,
     pairs = _align_pairs(ja_cues, zh_cues)
 
     if not pairs:
+        if stats is not None:
+            stats.update({'chunks_total': 0, 'chunks_failed': 0})
         return []
 
     chunks = [pairs[i:i + chunk_size] for i in range(0, len(pairs), chunk_size)]
     chunk_total = len(chunks)
     all_entities = []
+    chunks_failed = 0
     for ci, chunk in enumerate(chunks, 1):
-        ents = _extract_chunk(chunk, api_key, model, base_url,
-                              ci, chunk_total)
+        ents, ok = _extract_chunk(chunk, api_key, model, base_url,
+                                  ci, chunk_total)
+        if not ok:
+            chunks_failed += 1
         all_entities.extend(ents)
         if not quiet:
             print(f'  [extractor] chunk {ci}/{chunk_total}: '
                   f'{len(ents)} 实体', file=sys.stderr)
 
+    if stats is not None:
+        stats.update({'chunks_total': chunk_total, 'chunks_failed': chunks_failed})
     return _merge_entities(all_entities)
 
 
@@ -326,19 +356,71 @@ def extract_episode(ja_dir, zh_dir, ep, output_dir=None, api_key=None,
         ep_id = f'EP{int(re.sub(r"\\D", "", str(ep))):03d}'
     ja_cues = parse_subtitles(ja_path, mark_garbled=False)
     zh_cues = parse_subtitles(zh_path, mark_garbled=False)
+    stats = {}
     entities = extract_names(ja_cues, zh_cues, api_key=api_key, model=model,
-                             base_url=base_url, chunk_size=chunk_size)
+                             base_url=base_url, chunk_size=chunk_size,
+                             stats=stats)
 
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
         out_path = os.path.join(output_dir, f'extracted_{ep_id}.json')
         with open(out_path, 'w', encoding='utf-8') as f:
-            json.dump({'episode': ep_id, 'entities': entities},
+            json.dump({'episode': ep_id, 'entities': entities,
+                       'chunks': stats},
                       f, ensure_ascii=False, indent=2)
-        print(f'  [extractor] {ep_id}: {len(entities)} 实体 → '
+        n_fail = stats.get('chunks_failed', 0)
+        status = '⚠ 部分失败' if n_fail else 'OK'
+        print(f'  [extractor] {ep_id}: {len(entities)} 实体 '
+              f'({status}, chunk {n_fail}/{stats.get("chunks_total", 0)} 失败) → '
               f'{os.path.relpath(out_path)}', file=sys.stderr)
 
     return ep_id, entities
+
+
+def _sidecar_health(path, min_entities=2):
+    """判断现有 sidecar 是否健康（--resume / --status 依据）。
+
+    Returns:
+        'skip'   —— 健康，无需重跑
+        'failed' —— 需要重跑（有 chunk 失败，或旧格式实体过少）
+        None     —— sidecar 不存在（未提取）
+    """
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            d = json.load(f)
+    except Exception:
+        return 'failed'
+    chunks = d.get('chunks')
+    if chunks is not None:
+        return 'skip' if chunks.get('chunks_failed', 0) == 0 else 'failed'
+    # 旧格式（升级前无 chunks 字段）：实体数作失败代理
+    entities = d.get('entities', [])
+    return 'skip' if len(entities) > min_entities else 'failed'
+
+
+def _print_status(args, episodes):
+    """--status：扫描 sidecar 打印健康度报告（不调 LLM）。"""
+    done_healthy, done_failed, missing = [], [], []
+    for ep in episodes:
+        path = os.path.join(args.output, f'extracted_{ep}.json')
+        health = _sidecar_health(path, min_entities=args.min_entities)
+        if health == 'skip':
+            done_healthy.append(ep)
+        elif health == 'failed':
+            done_failed.append(ep)
+        else:
+            missing.append(ep)
+    total = len(episodes)
+    print(f'[extractor] --status：共 {total} 集', file=sys.stderr)
+    print(f'  ✅ 已提取健康：{len(done_healthy)}', file=sys.stderr)
+    print(f'  ⚠ 已提取但失败/过少：{len(done_failed)}'
+          + (f'（{",".join(done_failed)}）' if done_failed else ''),
+          file=sys.stderr)
+    print(f'  ⬜ 未提取：{len(missing)}'
+          + (f'（{",".join(missing[:40])}{"…" if len(missing) > 40 else ""}）'
+             if missing else ''), file=sys.stderr)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -372,6 +454,12 @@ def main():
     ap.add_argument('-o', '--output', default='temp/nouns',
                     help='sidecar 输出目录（默认 temp/nouns）')
     ap.add_argument('--chunk-size', type=int, default=DEFAULT_CHUNK_SIZE)
+    ap.add_argument('--resume', action='store_true',
+                    help='跳过健康 sidecar，只跑缺失/失败集（中断后续跑）')
+    ap.add_argument('--status', action='store_true',
+                    help='只打印健康度报告（✅健康/⚠失败/⬜未提取），不调 LLM')
+    ap.add_argument('--min-entities', type=int, default=2,
+                    help='旧 sidecar（无 chunks 字段）实体数≤此值视为失败')
     ap.add_argument('--api-key', default=LLM_API_KEY)
     ap.add_argument('--model', default=LLM_MODEL)
     ap.add_argument('--base-url', default=LLM_BASE_URL)
@@ -388,9 +476,30 @@ def main():
                     if ep != '???':
                         seen[ep] = True
         episodes = sorted(seen)
+
+    if args.status:
+        _print_status(args, episodes)
+        return
+
+    if args.resume:
+        skip, todo = [], []
+        for ep in episodes:
+            path = os.path.join(args.output, f'extracted_{ep}.json')
+            if _sidecar_health(path, min_entities=args.min_entities) == 'skip':
+                skip.append(ep)
+            else:
+                todo.append(ep)
+        episodes = todo
+        print(f'[extractor] --resume：跳过健康 {len(skip)} 集，'
+              f'待跑 {len(episodes)} 集', file=sys.stderr)
+        if not episodes:
+            print('[extractor] 全部健康，无需提取', file=sys.stderr)
+            return
+
     print(f'[extractor] 提取 {len(episodes)} 集', file=sys.stderr)
 
     ok = 0
+    failed = []
     for ep in episodes:
         _, entities = extract_episode(
             args.ja_dir, args.zh_dir, ep, output_dir=args.output,
@@ -398,7 +507,14 @@ def main():
             base_url=args.base_url or None, chunk_size=args.chunk_size)
         if entities:
             ok += 1
+        path = os.path.join(args.output, f'extracted_{ep}.json')
+        if _sidecar_health(path, min_entities=args.min_entities) != 'skip':
+            failed.append(ep)
     print(f'[extractor] 完成：{ok}/{len(episodes)} 集有提取结果', file=sys.stderr)
+    if failed:
+        print(f'[extractor] ⚠ 仍有失败 {len(failed)} 集'
+              f'（重跑 --resume 可重试）：{",".join(failed)}',
+              file=sys.stderr)
 
 
 if __name__ == '__main__':

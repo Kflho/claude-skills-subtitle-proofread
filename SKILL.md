@@ -67,6 +67,22 @@ python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json \
   --emit-mappings temp/noun_map_ja_to_zh.json --merge-existing temp/noun_mappings.json
 ```
 
+**提取续跑/恢复**（并发分片提取被 API 限速时，~17% 集的 chunk LLM 调用会静默失败导致漏实体）：
+sidecar 记录 `chunks: {chunks_total, chunks_failed}`，失败与空结果分开记账。
+
+```bash
+# 健康度检查（不调 LLM）：✅ 健康 / ⚠ 失败/过少 / ⬜ 未提取
+python "<scripts-dir>/nouns/extractor.py" \
+  --ja-dir "<日文源>" --zh-dir "<中文翻译>" -o temp/nouns --status
+
+# 中断后续跑：跳过健康 sidecar，只跑缺失/失败集（自动重试 chunk 失败）
+python "<scripts-dir>/nouns/extractor.py" \
+  --ja-dir "<日文源>" --zh-dir "<中文翻译>" -o temp/nouns --resume
+```
+
+> 旧 sidecar（无 `chunks` 字段）以实体数作失败代理（`--min-entities`，默认 2）；
+> 全量提取后**先 `--status` 确认无 ⚠ 再进聚合**，避免漏实体污染 map。
+
 **第 4 步：清单记录**（apply 后生成逐集 AI 审查记录，格式与人工清单一致）：
 
 ```bash
@@ -697,6 +713,9 @@ python "<scripts-dir>/fix/oped_fill.py" "<SUBTITLE_DIR>" \
 | `--skip-step1` | oped_fill: skip API boundary detection, use --op-boundary/--ed-boundary defaults |
 | `--extract-nouns` | translate_srt.py: 翻译后提取专名实体 → temp/nouns/extracted_EP###.json |
 | `--extract-dir <DIR>` | translate_srt.py / extractor.py: sidecar 输出目录（默认 temp/nouns） |
+| `--resume` | extractor.py: 跳过健康 sidecar，只跑缺失/失败集（中断后续跑） |
+| `--status` | extractor.py: 只打印健康度报告（✅/⚠/⬜），不调 LLM |
+| `--min-entities N` | extractor.py: 旧 sidecar（无 chunks 字段）实体数≤N 视为失败（默认 2） |
 | `--emit-mappings` | apply_map.py: 导出 ja→zh 幻觉控制表（`--merge-existing` 并入旧表） |
 | `--emit-checklist <PATH>` | apply_map.py: 生成逐集 AI 审查清单（`- [x] NN集：规范名（变体）`；与 `--apply` 同用=记录实际统一项） |
 
