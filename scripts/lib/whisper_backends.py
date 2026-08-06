@@ -360,16 +360,7 @@ def _transcribe_whisper_cpp(audio_path, model_path, language,
         print('⚠ whisper-cli 未生成 JSON 输出', file=sys.stderr)
         return []
 
-    try:
-        with open(json_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        print('⚠ whisper JSON 解码失败', file=sys.stderr)
-        if os.path.exists(json_path):
-            os.remove(json_path)
-        return []
-
-    # DEBUG: Save a copy for root-cause analysis (persistent location)
+    # DEBUG: Save a copy for root-cause analysis (persistent location) — 解析前先存，失败也不丢根因
     try:
         import shutil
         persistent_dir = os.path.join(os.path.expanduser('~'), '.claude', 'whisper_debug')
@@ -379,6 +370,24 @@ def _transcribe_whisper_cpp(audio_path, model_path, language,
         print(f'  [debug] Whisper JSON saved to: {debug_path}', file=sys.stderr)
     except Exception:
         pass
+
+    # ── 读取 JSON，宽容处理 whisper-cli 输出的杂散非法字节 ──
+    # 已知问题：whisper-cli 偶发在 text 字段插入孤立字节（如 \x89，位置在 UTF-8 多字节序列前），
+    # 导致整份 JSON 非法 UTF-8，json.load 抛 UnicodeDecodeError → 整集转录失败。
+    # 先按 bytes 读取，严格解码失败时用 errors='ignore' 剥离杂散字节再 json.loads。
+    with open(json_path, 'rb') as f:
+        raw = f.read()
+    try:
+        data = json.loads(raw.decode('utf-8'))
+    except UnicodeDecodeError:
+        print('⚠ whisper JSON 含非法字节，已剥离后解析', file=sys.stderr)
+        data = json.loads(raw.decode('utf-8', errors='ignore'))
+    except json.JSONDecodeError:
+        print('⚠ whisper JSON 解码失败', file=sys.stderr)
+        if os.path.exists(json_path):
+            os.remove(json_path)
+        return []
+
     os.remove(json_path)
 
     # ── Parse JSON with version-aware compat ──
