@@ -49,10 +49,19 @@ import nouns.extractor as extractor  # noqa: E402  (resolve_episode_file 复用)
 
 
 def _build_repl(variant, canonical):
-    """构建替换正则。variant 是 canonical 后缀时加负向断言防双替换。"""
+    """构建替换正则，防双替换。
+
+    - 变体是标准名后缀（茶水博士→御茶水博士）：匹配变体但前面不是 prefix
+      （御茶水博士 里的 茶水博士 前有 御 → 不匹配，防 御茶水博士博士）
+    - 变体是标准名前缀（乌拉尔→乌拉尔号）：匹配变体但后面不是 suffix
+      （乌拉尔号 里的 乌拉尔 后有 号 → 不匹配，防 乌拉尔号号）
+    """
     if canonical.endswith(variant) and len(canonical) > len(variant):
         prefix = canonical[:-len(variant)]
         return re.compile(r'(?<!' + re.escape(prefix) + r')' + re.escape(variant))
+    if canonical.startswith(variant) and len(canonical) > len(variant):
+        suffix = canonical[len(variant):]
+        return re.compile(re.escape(variant) + r'(?!' + re.escape(suffix) + r')')
     return re.compile(re.escape(variant))
 
 
@@ -183,7 +192,7 @@ def run_map(noun_map, target_dir, dry_run=True):
         if total > 0 and path in ep_by_path:
             per_episode_variants[ep_by_path[path]] = {
                 c: {v: n for v, n in vc.items() if n > 0}
-                for c, vc in variants.items()
+                for c, vc in variants.items() if vc
             }
 
     # 汇总报告
