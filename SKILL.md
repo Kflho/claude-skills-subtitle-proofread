@@ -83,6 +83,11 @@ python "<scripts-dir>/nouns/extractor.py" \
 > 旧 sidecar（无 `chunks` 字段）以实体数作失败代理（`--min-entities`，默认 2）；
 > 全量提取后**先 `--status` 确认无 ⚠ 再进聚合**，避免漏实体污染 map。
 
+**chunk 失败降级（DeepSeek 超长请求）**：大 chunk（默认 120 对 cue）下，LLM 对超长请求
+可能返回 **HTTP 200 + 空 `message.content`** → `call_chat` 静默返回 `''` → chunk 判失败但
+**无错误日志**（症状：集 chunk 大量失败、`--status` 成片 ⚠，且日志无报错）。
+用 `--chunk-size 60` 再 `--chunk-size 40` 逐级收敛（本作实测 74→22→5→0 失败）。
+
 **第 4 步：清单记录**（apply 后生成逐集 AI 审查记录，格式与人工清单一致）：
 
 ```bash
@@ -108,6 +113,14 @@ python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json \
 - `global`（主要角色 / episodes≥2）→ 跨全集统一
 - `per_episode` → 仅该标准名出现的集
 - `auto` → episodes≥2 → global；=1 → per_episode
+
+**`_build_repl` 双写防护（apply_map）**：替换正则按变体-标准名关系生成——
+- 变体是标准名精确后缀（茶水博士→御茶水博士）：`(?<!前缀)变体`，防"御茶水博士博士"；
+- 变体是标准名精确前缀（乌拉尔→乌拉尔号）：`变体(?!后缀)`，防"乌拉尔号号"；
+- **变体是标准名近似**（多里安→多利安博士，同音异字，非精确前后缀）：走裸匹配分支，
+  已补 `变体(?!标准名全部≥2字真后缀)`，防"多里安博士"→"多利安博士博士"。
+> ⚠️ **审查时注意近似音译变体**：只防精确前后缀时，裸匹配会吞"变体+标准名尾部"产生双写。
+> apply 后建议跑双写检测（匹配 `标准名+标准名尾2~3字`），确认 0 处 apply 引入。
 
 **AI 审查点（不可跳过）**：dry-run 输出的待改项、map 中的标准名与 scope。
 先审查 `temp/noun_map.json`（删误判变体、修正标准名、定 scope），再 `--apply`。
