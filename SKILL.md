@@ -15,7 +15,81 @@ description: >
 
 ## 🔥 快速上手：专名校对
 
-> 翻译完成后对中文SRT做专有名词一致性审查。最常用的入口点。
+> 翻译完成后对中文 SRT 做专有名词一致性审查。**AI 驱动三步**，脚本只做 AI 决策的便利执行工具（不做决策本身）：
+
+```bash
+cd "<project-root>"
+# 1. 提取：翻译时自动（translate_srt.py --extract-nouns），或对已翻译文件独立跑
+python "<scripts-dir>/nouns/extractor.py" --ja-dir "<日文源>" --zh-dir "<中文翻译>" -o temp/nouns
+# 2. 聚合：跨集增量合并 → running-map temp/noun_map.json
+python "<scripts-dir>/nouns/aggregate.py" --map temp/noun_map.json --extracted-dir temp/nouns -o temp/noun_map.json
+# 3. 应用：先 dry-run 预览 → 🤖 AI 审查 map → 再写入
+python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json --target-dir "<中文翻译>" --dry-run
+python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json --target-dir "<中文翻译>" --apply
+```
+
+**scope 语义**：`global`（主要角色 / episodes≥2）跨全集统一；`per_episode` 仅该实体出现的集；`auto` 按 episodes 数自动判定。
+
+**AI 审查点（不可跳过）**：先审查 `temp/noun_map.json` 与 dry-run 输出（定标准名、scope，删误判变体），再 `--apply`。
+
+→ 数据流与设计动机见下方「专名审查（AI 驱动）」一节。
+→ 旧版 `auto_translate.py` 词典审查法已弃用，见「专名审查（旧版 auto_translate）」一节。
+
+## 专名审查（AI 驱动 · 推荐）
+
+> **为什么重设计**：旧词典扫描法（unified_scanner → build_glossary → noun_mappings.json）
+> 从 8009 个词频里挑 367 个映射，噪声大（多为 Whisper 幻觉），且词典 seed 会产生幻觉标准名
+> （如「天間→天间」，正确应为「天马博士」）。新流程让 AI 在翻译过程中直接从真实文本挑专名
+> 实体，脚本只做 AI 决策的**便利执行工具**，不做决策本身。
+
+**三步闭环**（共享核心 `extract_names(ja_cues, zh_cues)`，翻译流程内 + 独立 CLI 同一实现）：
+
+```bash
+cd "<project-root>"
+
+# 1. 提取（翻译时自动，或独立跑已翻译文件）
+#    翻译时：translate_srt.py --extract-nouns → temp/nouns/extracted_EP###.json
+python "<scripts-dir>/nouns/extractor.py" \
+  --ja-dir "<日文源>" --zh-dir "<中文翻译>" -e EP001-EP005 -o temp/nouns
+
+# 2. 聚合 → running-map（增量合并，AI 判定 merge/new/ignore）
+python "<scripts-dir>/nouns/aggregate.py" \
+  --map temp/noun_map.json --extracted-dir temp/nouns -o temp/noun_map.json
+
+# 3. 应用（先 dry-run 预览 → 🤖 AI 审查 map → --apply）
+python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json \
+  --target-dir "<中文翻译>" --dry-run
+python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json \
+  --target-dir "<中文翻译>" --apply
+# 导出 ja→zh 幻觉控制表（供 translate_srt --mappings）
+python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json \
+  --target-dir "<中文翻译>" \
+  --emit-mappings temp/noun_map_ja_to_zh.json --merge-existing temp/noun_mappings.json
+```
+
+**数据流**：
+
+| 产物 | 内容 | 用途 |
+|------|------|------|
+| `temp/nouns/extracted_EP###.json` | 每集专名实体 `{ja_forms(含幻觉), zh_forms(含变体), count, samples}` | 聚合输入 |
+| `temp/noun_map.json` | running-map `{标准名: {ja_forms, zh_variants, episodes, scope}}` | AI 审查后应用 |
+| `temp/noun_map_ja_to_zh.json` | ja→zh 幻觉控制表 | translate_srt `--mappings` |
+
+**scope 语义**（apply_map 使用）：
+- `global`（主要角色 / episodes≥2）→ 跨全集统一
+- `per_episode` → 仅该标准名出现的集
+- `auto` → episodes≥2 → global；=1 → per_episode
+
+**AI 审查点（不可跳过）**：dry-run 输出的待改项、map 中的标准名与 scope。
+先审查 `temp/noun_map.json`（删误判变体、修正标准名、定 scope），再 `--apply`。
+> 例：提取可能把标题"铁腕阿童木"并入"阿童木"变体——审查时删掉即可。
+
+## 专名审查（旧版 auto_translate · legacy）
+
+> ⚠️ **已弃用**。旧法用 `auto_translate.py` 扫描候选 + 逐条审查，噪声大、把 AI 当搬运工。
+> 功能保留供存量项目参考；**新项目一律走上方「专名审查（AI 驱动）」流程**。
+
+**入口命令**：
 
 ```bash
 python "<scripts-dir>/auto_translate.py" \
@@ -50,9 +124,48 @@ python "<scripts-dir>/batch_classify.py"
 python "<scripts-dir>/batch_classify.py" --limit 3
 ```
 
-→ 完整流程见 [references/batch-review.md](references/batch-review.md)
+**完整迭代循环**：
 
-### ASS 格式项目
+```
+scan → candidates.json (N条)
+  │
+  ├─ N > 50 unknown_suspect → API 批量分类
+  │   ├─ common_word → temp/zh_common_blacklist.json
+  │   └─ proper_noun → temp/noun_mappings.json (self-mapping)
+  │
+  ├─ N ≤ 50 → AI 手动审查每条 candidate
+  │   ├─ inconsistency → 编辑 SRT 修复译法不一致
+  │   ├─ unknown_suspect(专名) → 补 mappings + 统一 SRT
+  │   └─ unknown_suspect(普通词) → 补黑名单
+  │
+  └─ 重跑 auto_translate.py → 自动检测 SRT 变更 → 重新扫描
+       ↓
+     candidates 归零 → done ✅
+```
+
+**旧法名词库生成**（unified_scanner → build_glossary，已被新流程提取替代）：
+
+```bash
+python "<scripts-dir>/scan/unified_scanner.py" --target-dir "<日文源>" \
+  --build-glossary --glossary-output reports/proper-nouns.md --project-lang ja
+python "<scripts-dir>/nouns/build_glossary.py" --findings temp/scans/findings.json \
+  -o reports/proper-nouns.md --mappings-output temp/noun_mappings.json
+```
+
+**关键文件**：
+
+| 文件 | 作用 |
+|------|------|
+| `temp/scans/candidates.json` | AI审查输入（扫描器输出） |
+| `temp/noun_mappings.json` | ja→zh 专名映射（补专名用） |
+| `temp/zh_common_blacklist.json` | 中文普通词黑名单（补普通词用） |
+| `temp/scans/classified_terms.json` | API 批量分类结果 |
+
+**黑名单机制**（v5.1）：`find_suspect_nouns.py` 支持 `--zh-blacklist <JSON>` 加载外部普通词列表。`auto_translate.py` 自动检测 `temp/zh_common_blacklist.json` 并传递。扫描器跳过黑名单中的词，从源头减少误报。
+
+→ 完整流程见 [references/batch-review.md](references/batch-review.md) 和 [references/translation.md](references/translation.md)。
+
+## ASS 格式项目
 
 本 skill 同时支持 **SRT** 和 **ASS** 两种格式。所有工具通过 `read_subtitles()`/`write_subtitles()`（`lib.subtitle_io`）或 `parse_subtitles()`/`write_srt()`（`lib.whisper_utils`）自动检测格式，无需手动转换。
 
@@ -161,10 +274,10 @@ python "<scripts-dir>/fix/episode_workflow.py" EP001 --step apply      # 应用�
 python "<scripts-dir>/fix/episode_workflow.py" EP001 --step ai-review  # AI 审查碎片
 ```
 
-**Phase 3：专名统一**（扫描 + 交互审查）
+**Phase 3：专名统一**（⚠️ 旧词典法，已弃用 → 新项目用「专名审查（AI 驱动）」流程）
 
 ```bash
-# 有日文源 → 交叉比对
+# 旧词典扫描审查（legacy，仅存量项目）
 python "<scripts-dir>/auto_translate.py" \
   --source-dir "<日文源>" --target-dir "<中文翻译>" \
   --mappings temp/noun_mappings.json
@@ -362,40 +475,34 @@ python "<scripts-dir>/polish_zh.py" --input-dir "<SUBTITLE_DIR>"
 ## 名词库准备 + 翻译
 
 > **非日语源（ru/en/其他）**：跳过名词库准备（jamdict/jieba 不适用），直接翻译。
-> 翻译后对中文输出执行专名校对即可（`auto_translate.py --target-dir`），见下方「专名统一审查」。
+> 翻译后对中文输出执行专名校对即可，见上方「专名审查（AI 驱动）」。
 > ```bash
 > python "<scripts>/translate_srt.py" --input-dir "<源字幕>" --output-dir "<中文输出>"
 > # 源语言自动检测，system prompt 动态适配
 > ```
 
-翻译项目**必须先准备名词库**，否则专名翻译不一致。
+翻译项目**必须先准备 `temp/noun_mappings.json`**（ja→zh 幻觉控制表），否则专名翻译不一致。
 
-→ 完整流程见 [references/translation.md](references/translation.md)
+生成方式（任选其一）：
+- **推荐**：新专名流程导出 —— `apply_map.py --emit-mappings <out> --merge-existing temp/noun_mappings.json`
+  （见上方「专名审查（AI 驱动）」；逐集翻译→提取→聚合→应用→导出，映射随语料自动累积）
+- 或 AI 直接编写/增补该 JSON
 
-简短版：
+🚨 **映射完整性检查 — 翻译前必做**：确认日语源中实际出现的书写形式都在 mappings 中有对应条目。
+反面案例：mapping 有「トビラ→飞雄」但没有「扉→飞雄」→ 翻译崩坏。
+
 ```bash
-# 1. 扫描生成词表
-python "<scripts>/scan/unified_scanner.py" --target-dir "<日文源>" \
-  --build-glossary --glossary-output reports/proper-nouns.md --project-lang ja
-python "<scripts>/nouns/build_glossary.py" --findings temp/scans/findings.json \
-  -o reports/proper-nouns.md --mappings-output temp/noun_mappings.json
-
-# 2. 🤖 AI 审查词表 → 编辑 temp/noun_mappings.json
-#    ⚠️ 确保每个专名的所有书写形式（汉字/片假名/平假名）都有映射！
-
-# 2.5. 🚨 映射完整性检查 — 翻译前必做
-#    确认日语源中实际出现的书写形式都在 mappings 中有对应条目
-#    反面案例：mapping 有「トビラ→飞雄」但没有「扉→飞雄」→ 翻译崩坏
-
-# 3. 翻译
+# 翻译（--extract-nouns 自动提取本集专名实体，供新流程聚合）
 python "<scripts>/translate_srt.py" --input-dir "<日文源>" --output-dir "<输出>" \
-  --mappings temp/noun_mappings.json
+  --mappings temp/noun_mappings.json --extract-nouns
 
-# 4. 🚨 翻译后验证 — 必须执行（不靠 exit 0 判断成功）
+# 翻译后验证 — 必须执行（不靠 exit 0 判断成功）
 #    a. grep 日语残留（零容忍）
 #    b. grep 已知错误专名
-#    c. 发现残留 → 手工修复或标 [???]，错误专名 → 回到步骤 2.5 补全映射
+#    c. 发现残留 → 手工修复或标 [???]，错误专名 → 回到映射完整性检查
 ```
+
+→ 完整流程见 [references/translation.md](references/translation.md)
 
 ## Pipeline
 
@@ -434,6 +541,9 @@ Phase 4: Polish (--lang zh only, optional)
 Report: reports/问题解决报告.md（自动生成，按 Phase 分组）
 ```
 
+> **专名统一的新流程**：run_all.py 的 Phase 3 是旧词典法（legacy）。新项目用独立的
+> extract→aggregate→apply_map 三流程，见「专名审查（AI 驱动）」。
+
 > **mj** = meaningful Japanese character count。mj < 2 = noise。
 > AI 审查只读小 JSON 文件（ai_fragments_{EP}.json, ai_review_candidates.json），不读词表全文。
 
@@ -442,6 +552,8 @@ Report: reports/问题解决报告.md（自动生成，按 Phase 分组）
 Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处理再继续**。
 
 ### 疑似专名搜索
+
+> ⚠️ 旧词典法暂停点（legacy）。新流程无此暂停点——提取/聚合自动完成，AI 只在「专名审查（AI 驱动）」的 dry-run 后审查 `temp/noun_map.json`。
 
 **触发**: `[review] N candidate(s)` 或 `[suspect-nouns] N entries → report layer 3`
 
@@ -477,6 +589,8 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 5. 验证：报告 Layer 2.5 全部 ✅
 
 ### 专有名词审查
+
+> ⚠️ 旧词典法暂停点（legacy）。新流程的审查点在「专名审查（AI 驱动）」：dry-run 后审查 `temp/noun_map.json`（标准名、scope、误判变体）再 `--apply`。
 
 **Step 1** — `[scan] 🤖 AI Glossary Review — N entries`：读 `reports/proper-nouns.md` → 逐条判专名/普通词 → 编辑 utils 白名单/黑名单 → 重跑 build_glossary
 
@@ -575,102 +689,3 @@ python "<scripts-dir>/fix/oped_fill.py" "<SUBTITLE_DIR>" \
 > `--apply-ai-review` 是后处理快速路径，不能和 full run 一起用。
 > 翻译工具完整参数见 [references/translation.md](references/translation.md)。
 
-### 专名提取 → 聚合 → 应用（AI 驱动，推荐新流程）
-
-> **为什么重设计**：旧词典扫描法（unified_scanner → build_glossary → noun_mappings.json）
-> 从 8009 个词频里挑 367 个映射，噪声大（多为 Whisper 幻觉）。新流程让 AI 在翻译过程
-> 中直接从真实文本挑专名实体，脚本只做 AI 决策的**便利执行工具**，不做决策本身。
-
-**三步闭环**（共享核心 `extract_names(ja_cues, zh_cues)`，翻译流程内 + 独立 CLI 同一实现）：
-
-```bash
-cd "<project-root>"
-
-# 1. 提取（翻译时自动，或独立跑已翻译文件）
-#    翻译时：translate_srt.py --extract-nouns → temp/nouns/extracted_EP###.json
-python "<scripts-dir>/nouns/extractor.py" \
-  --ja-dir "<日文源>" --zh-dir "<中文翻译>" -e EP001-EP005 -o temp/nouns
-
-# 2. 聚合 → running-map（增量合并，AI 判定 merge/new/ignore）
-python "<scripts-dir>/nouns/aggregate.py" \
-  --map temp/noun_map.json --extracted-dir temp/nouns -o temp/noun_map.json
-
-# 3. 应用（先 dry-run 预览 → 🤖 AI 审查 map → --apply）
-python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json \
-  --target-dir "<中文翻译>" --dry-run
-python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json \
-  --target-dir "<中文翻译>" --apply
-# 导出 ja→zh 幻觉控制表（供 translate_srt --mappings）
-python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json \
-  --target-dir "<中文翻译>" \
-  --emit-mappings temp/noun_map_ja_to_zh.json --merge-existing temp/noun_mappings.json
-```
-
-**数据流**：
-
-| 产物 | 内容 | 用途 |
-|------|------|------|
-| `temp/nouns/extracted_EP###.json` | 每集专名实体 `{ja_forms(含幻觉), zh_forms(含变体), count, samples}` | 聚合输入 |
-| `temp/noun_map.json` | running-map `{标准名: {ja_forms, zh_variants, episodes, scope}}` | AI 审查后应用 |
-| `temp/noun_map_ja_to_zh.json` | ja→zh 幻觉控制表 | translate_srt `--mappings` |
-
-**scope 语义**（apply_map 使用）：
-- `global`（主要角色 / episodes≥2）→ 跨全集统一
-- `per_episode` → 仅该标准名出现的集
-- `auto` → episodes≥2 → global；=1 → per_episode
-
-**AI 审查点（不可跳过）**：dry-run 输出的待改项、map 中的标准名与 scope。
-先审查 `temp/noun_map.json`（删误判变体、修正标准名、定 scope），再 `--apply`。
-> 例：提取可能把标题"铁腕阿童木"并入"阿童木"变体——审查时删掉即可。
-
-### 专名统一审查（独立工具）
-
-翻译完成后（或已有翻译文件），用 `auto_translate.py` 做专名校对：
-
-```bash
-cd "<project-root>"
-
-# 有日文源 → 交叉比对（最佳）
-python "<scripts-dir>/auto_translate.py" \
-  --source-dir "<日文源>" \
-  --target-dir "<中文翻译>" \
-  --mappings temp/noun_mappings.json
-
-# 无日文源 → 中文侧扫描（降级）
-python "<scripts-dir>/auto_translate.py" \
-  --target-dir "<中文翻译>" \
-  --mappings temp/noun_mappings.json
-```
-
-**完整迭代循环**（反复运行同一命令自动推进）：
-
-```
-scan → candidates.json (N条)
-  │
-  ├─ N > 50 unknown_suspect → API 批量分类
-  │   ├─ common_word → temp/zh_common_blacklist.json
-  │   └─ proper_noun → temp/noun_mappings.json (self-mapping)
-  │
-  ├─ N ≤ 50 → AI 手动审查每条 candidate
-  │   ├─ inconsistency → 编辑 SRT 修复译法不一致
-  │   ├─ unknown_suspect(专名) → 补 mappings + 统一 SRT
-  │   └─ unknown_suspect(普通词) → 补黑名单
-  │
-  └─ 重跑 auto_translate.py → 自动检测 SRT 变更 → 重新扫描
-       ↓
-     candidates 归零 → done ✅
-```
-
-**关键文件**：
-
-| 文件 | 作用 |
-|------|------|
-| `temp/scans/candidates.json` | AI审查输入（扫描器输出） |
-| `temp/noun_mappings.json` | ja→zh 专名映射（补专名用） |
-| `temp/zh_common_blacklist.json` | 中文普通词黑名单（补普通词用） |
-| `temp/scans/classified_terms.json` | API 批量分类结果 |
-
-**黑名单机制**（v5.1）：`find_suspect_nouns.py` 支持 `--zh-blacklist <JSON>` 加载外部普通词列表。`auto_translate.py` 自动检测 `temp/zh_common_blacklist.json` 并传递。扫描器跳过黑名单中的词，从源头减少误报。
-
-> 和 `run_all.py` Phase 3 共用同一审查引擎，结果质量一致。
-> 详细用法见 [references/translation.md](references/translation.md) 和 [references/batch-review.md](references/batch-review.md)。
