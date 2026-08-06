@@ -193,7 +193,7 @@ def run_map(noun_map, target_dir, dry_run=True):
     report.append(f'[apply_map] 覆盖 {len(file_repls)}/{len(files)} 文件，'
                   f'含变体的标准名 {len(scope_used)} 条')
     for canonical, scope in sorted(scope_used.items(), key=lambda kv: -sum(
-            c for f, (t, c) in per_file.items() if canonical in c)):
+            c[canonical] for f, (t, c) in per_file.items() if canonical in c)):
         # 统计该标准名总替换数
         total_c = sum(c[canonical] for f, (t, c) in per_file.items() if canonical in c)
         if total_c == 0:
