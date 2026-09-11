@@ -46,7 +46,8 @@ from collections import defaultdict
 import lib._path  # noqa: F401
 from lib.config import (LLM_API_KEY, LLM_MODEL, LLM_BASE_URL,
                         LLM_MODEL_DEFAULT, LLM_BASE_URL_DEFAULT,
-                        WHISPER_CLI, WHISPER_MODEL)
+                        WHISPER_CLI, WHISPER_MODEL,
+                        apply_llm_params)
 from lib.subtitle_io import read_subtitles, write_subtitles
 from lib.whisper_utils import (OP_BOUNDARY_SEC, ED_BOUNDARY_SEC,
                                extract_audio_wav, run_whisper)
@@ -63,13 +64,13 @@ WHISPER_SAMPLE_COUNT = 3   # episodes to Whisper for vocal/instrumental check
 # ── LLM helpers ──────────────────────────────────────────────────
 
 def _call_llm(messages, api_key, model, base_url,
-              temperature=0.1, max_tokens=4096):
-    """Call OpenAI-compatible chat API."""
+              temperature=0.1, max_tokens=None):
+    """Call OpenAI-compatible chat API. max_tokens=None → LLM_MAX_TOKENS。"""
     url = f'{base_url}/chat/completions'
-    body = {
+    body = apply_llm_params({
         'model': model, 'messages': messages,
-        'temperature': temperature, 'max_tokens': max_tokens,
-    }
+        'temperature': temperature,
+    }, max_tokens=max_tokens)
     data = json.dumps(body).encode('utf-8')
     req = urllib.request.Request(url, data=data)
     req.add_header('Content-Type', 'application/json')

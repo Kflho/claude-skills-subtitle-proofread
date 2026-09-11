@@ -41,6 +41,7 @@ import lib._path  # noqa: F401
 from lib.whisper_utils import parse_subtitles, write_subtitles
 from lib.config import (
     LLM_API_KEY, LLM_MODEL_DEFAULT, LLM_BASE_URL_DEFAULT,
+    apply_llm_params,
 )
 
 # ═══════════════════════════════════════════════════════════════
@@ -109,12 +110,11 @@ def load_glossary(path):
 def _call_deepseek(messages, api_key, model, base_url):
     """Call DeepSeek chat API, return response text."""
     url = f'{base_url}/chat/completions'
-    body = {
+    body = apply_llm_params({
         'model': model,
         'messages': messages,
         'temperature': 0.3,
-        'max_tokens': 2048,
-    }
+    })
     data = json.dumps(body).encode('utf-8')
 
     req = urllib.request.Request(url, data=data)

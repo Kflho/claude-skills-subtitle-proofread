@@ -29,7 +29,8 @@ import time
 
 import lib._path  # noqa: F401
 from lib.whisper_utils import extract_audio_wav, run_whisper
-from lib.config import WHISPER_CLI, WHISPER_MODEL, LLM_API_KEY, LLM_MODEL, LLM_BASE_URL
+from lib.config import (WHISPER_CLI, WHISPER_MODEL, LLM_API_KEY, LLM_MODEL,
+                        LLM_BASE_URL, apply_llm_params)
 from lib.project_utils import find_video
 
 
@@ -57,12 +58,11 @@ def translate_text(text, api_key, model, base_url):
 
     req = urllib.request.Request(
         f'{base_url}/chat/completions',
-        data=json.dumps({
+        data=json.dumps(apply_llm_params({
             'model': model,
             'messages': messages,
             'temperature': 0.3,
-            'max_tokens': 500,
-        }).encode('utf-8'),
+        })).encode('utf-8'),
         headers={
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {api_key}',

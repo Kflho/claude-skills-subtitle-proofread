@@ -19,7 +19,9 @@ import urllib.error
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
-from lib.config import LLM_API_KEY, LLM_MODEL, LLM_BASE_URL, LLM_MODEL_DEFAULT, LLM_BASE_URL_DEFAULT
+from lib.config import (LLM_API_KEY, LLM_MODEL, LLM_BASE_URL,
+                        LLM_MODEL_DEFAULT, LLM_BASE_URL_DEFAULT,
+                        apply_llm_params)
 
 BATCH_SIZE = 30
 DELAY = 0.5  # seconds between batches
@@ -28,12 +30,11 @@ DELAY = 0.5  # seconds between batches
 def _call_llm(messages, api_key, model, base_url):
     """Call OpenAI-compatible chat API."""
     url = f'{base_url}/chat/completions'
-    body = {
+    body = apply_llm_params({
         'model': model,
         'messages': messages,
         'temperature': 0.1,
-        'max_tokens': 2048,
-    }
+    })
     data = json.dumps(body).encode('utf-8')
     req = urllib.request.Request(url, data=data)
     req.add_header('Content-Type', 'application/json')

@@ -23,18 +23,24 @@ import urllib.error
 from lib.config import (
     LLM_API_KEY, LLM_MODEL, LLM_BASE_URL,
     LLM_MODEL_DEFAULT, LLM_BASE_URL_DEFAULT,
+    LLM_MAX_TOKENS, LLM_REASONING_EFFORT,
 )
 
 
 def call_chat(messages, api_key=None, model=None, base_url=None,
-              temperature=0.1, max_tokens=4096, timeout=120, retries=2,
+              temperature=0.1, max_tokens=None, timeout=120, retries=2,
               delay=1.0):
     """Call an OpenAI-compatible chat API. Returns content string or None.
 
     Args:
         messages: list of {'role': ..., 'content': ...} dicts.
         api_key/model/base_url: fall back to lib.config env/defaults.
+        max_tokens: fall back to LLM_MAX_TOKENS (config).
         retries: number of additional attempts after the first failure.
+
+    ⚠️ 推理模型（deepseek-flash / deepseek-v4-pro）默认关闭思考
+    （LLM_REASONING_EFFORT，默认 'none'）。不关的话思考 token 会吃光
+    max_tokens 预算 → content 返回空串 → 调用方静默判失败。
     """
     key = api_key or LLM_API_KEY
     mdl = model or LLM_MODEL or LLM_MODEL_DEFAULT
@@ -49,8 +55,10 @@ def call_chat(messages, api_key=None, model=None, base_url=None,
         'model': mdl,
         'messages': messages,
         'temperature': temperature,
-        'max_tokens': max_tokens,
+        'max_tokens': max_tokens or LLM_MAX_TOKENS,
     }
+    if LLM_REASONING_EFFORT:
+        body['reasoning_effort'] = LLM_REASONING_EFFORT
     data = json.dumps(body).encode('utf-8')
 
     for attempt in range(retries + 1):
@@ -60,7 +68,21 @@ def call_chat(messages, api_key=None, model=None, base_url=None,
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 result = json.loads(resp.read().decode('utf-8'))
-                return result['choices'][0]['message']['content']
+                choice = result['choices'][0]
+                content = choice['message'].get('content') or ''
+                if not content:
+                    # 空 content ≠ 成功。最常见原因是思考 token 吃光了预算
+                    # （finish_reason='length' + reasoning_content 非空）。
+                    # 不报出来的话调用方只会看到 None，无从定位。
+                    reasoning = choice['message'].get('reasoning_content') or ''
+                    print(f'  [llm] 空 content：finish_reason='
+                          f'{choice.get("finish_reason")!r}, '
+                          f'reasoning_content={len(reasoning)} 字'
+                          + ('（思考 token 吃光 max_tokens，'
+                             '把 LLM_REASONING_EFFORT 设为 none）'
+                             if reasoning else ''),
+                          file=sys.stderr)
+                return content
         except urllib.error.HTTPError as e:
             detail = ''
             try:

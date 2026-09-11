@@ -30,8 +30,38 @@ LLM_MODEL     = os.environ.get('LLM_MODEL', '') or os.environ.get('POLISH_MODEL'
 LLM_BASE_URL  = os.environ.get('LLM_BASE_URL', '') or os.environ.get('POLISH_BASE_URL', '')
 
 # Hardcoded defaults for LLM (used when env var is empty and CLI arg not given)
-LLM_MODEL_DEFAULT    = 'deepseek-v4-pro'
+LLM_MODEL_DEFAULT    = 'deepseek-flash'
 LLM_BASE_URL_DEFAULT = 'https://api.deepseek.com/v1'
+
+# ⚠️ 推理模型的思考 token 会吃光 max_tokens 预算。
+# deepseek-flash / deepseek-v4-pro 都返回 reasoning_content，且 completion_tokens
+# 里 reasoning_tokens 可占满全部额度 → content 为空串、finish_reason='length'。
+# 调用方拿到空串 → 判失败 → 整批 cue 保留原文（**静默**，无任何错误日志）。
+# 实测（10 条 cue 一批）：思考开 21.4s / content=0 / 解析 0 条；
+#                        思考关  1.4s / content=180 / 解析 10 条。
+# 所以默认关闭思考。显式提高 max_tokens 治标不治本——思考长度会跟着涨
+# （max_tokens=32768 时 reasoning 13832 tok，62s 才收敛）。
+#
+# 非 DeepSeek 端点若不认 reasoning_effort，把它设为空串即可省略该参数。
+LLM_MAX_TOKENS       = int(os.environ.get('LLM_MAX_TOKENS', '') or 8192)
+LLM_REASONING_EFFORT = os.environ.get('LLM_REASONING_EFFORT', 'none')
+
+
+def apply_llm_params(body, max_tokens=None):
+    """给自建 LLM 请求体补上推理模型所需的参数。
+
+    所有自己拼请求体的脚本都该走这里（`lib/llm.py:call_chat` 已内建）。
+    漏掉的话，推理模型的思考 token 会吃光 max_tokens 预算，返回空 content，
+    调用方静默判失败——不报错、不告警，只是翻译没生效。
+
+    Args:
+        body: 已含 model/messages/temperature 的请求体 dict（原地修改）。
+        max_tokens: 覆盖默认上限；None 用 LLM_MAX_TOKENS。
+    """
+    body['max_tokens'] = max_tokens or LLM_MAX_TOKENS
+    if LLM_REASONING_EFFORT:
+        body['reasoning_effort'] = LLM_REASONING_EFFORT
+    return body
 
 # ═══════════════════════════════════════════════════════════════
 # Baidu Translate

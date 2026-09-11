@@ -44,6 +44,7 @@ from lib.video_scan import episode_token, parse_episode_spec
 from lib.config import (
     LLM_API_KEY, LLM_MODEL, LLM_BASE_URL,
     LLM_MODEL_DEFAULT, LLM_BASE_URL_DEFAULT,
+    LLM_MAX_TOKENS, LLM_REASONING_EFFORT,
 )
 
 # ═══════════════════════════════════════════════════════════════
@@ -376,14 +377,22 @@ def apply_noun_pre_replace(cues, ja_to_zh):
 # ═══════════════════════════════════════════════════════════════
 
 def _call_llm(messages, api_key, model, base_url):
-    """Call OpenAI-compatible chat API, return response text."""
+    """Call OpenAI-compatible chat API, return response text.
+
+    ⚠️ 推理模型（deepseek-flash / deepseek-v4-pro）默认关闭思考。
+    不关的话思考 token 会吃光 max_tokens 预算 → content 为空串 →
+    `_translate_batch` 判整批失败 → 该批 10 条 cue 全部保留日文原文，
+    且**不打印任何错误**（表现为 mojibake 式的"翻译没生效"）。
+    """
     url = f'{base_url}/chat/completions'
     body = {
         'model': model,
         'messages': messages,
         'temperature': 0.3,
-        'max_tokens': 4096,
+        'max_tokens': LLM_MAX_TOKENS,
     }
+    if LLM_REASONING_EFFORT:
+        body['reasoning_effort'] = LLM_REASONING_EFFORT
     data = json.dumps(body).encode('utf-8')
 
     req = urllib.request.Request(url, data=data)
@@ -393,7 +402,18 @@ def _call_llm(messages, api_key, model, base_url):
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
             result = json.loads(resp.read().decode('utf-8'))
-            return result['choices'][0]['message']['content']
+            choice = result['choices'][0]
+            content = choice['message'].get('content') or ''
+            if not content:
+                reasoning = choice['message'].get('reasoning_content') or ''
+                print(f'  [translate] 空 content：finish_reason='
+                      f'{choice.get("finish_reason")!r}, '
+                      f'reasoning_content={len(reasoning)} 字'
+                      + ('（思考 token 吃光 max_tokens，'
+                         '把 LLM_REASONING_EFFORT 设为 none）'
+                         if reasoning else ''),
+                      file=sys.stderr)
+            return content
     except Exception as e:
         print(f'  [translate] API error: {e}', file=sys.stderr)
         return None

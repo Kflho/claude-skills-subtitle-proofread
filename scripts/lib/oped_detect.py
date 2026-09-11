@@ -16,7 +16,9 @@ import sys
 import urllib.request
 
 import lib._path  # noqa: F401 — ensure scripts/ on sys.path
-from lib.config import LLM_API_KEY, LLM_MODEL, LLM_BASE_URL, LLM_MODEL_DEFAULT, LLM_BASE_URL_DEFAULT
+from lib.config import (LLM_API_KEY, LLM_MODEL, LLM_BASE_URL,
+                        LLM_MODEL_DEFAULT, LLM_BASE_URL_DEFAULT,
+                        apply_llm_params)
 from lib.subtitle_io import read_subtitles  # unified SRT + ASS parser
 
 
@@ -188,12 +190,11 @@ def _build_boundary_prompt(episodes: list, lang: str = 'auto') -> str:
 def _call_llm(messages: list, api_key: str, model: str, base_url: str) -> str | None:
     """Call OpenAI-compatible chat API, return response text."""
     url = f'{base_url}/chat/completions'
-    body = {
+    body = apply_llm_params({
         'model': model,
         'messages': messages,
         'temperature': 0.1,
-        'max_tokens': 4096,
-    }
+    })
     data = json.dumps(body).encode('utf-8')
     req = urllib.request.Request(url, data=data)
     req.add_header('Content-Type', 'application/json')

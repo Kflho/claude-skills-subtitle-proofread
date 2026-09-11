@@ -483,16 +483,49 @@ python "<scripts-dir>/polish_zh.py" --input-dir "<SUBTITLE_DIR>"
 
 翻译（`translate_srt.py`）、润色（`polish_zh.py`）、fix_tail_wo 翻译步骤共用 `LLM_API_KEY`。
 
-> ⚠️ **模型名称**：DeepSeek API 当前只支持 `deepseek-v4-pro` 和 `deepseek-v4-flash`。
+> ⚠️ **模型名称**：用 `deepseek-flash`（`config.py` 的 `LLM_MODEL_DEFAULT`）。
+> 旧名 `deepseek-v4-flash` / `deepseek-v4-pro` 仍可调用，但对应模型已下线，
+> 请求由 DeepSeek-V4.1-Flash 提供并按 Flash 计费——**直接用新名**。
 > `deepseek-chat` 已失效（返回 HTTP 400）。
 >
 > ```bash
 > export LLM_API_KEY='sk-...'
-> export LLM_MODEL='deepseek-v4-pro'       # 默认值，对应 config.py LLM_MODEL_DEFAULT
+> export LLM_MODEL='deepseek-flash'         # 默认值，对应 config.py LLM_MODEL_DEFAULT
 > export LLM_BASE_URL='https://api.deepseek.com/v1'
 > ```
 >
 > 推荐写入 `~/.claude/settings.json` 的 `env` 字段持久化，不污染项目 CLAUDE.md。
+
+> 🚨 **推理模型的思考 token 会静默毁掉翻译**（本 skill 已默认规避）
+>
+> `deepseek-flash` 等推理模型会返回 `reasoning_content`，且思考 token 计入
+> `max_tokens` 预算。预算被思考吃光时，响应是 **HTTP 200 + `content` 空串 +
+> `finish_reason='length'`** —— 调用方只看到空串，判整批失败，**不打印任何错误**。
+> 症状：翻译"跑完了、exit 0"，但输出里成片 cue 仍是日文原文（实测某集 61% 未翻译）。
+>
+> 提高 `max_tokens` **治标不治本**：思考长度会跟着涨（`max_tokens=32768` 时
+> `reasoning_tokens=13832`，62s 才收敛，比关思考贵 57 倍）。
+>
+> 正确做法是关掉思考，`lib/config.py` 已默认：
+>
+> | env | 默认 | 说明 |
+> |---|---|---|
+> | `LLM_REASONING_EFFORT` | `none` | 关闭思考。设**空串**则省略该参数（= API 默认，思考开启） |
+> | `LLM_MAX_TOKENS` | `8192` | 单次响应 token 上限 |
+>
+> ```bash
+> # 默认即可，无需显式设置
+> export LLM_REASONING_EFFORT='none'
+> # 若要重新开启思考，必须同时把预算提到 32768 以上，否则输出为空
+> export LLM_REASONING_EFFORT='low' LLM_MAX_TOKENS=32768
+> ```
+>
+> **质量影响**：同批 12 条对白实测，思考开/关译文质量相当（差异仅风格），
+> 但耗时 1.7s vs 33.3s、completion token 106 vs 6061。思考并未减少译文里的
+> 日文残留（未收录专名仍原样输出），故**没有理由开启**。
+>
+> 覆盖范围：`lib/llm.py:call_chat` 与 `translate_srt.py:_call_llm`。
+> 两者在 `content` 为空且 `reasoning_content` 非空时会打印诊断，不再静默。
 
 ### 4. 验证
 
@@ -705,7 +738,8 @@ python "<scripts-dir>/fix/oped_fill.py" "<SUBTITLE_DIR>" \
 | `[translate] Baidu credentials not found` | 正常降级。配置 `BAIDU_APPID` + `BAIDU_SECRET` 或接受 AI 自行翻译 |
 | `[polish] LLM_API_KEY not set` | 正常降级。设置环境变量或选 `n` 跳过润色。不要复用 Claude Code 内部 key |
 | `[translate_srt] LLM_API_KEY not set` | **不要降级为 AI 自行翻译。**告知用户 key 为空，请用户设置后重跑。≤5 集且用户明确同意时才可手工翻译 |
-| `HTTP Error 400: Bad Request` + `invalid_request_error` | 模型名不兼容。检查 API 返回的 supported model names，更新 `lib/config.py` 中 `LLM_MODEL_DEFAULT`（当前 `deepseek-v4-pro`）。也可通过 `LLM_MODEL` env 或 `--model` CLI 参数覆盖 |
+| `HTTP Error 400: Bad Request` + `invalid_request_error` | 模型名不兼容。检查 API 返回的 supported model names，更新 `lib/config.py` 中 `LLM_MODEL_DEFAULT`（当前 `deepseek-flash`）。也可通过 `LLM_MODEL` env 或 `--model` CLI 参数覆盖 |
+| 翻译 exit 0 但成片 cue 仍是日文原文 | 推理模型思考 token 吃光 `max_tokens`（HTTP 200 但 `content` 空）。确认 `LLM_REASONING_EFFORT='none'`；若为空串则思考是开着的，需同时把 `LLM_MAX_TOKENS` 提到 32768+ |
 
 ## AI 介入点
 
@@ -735,7 +769,9 @@ python "<scripts-dir>/fix/oped_fill.py" "<SUBTITLE_DIR>" \
 | `--resume` | Resume after AI noun review (Phase 3 only) |
 | `--force-rescan` | Re-scan even if cache fresh |
 | `LLM_API_KEY` (env) | LLM API key for polish (optional) + translate_srt.py (**required**). Separate from Claude Code's. |
-| `LLM_MODEL` (env) | Override default model. Current default: `deepseek-v4-pro`. Use `--model` for per-run override. |
+| `LLM_MODEL` (env) | Override default model. Current default: `deepseek-flash`. Use `--model` for per-run override. |
+| `LLM_MAX_TOKENS` (env) | 单次响应 token 上限，默认 `8192`。推理模型需连同 `LLM_REASONING_EFFORT` 一起调。 |
+| `LLM_REASONING_EFFORT` (env) | 默认 `none`（关闭思考）。设空串 = 省略参数 = API 默认（思考开）。 |
 | `--source-lang <LANG>` | translate_srt.py: force source language (ja/ru/zh). Default: auto-detect. |
 | `--mappings <JSON>` | translate_srt.py: path to noun_mappings.json (preferred over --glossary) |
 | `--skip-oped` | translate_srt.py: skip OP/ED detection and pre-translation (use for shows without OP/ED) |
