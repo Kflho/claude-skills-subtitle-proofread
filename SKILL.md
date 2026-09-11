@@ -527,6 +527,26 @@ python "<scripts-dir>/polish_zh.py" --input-dir "<SUBTITLE_DIR>"
 > 覆盖范围：`lib/llm.py:call_chat` 与 `translate_srt.py:_call_llm`。
 > 两者在 `content` 为空且 `reasoning_content` 非空时会打印诊断，不再静默。
 
+> 🚨 **`noun_mappings.json` 里不能放 `_` 开头的元数据键**
+>
+> `load_mappings` 会把**所有值**拼成 `glossary_str` 塞进 prompt 的「固定译名参考
+> （必须使用）」。若文件里有 `"_comment": "…整段说明文字…"`，那段中文说明会当成
+> 译名混进去，把 prompt 撑长且语义错乱 —— 实测可让模型**放弃翻译、整批原样回显
+> 日文**（某集 #160-169 十连回显，prompt 里是 `1. どうか` … `10. さあ早くいらっしゃい`）。
+>
+> 已修：`load_mappings` 跳过 `_` 前缀键。但**说明文字请写进 CLAUDE.md**，
+> 不要指望它待在 JSON 里 —— 其他消费方（`apply_map.py --merge-existing`）未必过滤。
+
+> 🚨 **回显 ≠ 翻译成功：接受判据必须是「剥离编号后是否仍等于原文」**
+>
+> `targets` 是 `"1. …\n2. …"` 格式。模型整批回显时返回的是**带编号的原文**，
+> 于是 `translated_text != cue['text']` 判为「翻译成功」（文本确实不同 ——
+> 多了编号），回显被当成功写进输出，译文里留下一整段日文。
+>
+> `translate_srt.py` 现在用 `is_untranslated()`：剥掉 `^\s*\d+\s*[.、)）]\s*`
+> 前缀再比。`_translate_one` 对回显率 > 50% 的批次重试一次；
+> 接受循环把回显条目计入 `failed`，不再写进输出。
+
 ### 4. 验证
 
 **必须**执行，不靠 "Pipeline complete" 判断成功：
@@ -740,6 +760,8 @@ python "<scripts-dir>/fix/oped_fill.py" "<SUBTITLE_DIR>" \
 | `[translate_srt] LLM_API_KEY not set` | **不要降级为 AI 自行翻译。**告知用户 key 为空，请用户设置后重跑。≤5 集且用户明确同意时才可手工翻译 |
 | `HTTP Error 400: Bad Request` + `invalid_request_error` | 模型名不兼容。检查 API 返回的 supported model names，更新 `lib/config.py` 中 `LLM_MODEL_DEFAULT`（当前 `deepseek-flash`）。也可通过 `LLM_MODEL` env 或 `--model` CLI 参数覆盖 |
 | 翻译 exit 0 但成片 cue 仍是日文原文 | 推理模型思考 token 吃光 `max_tokens`（HTTP 200 但 `content` 空）。确认 `LLM_REASONING_EFFORT='none'`；若为空串则思考是开着的，需同时把 `LLM_MAX_TOKENS` 提到 32768+ |
+| 译文里成片出现 `1. 原文` `2. 原文`（带编号） | prompt 被 glossary 污染 → 模型整批回显。检查 `noun_mappings.json` 有无 `_comment` 之类的元数据键；已自动过滤，若仍复现则缩短 glossary |
+| 接受循环把回显记成成功 | 判据写成了 `out != src`。回显文本带编号，"不同"但没翻译。用 `is_untranslated()` 判 |
 
 ## AI 介入点
 
