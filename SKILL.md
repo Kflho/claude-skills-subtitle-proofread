@@ -365,11 +365,29 @@ python "<scripts-dir>/whisper_batch_transcribe.py" \
   --video-dir "<VIDEO_DIR>" \
   --output-dir "<OUTPUT_DIR>" \
   --lang ja --limit 3
+
+# 只转录指定集（支持 EP001-EP010 / SP01,SP02 / 1-3）
+python "<scripts-dir>/whisper_batch_transcribe.py" \
+  --video-dir "<VIDEO_DIR>" \
+  --output-dir "<OUTPUT_DIR>" \
+  --lang ja --episodes SP01,SP02
+
+# 只列出会选中哪些视频，不真跑
+python "<scripts-dir>/whisper_batch_transcribe.py" \
+  --video-dir "<VIDEO_DIR>" --output-dir "<OUTPUT_DIR>" --dry-run
 ```
 
 > 适用：没有任何字幕文件，或已有字幕质量太差不值得修复。
 > 输出：Whisper 自带 VAD 分段，直接生成完整 SRT。
-> **视频匹配**：`find_video()` 使用数字边界正则 `(?<!\d)N(?!\d)` 匹配集号，避免哈希中的数字子串误匹配（如 "192" 匹配到 "[C319227A]"）。
+> **集号识别**：`lib/video_scan.py` 直接枚举视频文件再推导集号 token（`episode_token()`），
+> 不再硬编码 EP001-EP194 —— **EP### / SP## / OVA## / 特别篇等任意命名都能跑**，
+> 同目录混排也没问题。裸数字集号要求左右均为非字母数字，故
+> `[960x720]` / `10bit` / `A3D3AE54` 里的数字不会被误取；输出文件名即推导出的
+> token（`SP01.srt`、`EP064.srt`）。`--episodes` / `--start-from` 同样走 token
+> （`translate_srt.py` 的 `-e` / `--start-from` 亦然）。
+> **时间戳自愈**：`-p`（processors）> 1 时 whisper.cpp 的 `whisper_full_parallel`
+> 在某些 build 上不对第 2..N 块施加时间偏移，表现为分块边界之后时间戳集体塌成 0。
+> 脚本检测到此类损坏会自动改用 `-p 1` 重跑一次并打印告警，无需人工干预。
 
 **Whisper 切段修复**（全量翻译后补 `[???]` 标记的 cue）
 

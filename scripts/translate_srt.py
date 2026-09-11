@@ -40,6 +40,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import lib._path  # noqa: F401
 from lib.whisper_utils import parse_subtitles, write_subtitles, OP_BOUNDARY_SEC, ED_BOUNDARY_SEC
+from lib.video_scan import episode_token, parse_episode_spec
 from lib.config import (
     LLM_API_KEY, LLM_MODEL, LLM_BASE_URL,
     LLM_MODEL_DEFAULT, LLM_BASE_URL_DEFAULT,
@@ -649,32 +650,33 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
 # ═══════════════════════════════════════════════════════════════
 
 def _parse_episodes(arg):
-    """Parse --episodes argument into a list of episode IDs.
+    """Parse --episodes argument into a list of episode tokens.
 
-    Supports: 'EP001-EP010', 'EP001,EP005,EP010', '1-10', '1,5,10', None (all)
+    Supports: 'EP001-EP010', 'EP001,EP005', '1-10', '1,5', 'SP01,SP02', None (all)
     """
     if not arg:
         return None
-    episodes = []
-    for part in arg.split(','):
-        part = part.strip()
-        if '-' in part:
-            a, b = part.split('-', 1)
-            a = int(re.sub(r'\D', '', a))
-            b = int(re.sub(r'\D', '', b))
-            episodes.extend(f'EP{i:03d}' for i in range(a, b + 1))
-        else:
-            num = int(re.sub(r'\D', '', part))
-            episodes.append(f'EP{num:03d}')
-    return sorted(set(episodes))
+    return parse_episode_spec(arg) or None
 
 
-def _filter_by_start(episodes, start_from):
-    """Only keep episodes >= start_from."""
+def _filter_by_start(files, start_from):
+    """Only keep files whose episode token is >= start_from.
+
+    Token 精确命中时按列表位置截取；否则退回同类 token 的字符串比较
+    （token 零填充，同类型内字典序即数值序）。
+    """
     if not start_from:
-        return episodes
-    start_ep = f'EP{int(re.sub(r"\D", "", start_from)):03d}'
-    return [ep for ep in episodes if ep >= start_ep]
+        return files
+    st = parse_episode_spec(str(start_from))
+    if not st:
+        return files
+    start_ep = st[0]
+    exact = [i for i, f in enumerate(files) if episode_token(f) == start_ep]
+    if exact:
+        return files[exact[0]:]
+    kind = re.match(r'[A-Za-z]+', start_ep).group(0)
+    return [f for f in files
+            if episode_token(f).startswith(kind) and episode_token(f) >= start_ep]
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -701,14 +703,12 @@ def translate_dir(input_dir, output_dir, glossary_str, ja_to_zh,
 
     print(f'{len(srt_files)} files found', file=sys.stderr)
 
-    # Episode filter
+    # Episode filter — token-based, so EP### and SP## both work
     if episodes:
         ep_set = set(episodes)
-        srt_files = [f for f in srt_files
-                     if any(f.startswith(ep) for ep in ep_set)]
+        srt_files = [f for f in srt_files if episode_token(f) in ep_set]
     if start_from:
-        start_ep = f'EP{int(re.sub(r"\D", "", start_from)):03d}'
-        srt_files = [f for f in srt_files if f[:6] >= start_ep]
+        srt_files = _filter_by_start(srt_files, start_from)
 
     if not srt_files:
         print('No files to translate after filtering.', file=sys.stderr)

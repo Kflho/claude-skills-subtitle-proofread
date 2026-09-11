@@ -628,14 +628,68 @@ def vad_filter_audio(input_audio, output_audio, silence_db=-30, min_silence=0.8,
     return speech_segs, dur, speech_dur
 
 
-def extract_audio_wav(video_path, output_path, ss=None, duration=None):
-    """从视频提取 WAV 音频（16kHz mono 无损）。可选起止时间。"""
+# 容器语言标签（ISO 639-2/B）→ whisper 语言码
+_LANG_TAG_MAP = {
+    'ja': ('jpn', 'ja', 'japanese'),
+    'en': ('eng', 'en', 'english'),
+    'zh': ('chi', 'zho', 'zh', 'chinese'),
+    'ru': ('rus', 'ru', 'russian'),
+    'ko': ('kor', 'ko', 'korean'),
+}
+
+
+def probe_audio_streams(video_path):
+    """列出音轨 [(相对序号, 语言标签), ...]。探测失败返回 []。
+
+    相对序号即 -map 0:a:N 里的 N。
+    """
+    probe = run_ffmpeg(
+        ['-v', 'error', '-select_streams', 'a',
+         '-show_entries', 'stream=index:stream_tags=language',
+         '-of', 'csv=p=0', video_path],
+        tool='ffprobe', check=False, text=True)
+    out = []
+    for line in (probe.stdout or '').splitlines():
+        parts = [p.strip() for p in line.split(',') if p.strip()]
+        if not parts:
+            continue
+        lang = parts[1].lower() if len(parts) > 1 else ''
+        out.append((len(out), lang))
+    return out
+
+
+def pick_audio_stream(video_path, prefer_lang):
+    """按语言标签挑音轨，返回相对序号；无匹配/探测失败返回 None。"""
+    wanted = _LANG_TAG_MAP.get((prefer_lang or '').lower())
+    if not wanted:
+        return None
+    for idx, lang in probe_audio_streams(video_path):
+        if lang in wanted:
+            return idx
+    return None
+
+
+def extract_audio_wav(video_path, output_path, ss=None, duration=None,
+                      audio_stream=None, prefer_lang=None):
+    """从视频提取 WAV 音频（16kHz mono 无损）。可选起止时间。
+
+    audio_stream: 显式音轨序号（0 = 第一条音轨）。
+    prefer_lang:  目标语言（'ja'/'en'…）——按容器语言标签自动挑轨。
+                  双语 DVDRip（如 [2xAudio-jp+en]）不加 -map 时 ffmpeg 取
+                  「默认」轨，可能抓到英语配音轨，此后用 ja 模型转录即得乱码。
+    audio_stream 与 prefer_lang 同时给出时 audio_stream 优先。
+    """
+    if audio_stream is None and prefer_lang:
+        audio_stream = pick_audio_stream(video_path, prefer_lang)
     args = ['-y']
     if ss is not None:
         args += ['-ss', str(ss)]
     if duration is not None:
         args += ['-t', str(duration)]
-    args += ['-i', video_path, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', output_path]
+    args += ['-i', video_path]
+    if audio_stream is not None:
+        args += ['-map', f'0:a:{audio_stream}']
+    args += ['-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', output_path]
     run_ffmpeg(args)
 
 
