@@ -191,6 +191,7 @@ def load_mappings(path):
 
     格式: {"ja_term": "zh_translation", ...}
     zh 值为空的条目会被过滤掉（AI 尚未审查）。
+    `_` 开头的键视为说明性元数据（`_comment` 等），不参与译名表与预替换。
     返回 (glossary_str, ja_to_zh_dict)，与 load_glossary() 签名一致。
     """
     if not path or not os.path.exists(path):
@@ -201,7 +202,11 @@ def load_mappings(path):
 
     # 只保留 AI 已填入中文译名的条目
     # 注意：允许单字条目（如汉字专名「扉」），但跳过空值
-    ja_to_zh = {k: v for k, v in raw.items() if v}
+    # ⚠️ 必须滤掉 `_comment` 之类的元数据键：它们的值是整段说明文字，
+    # 混进 glossary_str 后会顶进 prompt 的「固定译名参考（必须使用）」，
+    # 把 prompt 撑长且语义混乱 —— 实测可让模型放弃翻译、整批原样回显日文。
+    ja_to_zh = {k: v for k, v in raw.items()
+                if v and not str(k).startswith('_')}
     glossary_str = ', '.join(sorted(set(ja_to_zh.values()))) if ja_to_zh else ''
     return glossary_str, ja_to_zh
 
@@ -532,6 +537,36 @@ def _translate_batch(cues, api_key, model, base_url, glossary_str, ja_context=No
     return _parse_json_response(response)
 
 
+# 模型照抄 prompt 时会把编号一起带回来（targets 是 "1. …\n2. …" 格式）
+_ECHO_PREFIX_RE = re.compile(r'^\s*\d+\s*[.、)）]\s*')
+
+
+def is_untranslated(src, out):
+    """译文是否只是原文回显（含照抄带编号的 prompt 行）。
+
+    不判这个的话，「1. どうか」会被 `out != src` 判成翻译成功——
+    文本确实不同（多了编号），人看到却是整片日文。
+    """
+    if not out or not str(out).strip():
+        return True
+    s = _ECHO_PREFIX_RE.sub('', str(src).strip()).strip()
+    o = _ECHO_PREFIX_RE.sub('', str(out).strip()).strip()
+    return o == s
+
+
+def bad_ratio(batch_cues, result):
+    """一批里未翻译/回显条目的占比。result 为 None 时视为全失败。"""
+    if not result:
+        return 1.0
+    n = len(batch_cues)
+    if n == 0:
+        return 0.0
+    bad = sum(1 for j, c in enumerate(batch_cues)
+              if is_untranslated(c.get('text', ''),
+                                 result[j] if j < len(result) else None))
+    return bad / n
+
+
 # ═══════════════════════════════════════════════════════════════
 # Single file translation
 # ═══════════════════════════════════════════════════════════════
@@ -612,6 +647,15 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
             time.sleep(1)
             result = _translate_batch(batch_cues, api_key, model, base_url, glossary_str,
                                       ja_context=ja_ctx, source_lang=source_lang)
+        # 整批回显/未翻译也重试一次：prompt 过长或语义混乱时，模型会直接
+        # 把带编号的原文照抄回来。这类结果非 None、且与原文"不同"（多了编号），
+        # 光看 None 判不出来。
+        elif bad_ratio(batch_cues, result) > 0.5:
+            time.sleep(1)
+            retry = _translate_batch(batch_cues, api_key, model, base_url, glossary_str,
+                                     ja_context=ja_ctx, source_lang=source_lang)
+            if retry is not None and bad_ratio(batch_cues, retry) < bad_ratio(batch_cues, result):
+                result = retry
         return batch_idx, batch_cues, result
 
     print(f'    [{len(batches)} batches in parallel]', end='', file=sys.stderr)
@@ -620,13 +664,15 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
         futures = {executor.submit(_translate_one, b): b[0] for b in batches}
         for future in as_completed(futures):
             batch_idx, batch_cues, result = future.result()
-            if result:
-                for j, translated_text in enumerate(result):
-                    if j < len(batch_cues) and translated_text and translated_text != batch_cues[j]['text']:
-                        result_cues[batch_idx + j]['text'] = translated_text
-                        translated += 1
-            else:
-                failed += len(batch_cues)
+            for j, cue in enumerate(batch_cues):
+                translated_text = result[j] if result and j < len(result) else None
+                # 判据是「不是原文回显」，不是「和原文不同」——整批照抄成
+                # "1. どうか" 也算「不同」，但那是失败，不能记成功写进输出。
+                if not is_untranslated(cue['text'], translated_text):
+                    result_cues[batch_idx + j]['text'] = translated_text
+                    translated += 1
+                else:
+                    failed += 1
             # Progress: count completed futures
             done = len([f for f in futures if f.done()])
             pct = done * 100 // len(batches)
