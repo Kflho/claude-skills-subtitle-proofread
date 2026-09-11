@@ -91,9 +91,24 @@ def _read_raw_lines(path: str) -> list[str]:
     return decode_subtitle_bytes(raw).splitlines(True)
 
 
-def _write_raw_lines(path: str, lines: list[str]):
+def subtitle_write_encoding(path: str, default: str = 'utf-8-sig') -> str:
+    """写出 `path` 时应使用的编码 —— 沿用其现有文件的编码。
+
+    ASS 的行业惯例是 UTF-16LE + BOM，一律写 UTF-8 会把交付格式悄悄改掉。
+    文件不存在时返回 `default`。
+    """
+    if not os.path.exists(path):
+        return default
+    with open(path, 'rb') as f:
+        enc = _detect_encoding(f.read())
+    # 'utf-16' 会写出 BOM 并采用本机字节序（LE）；_detect_encoding
+    # 返回的 'utf-16-le' 单独用 open() 是不带 BOM 的，不能直接用。
+    return 'utf-16' if enc.startswith('utf-16') else enc
+
+
+def _write_raw_lines(path: str, lines: list[str], encoding: str = 'utf-8-sig'):
     os.makedirs(os.path.dirname(path) if os.path.dirname(path) else '.', exist_ok=True)
-    with open(path, 'w', encoding='utf-8-sig') as f:
+    with open(path, 'w', encoding=encoding) as f:
         f.writelines(lines)
 
 
@@ -311,7 +326,8 @@ def read_subtitles(path: str, mark_garbled: bool = True,
     return cues
 
 
-def write_subtitles(path: str, cues: list[dict], template_path: str = None):
+def write_subtitles(path: str, cues: list[dict], template_path: str = None,
+                    style: str = 'Default'):
     """Write cue list back to subtitle file. Auto-detects SRT vs ASS.
 
     Cues are re-numbered sequentially (1, 2, 3...) for SRT.
@@ -322,9 +338,11 @@ def write_subtitles(path: str, cues: list[dict], template_path: str = None):
         cues: Cue list to write.
         template_path: For ASS output, read header/styles from this file
                        if the output doesn't exist yet (new translation).
+        style: For ASS output in new-file mode, the style name to use.
     """
     if path.lower().endswith('.ass'):
-        return _write_ass_cues(path, cues, template_path=template_path)
+        return _write_ass_cues(path, cues, template_path=template_path,
+                               style=style)
     else:
         return _write_srt_cues(path, cues)
 
@@ -484,7 +502,7 @@ def _write_srt_cues(path: str, cues: list[dict]):
         for text_line in cue['text'].split('\n'):
             lines.append(f"{text_line}\n")
         lines.append('\n')
-    _write_raw_lines(path, lines)
+    _write_raw_lines(path, lines, encoding=subtitle_write_encoding(path))
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -523,18 +541,43 @@ def _read_ass_cues(path: str, mark_garbled: bool = True,
     return cues
 
 
-def _write_ass_cues(path: str, cues: list[dict], template_path: str = None):
+def _ass_time(srt_time: str) -> str:
+    """SRT 时间码 → ASS 时间码（`0:01:23.46`，百分秒，小时不补零）。"""
+    h, m, rest = srt_time.split(':')
+    s, ms = rest.replace(',', '.').split('.')
+    return f'{int(h)}:{m}:{s}.{int(round(int(ms[:3]) / 10)):02d}'
+
+
+def _write_ass_cues(path: str, cues: list[dict], template_path: str = None,
+                    style: str = 'Default'):
     """Write cue list to ASS file.
+
+    Two modes:
+
+    * **New file** (``path`` doesn't exist) — the template supplies the
+      header/styles only; the whole `[Events]` section is rebuilt from
+      ``cues``.  Used for new translations.
+    * **Existing file** — dialogue lines are edited in place, matched to the
+      template by ``_start_line``.
+
+    ⚠️ The mode matters.  In-place editing keys off ``_start_line``, i.e. the
+    cue's position in *that same file*.  Feeding a template plus cues parsed
+    from a *different* source (an SRT, another episode) matches no line at
+    all and silently writes the template's own dialogue back out — output
+    that looks like a success and is entirely the wrong subtitles.
 
     Args:
         path: Output ASS file path.
-        cues: Cue list with _start_line and _ass_dialogue metadata.
-        template_path: If `path` doesn't exist, read header/styles from this file.
+        cues: Cue list. Each needs start/end timecodes and text.
+        template_path: Source of the header/styles (new-file mode) or the
+            file being edited (existing-file mode).
+        style: ASS style for new-file mode's dialogue lines.
     """
-    from lib.ass_utils import read_ass_file, build_dialogue_line
+    from lib.ass_utils import read_ass_file, build_dialogue_line, write_ass_file
 
+    is_new = not os.path.exists(path)
     # If output doesn't exist, use template for header/styles
-    read_path = path if os.path.exists(path) else (template_path or path)
+    read_path = path if not is_new else (template_path or path)
     if not os.path.exists(read_path):
         raise FileNotFoundError(
             f'ASS output "{path}" does not exist and no template_path provided. '
@@ -542,6 +585,28 @@ def _write_ass_cues(path: str, cues: list[dict], template_path: str = None):
         )
 
     lines = read_ass_file(read_path)
+
+    if is_new:
+        ev = next((i for i, l in enumerate(lines)
+                   if l.strip().lower() == '[events]'), None)
+        if ev is None:
+            raise ValueError(f'template ASS "{read_path}" has no [Events] section')
+        fmt = next((i for i in range(ev, len(lines))
+                    if lines[i].startswith('Format:')), None)
+        if fmt is None:
+            raise ValueError(f'template ASS "{read_path}" has no Events Format: line')
+
+        out = list(lines[:fmt + 1])
+        for c in cues:
+            out.append(build_dialogue_line({
+                'format': 'Dialogue: 0', 'layer': '0',
+                'start': _ass_time(c['start']), 'end': _ass_time(c['end']),
+                'style': style, 'name': '',
+                'margin_l': '0', 'margin_r': '0', 'margin_v': '0',
+                'effect': '', 'text': c['text'],
+            }) + '\n')
+        write_ass_file(path, out, template_path=read_path)
+        return
     # Build index: line_number → cue
     cue_by_line = {}
     for cue in cues:
@@ -558,7 +623,7 @@ def _write_ass_cues(path: str, cues: list[dict], template_path: str = None):
                 ass_d['text'] = cue['text']
                 lines[i] = build_dialogue_line(ass_d) + '\n'
 
-    _write_raw_lines(path, lines)
+    _write_raw_lines(path, lines, encoding=subtitle_write_encoding(path))
 
 
 # ═══════════════════════════════════════════════════════════════

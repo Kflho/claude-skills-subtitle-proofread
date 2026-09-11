@@ -167,23 +167,21 @@ def build_dialogue_line(d: dict) -> str:
     if d.get('_format') == 'srt':
         return srt_utils.build_srt_cue(d)
 
-    # ASS 格式
-    parts = d.get('_raw_parts', [
-        d.get('format', 'Dialogue: 0'),
-        d.get('layer', '0'),
-        d['start'], d['end'],
-        d.get('style', 'Default'),
-        d.get('name', ''),
-        d.get('margin_l', '0'),
-        d.get('margin_r', '0'),
-        d.get('margin_v', '0'),
-        d['text'],
-    ])
-    # 确保 parts 有正确的元素
-    if len(parts) < 10:
+    # ASS 格式。Events 的 Format 是 10 个字段：
+    #   Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+    # 其中 Layer 内嵌在首字段里（`Dialogue: {layer}`），**不是**独立的一项 ——
+    # 早先的兜底分支把 format 和 layer 并列输出，写出
+    # `Dialogue: 0,0,0:00:00.73,…` 这种多一列的行（字段整体错位一格）。
+    if '_raw_parts' in d:
+        parts = list(d['_raw_parts'])
+        if len(parts) < 10:
+            parts = None
+    else:
+        parts = None
+
+    if parts is None:
         parts = [
-            d.get('format', 'Dialogue: 0'),
-            d.get('layer', '0'),
+            d.get('format') or f"Dialogue: {d.get('layer', '0')}",
             d['start'], d['end'],
             d.get('style', 'Default'),
             d.get('name', ''),
@@ -219,17 +217,28 @@ def read_ass_file(path: str) -> list[str]:
     return decode_subtitle_bytes(raw).splitlines(True)
 
 
-def write_ass_file(path: str, lines: list[str]):
+def write_ass_file(path: str, lines: list[str], template_path: str = None):
     """写入字幕文件。自动处理 ASS 和 SRT。
 
     Args:
         path: 文件路径
         lines: 要写入的行列表
+        template_path: 若给出，按该文件的编码写出（保持交付格式）。
+            ASS 的行业惯例是 UTF-16LE + BOM —— 一律写 UTF-8 会把交付
+            格式悄悄改掉。
     """
     if _is_srt_path(path):
         srt_utils.write_srt_file(path, lines)
     else:
-        with open(path, 'w', encoding='utf-8') as f:
+        encoding = 'utf-8'
+        if template_path and os.path.exists(template_path):
+            from lib.subtitle_io import _detect_encoding
+            with open(template_path, 'rb') as f:
+                enc = _detect_encoding(f.read())
+            # 'utf-16' 会写出 BOM 并采用本机字节序（LE）；_detect_encoding
+            # 返回的 'utf-16-le' 单独用 open() 是不带 BOM 的，不能直接用。
+            encoding = 'utf-16' if enc.startswith('utf-16') else enc
+        with open(path, 'w', encoding=encoding) as f:
             f.writelines(lines)
 
 
