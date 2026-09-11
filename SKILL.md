@@ -1,10 +1,9 @@
 ---
 name: subtitle-proofread
 description: >
-  Subtitle proofreading — 3-phase pipeline (scan → triage → deliver). Use when the
-  user wants to proofread, scan, or fix subtitles (SRT/ASS), run Whisper ASR
-  correction, unify proper nouns, or apply batch fixes. Unfixable items get [???]
-  markers for Aegisub review. Covers: 字幕, subtitle, SRT, ASS, proofread, 校对, Whisper, 专有名词, captions.
+  Use when the user wants 字幕 handled end to end: transcribe video with Whisper
+  ASR, translate subtitles to Chinese, unify proper nouns across episodes, or
+  proofread existing SRT/ASS. Unfixable items get [???] markers for Aegisub review.
 ---
 
 # Subtitle Proofread
@@ -13,50 +12,26 @@ description: >
 
 **资源驱动**：有什么用什么。有视频+Whisper→修复乱码+补全缺字幕；有参考字幕→注入 AI 校对上下文。缺资源也能残血运行——跳过缺失步骤，剩余步骤照常。
 
-## 🔥 快速上手：专名校对
+## 专名审查（AI 驱动）
 
-> 翻译完成后对中文 SRT 做专有名词一致性审查。**AI 驱动三步**，脚本只做 AI 决策的便利执行工具（不做决策本身）：
-
-```bash
-cd "<project-root>"
-# 1. 提取：翻译时自动（translate_srt.py --extract-nouns），或对已翻译文件独立跑
-python "<scripts-dir>/nouns/extractor.py" --ja-dir "<日文源>" --zh-dir "<中文翻译>" -o temp/nouns
-# 2. 聚合：跨集增量合并 → running-map temp/noun_map.json
-python "<scripts-dir>/nouns/aggregate.py" --map temp/noun_map.json --extracted-dir temp/nouns -o temp/noun_map.json
-# 3. 应用：先 dry-run 预览 → 🤖 AI 审查 map → 再写入
-python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json --target-dir "<中文翻译>" --dry-run
-python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json --target-dir "<中文翻译>" --apply
-```
-
-**scope 语义**：`global`（主要角色 / episodes≥2）跨全集统一；`per_episode` 仅该实体出现的集；`auto` 按 episodes 数自动判定。
-
-**AI 审查点（不可跳过）**：先审查 `temp/noun_map.json` 与 dry-run 输出（定标准名、scope，删误判变体），再 `--apply`。
-
-→ 数据流与设计动机见下方「专名审查（AI 驱动）」一节。
-→ 旧版 `auto_translate.py` 词典审查法已弃用，见「专名审查（旧版 auto_translate）」一节。
-
-## 专名审查（AI 驱动 · 推荐）
-
-> **为什么重设计**：旧词典扫描法（unified_scanner → build_glossary → noun_mappings.json）
-> 从 8009 个词频里挑 367 个映射，噪声大（多为 Whisper 幻觉），且词典 seed 会产生幻觉标准名
-> （如「天間→天间」，正确应为「天马博士」）。新流程让 AI 在翻译过程中直接从真实文本挑专名
-> 实体，脚本只做 AI 决策的**便利执行工具**，不做决策本身。
+> **为什么用这个流程**：旧词典扫描法（`unified_scanner` → `build_glossary`）从词频里挑映射，
+> 噪声大且会产生幻觉标准名（把「天間」定成「天间」，正确应为「天马博士」）。新流程让 AI
+> 从真实文本里挑专名实体，**脚本只做 AI 决策的执行工具，不做决策本身**。
 
 **三步闭环**（共享核心 `extract_names(ja_cues, zh_cues)`，翻译流程内 + 独立 CLI 同一实现）：
 
 ```bash
 cd "<project-root>"
 
-# 1. 提取（翻译时自动，或独立跑已翻译文件）
-#    翻译时：translate_srt.py --extract-nouns → temp/nouns/extracted_EP###.json
+# 1. 提取（翻译时自动：translate_srt.py --extract-nouns；或对已翻译文件独立跑）
 python "<scripts-dir>/nouns/extractor.py" \
   --ja-dir "<日文源>" --zh-dir "<中文翻译>" -e EP001-EP005 -o temp/nouns
 
-# 2. 聚合 → running-map（增量合并，AI 判定 merge/new/ignore）
+# 2. 聚合 → running-map（跨集增量合并）
 python "<scripts-dir>/nouns/aggregate.py" \
   --map temp/noun_map.json --extracted-dir temp/nouns -o temp/noun_map.json
 
-# 3. 应用（先 dry-run 预览 → 🤖 AI 审查 map → --apply）
+# 3. 应用：先 dry-run 预览 → 🤖 审查 map → 再写入
 python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json \
   --target-dir "<中文翻译>" --dry-run
 python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json \
@@ -67,11 +42,17 @@ python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json \
   --emit-mappings temp/noun_map_ja_to_zh.json --merge-existing temp/noun_mappings.json
 ```
 
-**提取续跑/恢复**（并发分片提取被 API 限速时，~17% 集的 chunk LLM 调用会静默失败导致漏实体）：
-sidecar 记录 `chunks: {chunks_total, chunks_failed}`，失败与空结果分开记账。
+**🤖 审查点（不可跳过）**：dry-run 之后、`--apply` 之前，审查 `temp/noun_map.json` ——
+定标准名、定 scope、删误判变体（例：提取可能把标题「铁腕阿童木」并进「阿童木」变体，删掉即可）。
+
+**scope 语义**：`global` = 跨全集统一（主要角色 / episodes≥2）；`per_episode` = 仅该实体
+出现的集；`auto` = episodes≥2 取 global，否则取 per_episode。
+
+**提取续跑**（并发分片被 API 限速时 ~17% 集的 chunk LLM 调用会静默失败漏实体；sidecar 记
+`chunks: {chunks_total, chunks_failed}`，失败与空结果分开记账）：
 
 ```bash
-# 健康度检查（不调 LLM）：✅ 健康 / ⚠ 失败/过少 / ⬜ 未提取
+# 健康度 ✅ 健康 / ⚠ 失败或过少 / ⬜ 未提取（不调 LLM）
 python "<scripts-dir>/nouns/extractor.py" \
   --ja-dir "<日文源>" --zh-dir "<中文翻译>" -o temp/nouns --status
 
@@ -80,26 +61,31 @@ python "<scripts-dir>/nouns/extractor.py" \
   --ja-dir "<日文源>" --zh-dir "<中文翻译>" -o temp/nouns --resume
 ```
 
-> 旧 sidecar（无 `chunks` 字段）以实体数作失败代理（`--min-entities`，默认 2）；
 > 全量提取后**先 `--status` 确认无 ⚠ 再进聚合**，避免漏实体污染 map。
+> 旧 sidecar（无 `chunks` 字段）以实体数作失败代理（`--min-entities`，默认 2）。
 
-**chunk 失败降级（DeepSeek 超长请求）**：大 chunk（默认 120 对 cue）下，LLM 对超长请求
-可能返回 **HTTP 200 + 空 `message.content`** → `call_chat` 静默返回 `''` → chunk 判失败但
-**无错误日志**（症状：集 chunk 大量失败、`--status` 成片 ⚠，且日志无报错）。
-用 `--chunk-size 60` 再 `--chunk-size 40` 逐级收敛（本作实测 74→22→5→0 失败）。
+**chunk 失败降级（DeepSeek 超长请求）**：大 chunk（默认 120 对 cue）下 LLM 对超长请求可能
+返回 **HTTP 200 + 空 `message.content`** → `call_chat` 静默返回 `''` → chunk 判失败但
+**日志无报错**（症状：`--status` 成片 ⚠ 而日志干净）。用 `--chunk-size 60` 再 `40`
+逐级收敛（实测 74→22→5→0 失败）。
 
-**第 4 步：清单记录**（apply 后生成逐集 AI 审查记录，格式与人工清单一致）：
+**清单记录**（`--emit-checklist` 与 `--apply` 同用 = 记录实际统一项）：
 
 ```bash
-# --apply 时同跑：记录实际统一项 → 逐集清单
 python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json \
   --target-dir "<中文翻译>" --apply --emit-checklist temp/ai_review_checklist.txt
 ```
 
-清单行格式（人工清单同款）：
-`- [x] NN集：规范名（变体、变体）、规范名（变体）` —— 只记实际发生替换的集，
-`[x]` 表示 AI 已审查。生成后把行追加到项目清单（如 `字幕翻译.md`）的 `## ai 审查`
-版块；`## 人工审查` 版块不动。
+行格式 `- [x] NN集：规范名（变体、变体）`，只记实际发生替换的集，`[x]` 表示 AI 已审查。
+把行追加到项目清单的 `## ai 审查` 版块；`## 人工审查` 版块不动。
+
+**`_build_repl` 双写防护**（apply_map 按变体-标准名关系生成替换正则）：
+- 变体是标准名精确后缀（茶水博士→御茶水博士）→ `(?<!前缀)变体`，防「御茶水博士博士」
+- 变体是标准名精确前缀（乌拉尔→乌拉尔号）→ `变体(?!后缀)`，防「乌拉尔号号」
+- 变体与标准名是近似音译（多里安→多利安博士）→ 裸匹配 + `变体(?!标准名全部≥2字真后缀)`
+
+> ⚠️ 近似音译变体是双写高发区：apply 后跑一次双写检测（匹配 `标准名+标准名尾2~3字`），
+> 确认 apply 引入 0 处。
 
 **数据流**：
 
@@ -109,29 +95,12 @@ python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json \
 | `temp/noun_map.json` | running-map `{标准名: {ja_forms, zh_variants, episodes, scope}}` | AI 审查后应用 |
 | `temp/noun_map_ja_to_zh.json` | ja→zh 幻觉控制表 | translate_srt `--mappings` |
 
-**scope 语义**（apply_map 使用）：
-- `global`（主要角色 / episodes≥2）→ 跨全集统一
-- `per_episode` → 仅该标准名出现的集
-- `auto` → episodes≥2 → global；=1 → per_episode
-
-**`_build_repl` 双写防护（apply_map）**：替换正则按变体-标准名关系生成——
-- 变体是标准名精确后缀（茶水博士→御茶水博士）：`(?<!前缀)变体`，防"御茶水博士博士"；
-- 变体是标准名精确前缀（乌拉尔→乌拉尔号）：`变体(?!后缀)`，防"乌拉尔号号"；
-- **变体是标准名近似**（多里安→多利安博士，同音异字，非精确前后缀）：走裸匹配分支，
-  已补 `变体(?!标准名全部≥2字真后缀)`，防"多里安博士"→"多利安博士博士"。
-> ⚠️ **审查时注意近似音译变体**：只防精确前后缀时，裸匹配会吞"变体+标准名尾部"产生双写。
-> apply 后建议跑双写检测（匹配 `标准名+标准名尾2~3字`），确认 0 处 apply 引入。
-
-**AI 审查点（不可跳过）**：dry-run 输出的待改项、map 中的标准名与 scope。
-先审查 `temp/noun_map.json`（删误判变体、修正标准名、定 scope），再 `--apply`。
-> 例：提取可能把标题"铁腕阿童木"并入"阿童木"变体——审查时删掉即可。
-
 ## 专名审查（旧版 auto_translate · legacy）
 
-> ⚠️ **已弃用**。旧法用 `auto_translate.py` 扫描候选 + 逐条审查，噪声大、把 AI 当搬运工。
-> 功能保留供存量项目参考；**新项目一律走上方「专名审查（AI 驱动）」流程**。
-
-**入口命令**：
+> ⚠️ **已弃用**，仅存量项目参考。旧法用 `auto_translate.py` 扫候选 + 逐条审查（噪声大，
+> 且把 AI 当搬运工）。**新项目一律走上方「专名审查（AI 驱动）」**；完整迭代循环
+> （扫描 → API 批量分类 → 黑名单 / 映射表 → 重跑至归零）见
+> [references/batch-review.md](references/batch-review.md)。
 
 ```bash
 python "<scripts-dir>/auto_translate.py" \
@@ -139,73 +108,9 @@ python "<scripts-dir>/auto_translate.py" \
   --mappings temp/noun_mappings.json
 ```
 
-**检查点驱动，反复运行同一命令自动推进：**
-
-| 阶段 | 输出 | 做什么 |
-|------|------|--------|
-| `review` | `temp/scans/candidates.json` (N条) | 开始AI审查 |
-| `review_pending` | candidates 未归零 | 继续修复 + 重跑 |
-| `done` ✅ | candidates 归零 | 完成 |
-
-**AI 审查循环**（每条 candidate 有 `type` 字段）：
-
-| type | 含义 | 操作 |
-|------|------|------|
-| `inconsistency` | 已知专名译法不一致（如「阿托姆」→应为「阿童木」） | 按 `zh_canonical_in_mappings` 修复 SRT |
-| `unknown_suspect` | 未识别疑似专名 | 判断是否专名 → 是：补 `noun_mappings.json` + 统一 SRT；否：补 `temp/zh_common_blacklist.json` |
-
-**大规模审查（100+ unknown_suspect）**：不要逐条硬查。
-→ 用 `batch_classify.py` 批量分类（30条/批，API 成本 ~$0.30-0.50）
-→ 普通词自动补黑名单，专名自动补映射表，重扫 → 迭代至归零
-
-```bash
-# 一键批量分类
-python "<scripts-dir>/batch_classify.py"
-
-# 先测试几批
-python "<scripts-dir>/batch_classify.py" --limit 3
-```
-
-**完整迭代循环**：
-
-```
-scan → candidates.json (N条)
-  │
-  ├─ N > 50 unknown_suspect → API 批量分类
-  │   ├─ common_word → temp/zh_common_blacklist.json
-  │   └─ proper_noun → temp/noun_mappings.json (self-mapping)
-  │
-  ├─ N ≤ 50 → AI 手动审查每条 candidate
-  │   ├─ inconsistency → 编辑 SRT 修复译法不一致
-  │   ├─ unknown_suspect(专名) → 补 mappings + 统一 SRT
-  │   └─ unknown_suspect(普通词) → 补黑名单
-  │
-  └─ 重跑 auto_translate.py → 自动检测 SRT 变更 → 重新扫描
-       ↓
-     candidates 归零 → done ✅
-```
-
-**旧法名词库生成**（unified_scanner → build_glossary，已被新流程提取替代）：
-
-```bash
-python "<scripts-dir>/scan/unified_scanner.py" --target-dir "<日文源>" \
-  --build-glossary --glossary-output reports/proper-nouns.md --project-lang ja
-python "<scripts-dir>/nouns/build_glossary.py" --findings temp/scans/findings.json \
-  -o reports/proper-nouns.md --mappings-output temp/noun_mappings.json
-```
-
-**关键文件**：
-
-| 文件 | 作用 |
-|------|------|
-| `temp/scans/candidates.json` | AI审查输入（扫描器输出） |
-| `temp/noun_mappings.json` | ja→zh 专名映射（补专名用） |
-| `temp/zh_common_blacklist.json` | 中文普通词黑名单（补普通词用） |
-| `temp/scans/classified_terms.json` | API 批量分类结果 |
-
-**黑名单机制**（v5.1）：`find_suspect_nouns.py` 支持 `--zh-blacklist <JSON>` 加载外部普通词列表。`auto_translate.py` 自动检测 `temp/zh_common_blacklist.json` 并传递。扫描器跳过黑名单中的词，从源头减少误报。
-
-→ 完整流程见 [references/batch-review.md](references/batch-review.md) 和 [references/translation.md](references/translation.md)。
+**关键文件**：`temp/scans/candidates.json`（审查输入）、`temp/noun_mappings.json`（ja→zh 映射）、
+`temp/zh_common_blacklist.json`（中文普通词黑名单）、`temp/scans/classified_terms.json`
+（API 分类结果）。黑名单经 `--zh-blacklist` 传给 `find_suspect_nouns.py`，从源头减少误报。
 
 ## ASS 格式项目
 
@@ -319,17 +224,12 @@ python "<scripts-dir>/fix/episode_workflow.py" EP001 --step ai-review  # AI 审�
 **Phase 3：专名统一**（⚠️ 旧词典法，已弃用 → 新项目用「专名审查（AI 驱动）」流程）
 
 ```bash
-# 旧词典扫描审查（legacy，仅存量项目）
+# legacy：日文源 + 中文翻译对照审查
 python "<scripts-dir>/auto_translate.py" \
   --source-dir "<日文源>" --target-dir "<中文翻译>" \
   --mappings temp/noun_mappings.json
 
-# 无日文源 → 中文侧扫描
-python "<scripts-dir>/auto_translate.py" \
-  --target-dir "<中文翻译>" \
-  --mappings temp/noun_mappings.json
-
-# 仅扫描专名（不比对 SRT）
+# legacy：无日文源时只扫中文侧专名（不比对 SRT）
 python "<scripts-dir>/nouns/find_suspect_nouns.py" \
   --target-dir "<中文翻译>" --project-lang zh
 ```
@@ -446,23 +346,19 @@ python "<scripts-dir>/whisper_spot_fix.py" EP001 --start 24:35 --end 24:44 --no-
 ```
 
 **关键规则：**
-- **时间轴用用户的**：Whisper 自身时间戳只作内部参考，不输出。用户已经对好轴。
-- **前后各 2 句**：给用户看到修复后的句子如何嵌入上下文。
-- **发现幻觉 cue**（切片 Whisper 在同一时间段输出完全不同的文本）：在 JA 行标注 `⚠️ 原为幻觉，日文无对应`，ZH 给出切片参考翻译。
-- **不要多余的话**：不写"建议修复为"、"核心问题"、"分析"等。用户只需要轴 + 参考文本。
-- **不解释、不总结、不推荐方案**。用户拿到参考自己判断。
+- **时间轴用用户的**：Whisper 自身时间戳只作内部参考。用户已经对好轴。
+- **前后各 2 句**：让用户看到修复后的句子如何嵌入上下文。
+- **发现幻觉 cue**（切片 Whisper 在同一时间段输出完全不同的文本）：JA 行标注 `⚠️ 原为幻觉，日文无对应`，ZH 给出切片参考翻译。
+- **只输出这份对照**：轴 + JA + ZH，到此为止 —— 用户拿到参考自己判断。
 
 **Whisper 幻觉重复**（已知问题，翻译阶段处理）
 
-Whisper 在音乐/噪声段会产生幻觉重复（连续多条 cue 文本高度相似甚至完全相同）。
-> ⚠️ **切片重跑 Whisper 方案已验证无效**（`fix_repeated_cues.py` 已弃用）。
-> 根因是音频本身触发幻觉，重跑只换一组幻觉，不会修复。
-
-**正确做法**：在 AI 翻译阶段，system prompt 中告知 LLM：
+在 AI 翻译的 system prompt 中告知 LLM：
 > "连续多条字幕文本相同或高度相似是 Whisper 的 bug（幻觉重复），
 > 照常翻译每条即可，不要尝试区分或合并它们。最终由人工审查决定保留哪条。"
 
-> 此问题目前无法自动审查，只能等人工校对阶段处理。
+> 切片重跑 Whisper 已验证无效（根因在音频本身，重跑只换一组幻觉），自动审查同样不可行，
+> 只能留到人工校对阶段。详见 [references/workflows.md](references/workflows.md) 的「已知问题」。
 
 **Phase 4：AI 润色**（--lang zh 项目可选）
 
@@ -496,99 +392,6 @@ python "<scripts-dir>/polish_zh.py" --input-dir "<SUBTITLE_DIR>"
 >
 > 推荐写入 `~/.claude/settings.json` 的 `env` 字段持久化，不污染项目 CLAUDE.md。
 
-> 🚨 **推理模型的思考 token 会静默毁掉翻译**（本 skill 已默认规避）
->
-> `deepseek-flash` 等推理模型会返回 `reasoning_content`，且思考 token 计入
-> `max_tokens` 预算。预算被思考吃光时，响应是 **HTTP 200 + `content` 空串 +
-> `finish_reason='length'`** —— 调用方只看到空串，判整批失败，**不打印任何错误**。
-> 症状：翻译"跑完了、exit 0"，但输出里成片 cue 仍是日文原文（实测某集 61% 未翻译）。
->
-> 提高 `max_tokens` **治标不治本**：思考长度会跟着涨（`max_tokens=32768` 时
-> `reasoning_tokens=13832`，62s 才收敛，比关思考贵 57 倍）。
->
-> 正确做法是关掉思考，`lib/config.py` 已默认：
->
-> | env | 默认 | 说明 |
-> |---|---|---|
-> | `LLM_REASONING_EFFORT` | `none` | 关闭思考。设**空串**则省略该参数（= API 默认，思考开启） |
-> | `LLM_MAX_TOKENS` | `8192` | 单次响应 token 上限 |
->
-> ```bash
-> # 默认即可，无需显式设置
-> export LLM_REASONING_EFFORT='none'
-> # 若要重新开启思考，必须同时把预算提到 32768 以上，否则输出为空
-> export LLM_REASONING_EFFORT='low' LLM_MAX_TOKENS=32768
-> ```
->
-> **质量影响**：同批 12 条对白实测，思考开/关译文质量相当（差异仅风格），
-> 但耗时 1.7s vs 33.3s、completion token 106 vs 6061。思考并未减少译文里的
-> 日文残留（未收录专名仍原样输出），故**没有理由开启**。
->
-> 覆盖范围：`lib/llm.py:call_chat` 与 `translate_srt.py:_call_llm`。
-> 两者在 `content` 为空且 `reasoning_content` 非空时会打印诊断，不再静默。
-
-> 🚨 **`noun_mappings.json` 里不能放 `_` 开头的元数据键**
->
-> `load_mappings` 会把**所有值**拼成 `glossary_str` 塞进 prompt 的「固定译名参考
-> （必须使用）」。若文件里有 `"_comment": "…整段说明文字…"`，那段中文说明会当成
-> 译名混进去，把 prompt 撑长且语义错乱 —— 实测可让模型**放弃翻译、整批原样回显
-> 日文**（某集 #160-169 十连回显，prompt 里是 `1. どうか` … `10. さあ早くいらっしゃい`）。
->
-> 已修：`load_mappings` 跳过 `_` 前缀键。但**说明文字请写进 CLAUDE.md**，
-> 不要指望它待在 JSON 里 —— 其他消费方（`apply_map.py --merge-existing`）未必过滤。
-
-> 🚨 **回显 ≠ 翻译成功：接受判据必须是「剥离编号后是否仍等于原文」**
->
-> `targets` 是 `"1. …\n2. …"` 格式。模型整批回显时返回的是**带编号的原文**，
-> 于是 `translated_text != cue['text']` 判为「翻译成功」（文本确实不同 ——
-> 多了编号），回显被当成功写进输出，译文里留下一整段日文。
->
-> `translate_srt.py` 现在用 `is_untranslated()`：剥掉 `^\s*\d+\s*[.、)）]\s*`
-> 前缀再比。`_translate_one` 对回显率 > 50% 的批次重试一次；
-> 接受循环把回显条目计入 `failed`，不再写进输出。
-
-> 🚨 **OP/ED 预替换不能按时间窗无脑覆写 —— 窗口比 OP 长时吞掉正片对白**
->
-> `apply_oped_pre_replace` 早先按固定窗口（`OP_BOUNDARY_SEC` = `ED_BOUNDARY_SEC`
-> = 180s）取「窗口内所有 cue」，**一律**改写成预译的那一句歌词中文。窗口是照
-> 「OP 最长 180s」定的，OP 只有 82s 的作品里，窗口一路吃进正片：
-> 某 SP 实测 45 条对白被覆写 —— #1–#23 全成「和Freeze王子接吻」、
-> #442–#463 全成「买买买买买」，**真正的对白无声消失**，且因为文本非空、
-> 非日文残留，Step 4 的验证项**一个都不报警**。
->
-> 已修：`_is_lyric()` 三信号判定，只覆写真歌词 —— 等于该窗口 canonical /
-> 同集窗口内重复 ≥2 次（音乐段幻觉重复）/ 跨集出现 ≥2 次（主题歌）。
-> 只出现一次、别集也没有的文本不再覆写，留给正常翻译。
->
-> **排查手法**：预替换后立刻统计「同一句中文在窗口内重复次数」，
-> 单句占比过高即是窗口过宽的信号 —— 歌词本就该重复，但正片对白不该。
-
-> 🚨 **ASS 输出：新译文必须走「新文件模式」，否则写出的是模板自己的台词**
->
-> `_write_ass_cues` 的就地编辑按 `_start_line` 匹配 —— 那是「cue 在**该文件**
-> 里的行号」。传模板 + 从别处（SRT、另一集）解析来的 cue，一行都对不上，
-> 函数不报错，**原样把模板的对话写出去**：文件看着正常，内容整篇是错的。
->
-> 已修：按输出文件是否存在分流。不存在 → 模板只提供 header/styles，
-> `[Events]` 段整段按 cues 重建（`_ass_time` 负责 SRT 时间码 → ASS 百分秒）。
->
-> 编码同理：`write_ass_file` / `_write_raw_lines` 原先一律写 UTF-8，而 ASS 的
-> 行业惯例是 **UTF-16LE + BOM**，读写一轮格式就变了。现在走
-> `subtitle_write_encoding()` 沿用现有文件的编码。
-
-> 🚨 **编码探测：单字节编码会让 CJK 编码变成死代码**
->
-> 旧的 `_ENCODING_CHAIN` 是「第一个解码不报错的编码」试探：
-> `utf-8-sig, utf-8, cp1251, koi8-r, shift-jis, gbk`。cp1251/koi8-r 是单字节
-> 编码，**对任意字节串都能解码成功**，且排在 shift-jis/gbk 前面 —— 后两者
-> 永远走不到。任何非 UTF-8 文件都被静默解成西里尔乱码：实测 12 集
-> UTF-16LE 的参考字幕全部解析出 **0 条 cue 且不抛异常**（Step 4 的各项验证
-> 也不会报警，因为「0 条」看起来像「没内容」而不是「读失败」）。
->
-> 已修：BOM 嗅探优先 → 无 BOM 时按 NUL 字节奇偶分布探测 UTF-16 →
-> 单字节编码一律挪到试探链**末尾**。解码后还要 `lstrip('﻿')`，
-> 否则 `utf-16-le` 会把 BOM 变成正文首字符，`[Script Info]` 段头判断失配。
-
 ### 4. 验证
 
 **必须**执行，不靠 "Pipeline complete" 判断成功：
@@ -601,7 +404,9 @@ python "<scripts-dir>/polish_zh.py" --input-dir "<SUBTITLE_DIR>"
    - 同一 (EP, 时间) 在 AI fragment section 有 correction 非空但仍是 ⬜ → SRT 已修，报告未同步，忽略
    - 其余 → 回到对应[暂停点](#暂停点--action)处理
 3. 确认 Phase 3「疑似专名搜索」非空（非"暂无记录"）
-4. 0 条**真正待处理**的 ⬜ → 完成
+4. **与日文源逐条对数量** —— 条数对齐，且逐条时间轴对齐。文本非空、非日文的破坏
+   （OP/ED 窗口吞掉对白、cue 被覆写）**不会**在 ⬜ 里露头，只有对数量才发现。
+5. 0 条**真正待处理**的 ⬜ 且第 4 步对齐 → 完成
 
 > 脚本 exit 0 ≠ 成功。同一个 cue 可能出现在报告多个 section，一边 ✅ 就算干净。
 >
@@ -708,26 +513,16 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 
 ### 疑似专名搜索
 
-> ⚠️ 旧词典法暂停点（legacy）。新流程无此暂停点——提取/聚合自动完成，AI 只在「专名审查（AI 驱动）」的 dry-run 后审查 `temp/noun_map.json`。
+> ⚠️ 旧词典法的暂停点，仅存量项目。新流程无此暂停点 —— 提取/聚合自动完成，AI 只在
+> 「专名审查（AI 驱动）」dry-run 后审查 `temp/noun_map.json`。
 
 **触发**: `[review] N candidate(s)` 或 `[suspect-nouns] N entries → report layer 3`
 
-**审查流程**（按候选数量选择策略）：
-
-**≤ 50 条** → 手动审查
-1. 读 `temp/scans/candidates.json`（统一格式）
-2. 每条 candidate 有 `type` 字段：
-   - `inconsistency` → 已知专名译法不一致（如「阿托姆」→ 应为「阿童木」），按 `zh_canonical_in_mappings` 编辑 SRT
-   - `unknown_suspect` → 未识别专名，判断是否专名 → 是：补 `noun_mappings.json` + 统一 SRT → 否：跳过
-3. 修完重新运行 → candidates 归零 → 完成
-
-**> 50 条** → API 批量分类（见 [references/batch-review.md](references/batch-review.md)）
-1. 读 `candidates.json` → 提取所有 `unknown_suspect`
-2. 写脚本用 `LLM_API_KEY` 批量分类（30条/批），判断每个词是 proper_noun 还是 common_word
-3. 普通词 → 补 `temp/zh_common_blacklist.json`（JSON 数组）
-4. 专名 → 补 `noun_mappings.json`（self-mapping 即可：`"专名": "专名"`）
-5. 重跑 auto_translate.py → 自动使用 `--zh-blacklist` 加载黑名单 → 候选数大幅下降
-6. 迭代至归零
+读 `temp/scans/candidates.json`，按每条 candidate 的 `type` 字段处理：`inconsistency`
+（已知译法不一致，如「阿托姆」应为「阿童木」）按 `zh_canonical_in_mappings` 编辑 SRT；
+`unknown_suspect` 判专名 / 普通词 —— 专名补 `noun_mappings.json` + 统一 SRT，普通词补
+`temp/zh_common_blacklist.json`。候选 > 50 条时走 API 批量分类（30 条/批），完整流程见
+[references/batch-review.md](references/batch-review.md)。修完重跑至 candidates 归零。
 
 ### AI 碎片补全
 
@@ -745,11 +540,13 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 
 ### 专有名词审查
 
-> ⚠️ 旧词典法暂停点（legacy）。新流程的审查点在「专名审查（AI 驱动）」：dry-run 后审查 `temp/noun_map.json`（标准名、scope、误判变体）再 `--apply`。
+> ⚠️ 旧词典法暂停点，仅存量项目。新流程的审查点在「专名审查（AI 驱动）」：
+> dry-run 后审查 `temp/noun_map.json`（标准名、scope、误判变体）再 `--apply`。
 
-**Step 1** — `[scan] 🤖 AI Glossary Review — N entries`：读 `reports/proper-nouns.md` → 逐条判专名/普通词 → 编辑 utils 白名单/黑名单 → 重跑 build_glossary
-
-**Step 2** — `AI REVIEW NEEDED: N`：读 `ai_review_candidates.json` → 判专名/普通词 → 写 `ai_review_fixes.json` → `--resume`
+**触发** `[scan] 🤖 AI Glossary Review — N entries`：读 `reports/proper-nouns.md`，逐条判
+专名 / 普通词 → 编辑白名单 / 黑名单 → 重跑 `build_glossary`。
+**触发** `AI REVIEW NEEDED: N`：读 `ai_review_candidates.json` 判定 → 写
+`ai_review_fixes.json` → `--resume`。
 
 → 详细规则见 [references/interventions.md](references/interventions.md)
 
@@ -796,18 +593,17 @@ python "<scripts-dir>/fix/oped_fill.py" "<SUBTITLE_DIR>" \
 | `SyntaxError` / `UnicodeEncodeError` | emoji→ASCII、括号补全，修完重跑 |
 | `Done: 0 fixed` + 无 `[whisper]` 输出 | `--video-dir` 缺失或路径错 — 验证 CLAUDE.md 路径 |
 | 某步骤失败但已写中间文件 | 清空 `temp/` + `reports/`，加 `--force-rescan` 重跑 |
-| 参考字幕乱码（西里尔/中文变 `?`） | v2 已自动检测编码（UTF-8/CP1251/KOI8-R/Shift-JIS/GBK） |
+| 参考字幕乱码（西里尔 / 中文变 `?`）或**解析出 0 条 cue 却不报错** | 编码探测失准。`_detect_encoding()` 先嗅 BOM，无 BOM 再按 NUL 字节奇偶分布测 UTF-16；**单字节编码（cp1251/koi8-r/latin-1）必须留在试探链末尾** —— 它们对任意字节串都能解码成功，排在 CJK 多字节编码前会让后者成死代码。ASS 惯例编码是 UTF-16LE+BOM |
 | `[translate] Baidu credentials not found` | 正常降级。配置 `BAIDU_APPID` + `BAIDU_SECRET` 或接受 AI 自行翻译 |
 | `[polish] LLM_API_KEY not set` | 正常降级。设置环境变量或选 `n` 跳过润色。不要复用 Claude Code 内部 key |
 | `[translate_srt] LLM_API_KEY not set` | **不要降级为 AI 自行翻译。**告知用户 key 为空，请用户设置后重跑。≤5 集且用户明确同意时才可手工翻译 |
 | `HTTP Error 400: Bad Request` + `invalid_request_error` | 模型名不兼容。检查 API 返回的 supported model names，更新 `lib/config.py` 中 `LLM_MODEL_DEFAULT`（当前 `deepseek-flash`）。也可通过 `LLM_MODEL` env 或 `--model` CLI 参数覆盖 |
-| 翻译 exit 0 但成片 cue 仍是日文原文 | 推理模型思考 token 吃光 `max_tokens`（HTTP 200 但 `content` 空）。确认 `LLM_REASONING_EFFORT='none'`；若为空串则思考是开着的，需同时把 `LLM_MAX_TOKENS` 提到 32768+ |
-| 译文里成片出现 `1. 原文` `2. 原文`（带编号） | prompt 被 glossary 污染 → 模型整批回显。检查 `noun_mappings.json` 有无 `_comment` 之类的元数据键；已自动过滤，若仍复现则缩短 glossary |
-| 接受循环把回显记成成功 | 判据写成了 `out != src`。回显文本带编号，"不同"但没翻译。用 `is_untranslated()` 判 |
-| 片头/片尾一大段对白变成同一句歌词中文 | OP/ED 预替换按固定 180s 窗口无脑覆写，窗口宽于实际 OP。`_is_lyric()` 已改为只覆写真歌词；统计窗口内单句重复率即可确认 |
+| 翻译 exit 0 但成片 cue 仍是日文原文 | 推理模型思考 token 吃光 `max_tokens`（HTTP 200 + `content` 空 + `finish_reason='length'`，无报错）。确认 `LLM_REASONING_EFFORT='none'`；若为空串则思考是开着的，需同时把 `LLM_MAX_TOKENS` 提到 32768+。实测思考开/关译文质量相当（仅风格差异），耗时 1.7s vs 33.3s —— **没有理由开启**，别靠加大预算解决 |
+| 译文里成片出现 `1. 原文` `2. 原文`（带编号） | prompt 被 glossary 污染 → 模型整批回显。`load_mappings` 会把**所有值**拼进「固定译名参考」，`_comment` 之类的元数据键会混入。已自动跳过 `_` 前缀键；**说明文字写进 CLAUDE.md，不要留在 JSON 里**（`apply_map.py --merge-existing` 等消费方未必过滤） |
+| 接受循环把回显记成成功 | 判据写成了 `out != src`。回显返回的是**带编号的原文**，文本确实"不同"但没翻译。用 `is_untranslated()` 剥掉 `^\s*\d+\s*[.、)）]\s*` 前缀再比 |
+| 片头/片尾一大段对白变成同一句歌词中文 | OP/ED 预替换按固定 180s 窗口无脑覆写，窗口宽于实际 OP。`_is_lyric()` 已改为只覆写真歌词（等于窗口 canonical / 同集窗口内重复 ≥2 次 / 跨集出现 ≥2 次）。统计窗口内单句重复率即可确认 |
 | OP/ED 预替换后对白凭空少了一截 | 同上。被覆写的 cue 文本非空、非日文，**Step 4 各验证项都不会报警** —— 必须与日文源逐条对数量 |
-| 参考字幕/ASS 解析出 0 条 cue，但不报错 | 编码探测把 UTF-16 判成了 koi8-r。检查 `_detect_encoding()` 的 BOM 嗅探；UTF-16LE 是 ASS 惯例编码 |
-| 生成的 ASS 内容全是模板那一集的台词 | 新译文误走了就地编辑分支（`_start_line` 对不上、又不报错）。确认输出文件事先不存在，走新文件模式 |
+| 生成的 ASS 内容全是模板那一集的台词 | 新译文误走了就地编辑分支（`_start_line` 对不上、又不报错）。输出文件须**事先不存在**才会走新文件模式（模板只提供 header/styles） |
 | ASS 写出来变成 UTF-8 | `write_ass_file(..., template_path=)` 没传，编码没沿用。ASS 交付要 UTF-16LE + BOM |
 | ASS 行的字段整体错位一格 | `build_dialogue_line` 兜底分支把 `format`(`Dialogue: {layer}`) 和 `layer` 并列输出。Events 是 10 字段，Layer 内嵌在首字段里 |
 
