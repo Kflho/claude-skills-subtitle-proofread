@@ -243,11 +243,11 @@ def _pick_oped_canonical(variants):
 def collect_oped_across_episodes(input_dir, api_key, model, base_url, dry_run=False):
     """Scan all episodes to collect OP/ED text across episodes.
 
-    Returns:
-        op_canonical: str or None — canonical Chinese OP text
-        ed_canonical: str or None — canonical Chinese ED text
-        op_texts: dict {ep_name: [(start_idx, ja_text)]} — per-episode OP cue locations
-        ed_texts: dict {ep_name: [(start_idx, ja_text)]} — per-episode ED cue locations
+    Returns dict:
+        op_zh, ed_zh: str|None — canonical Chinese OP/ED text
+        op_texts, ed_texts: {ep_name: [(cue_idx, ja_text)]} — 各集窗口内 cue 位置
+        op_ja, ed_ja: str|None — canonical Japanese text
+        op_variants, ed_variants: Counter — 跨集文本频次（判歌词用）
     """
     srt_files = sorted([
         f for f in os.listdir(input_dir)
@@ -255,7 +255,9 @@ def collect_oped_across_episodes(input_dir, api_key, model, base_url, dry_run=Fa
     ])
 
     if not srt_files:
-        return None, None, {}, {}
+        return {'op_zh': None, 'ed_zh': None, 'op_texts': {}, 'ed_texts': {},
+                'op_ja': None, 'ed_ja': None,
+                'op_variants': Counter(), 'ed_variants': Counter()}
 
     # Collect OP/ED text from each episode
     op_variants = Counter()
@@ -322,30 +324,61 @@ def collect_oped_across_episodes(input_dir, api_key, model, base_url, dry_run=Fa
             ed_zh = result[0]
             print(f'  [oped] ED: {ed_ja[:40]}... → {ed_zh[:40]}...', file=sys.stderr)
 
-    return op_zh, ed_zh, op_texts, ed_texts
+    return {'op_zh': op_zh, 'ed_zh': ed_zh,
+            'op_texts': op_texts, 'ed_texts': ed_texts,
+            'op_ja': op_ja, 'ed_ja': ed_ja,
+            'op_variants': op_variants, 'ed_variants': ed_variants}
 
 
-def apply_oped_pre_replace(cues, srt_file, op_zh, ed_zh, op_texts, ed_texts):
-    """Pre-replace OP/ED text in cues with pre-translated Chinese.
+def _is_lyric(text, canonical_ja, within_file, cross_episodes):
+    """这句文本是否算「歌词」，可以整条覆写成预译的 OP/ED 中文。
 
-    Uses text matching: any cue whose text matches the canonical OP/ED
-    Japanese text (from collect_oped) gets replaced with the Chinese version.
+    三个信号，命中任一即是：
+      · 等于 canonical（该窗口里出现最多的那句）
+      · 同一集窗口内重复 ≥2 次 —— Whisper 在音乐段的幻觉重复
+      · 跨集出现 ≥2 次 —— 主题歌歌词（每集都会唱）
+
+    单独一句、只出现一次、别的集也没有的文本 → **不是歌词**，多半是
+    恰好落在窗口里的正片对白，必须留给正常翻译。
+    """
+    t = (text or '').strip()
+    if not t:
+        return False
+    if canonical_ja and t == canonical_ja.strip():
+        return True
+    if within_file.get(t, 0) >= 2:
+        return True
+    return cross_episodes.get(t, 0) >= 2
+
+
+def apply_oped_pre_replace(cues, srt_file, oped):
+    """Pre-replace OP/ED **lyric** cues with pre-translated Chinese.
+
+    ⚠️ 只覆盖判定为歌词的 cue（`_is_lyric`）。早先的实现把 OP/ED 时间窗
+    内的 cue **无条件全部覆写**——窗口是固定 180s 的常量，OP 只有 90s 的
+    作品里，窗口会一路吃进正片对白，把整段对白替换成同一句歌词中文。
     """
     replaced = 0
 
-    # OP replacement via text matching
-    if op_zh and srt_file in op_texts:
-        for idx, ja_text in op_texts[srt_file]:
-            if idx < len(cues) and cues[idx].get('text', '').strip() == ja_text:
-                cues[idx]['text'] = op_zh
-                replaced += 1
-
-    # ED replacement via text matching
-    if ed_zh and srt_file in ed_texts:
-        for idx, ja_text in ed_texts[srt_file]:
-            if idx < len(cues) and cues[idx].get('text', '').strip() == ja_text:
-                cues[idx]['text'] = ed_zh
-                replaced += 1
+    for region, key_zh, key_texts, key_ja, key_var in (
+            ('OP', 'op_zh', 'op_texts', 'op_ja', 'op_variants'),
+            ('ED', 'ed_zh', 'ed_texts', 'ed_ja', 'ed_variants')):
+        zh = oped.get(key_zh)
+        entries = oped.get(key_texts) or {}
+        if not zh or srt_file not in entries:
+            continue
+        canonical = oped.get(key_ja)
+        cross = oped.get(key_var) or Counter()
+        within = Counter(t for _, t in entries[srt_file])
+        for idx, ja_text in entries[srt_file]:
+            if idx >= len(cues):
+                continue
+            if cues[idx].get('text', '').strip() != ja_text:
+                continue  # 预替换过的（专名）或已改动，跳过
+            if not _is_lyric(ja_text, canonical, within, cross):
+                continue
+            cues[idx]['text'] = zh
+            replaced += 1
 
     return replaced
 
@@ -573,7 +606,7 @@ def bad_ratio(batch_cues, result):
 
 def translate_file(input_path, output_path, glossary_str, ja_to_zh,
                    api_key, model, base_url,
-                   op_zh=None, ed_zh=None, op_texts=None, ed_texts=None,
+                   oped=None,
                    dry_run=False, source_lang=None,
                    extract_nouns=False, extract_dir=None):
     """Translate a single subtitle file (SRT or ASS).
@@ -600,13 +633,10 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
         source_lang = _detect_source_lang(cues)
         print(f'  {fname}: detected source language = {source_lang}', file=sys.stderr)
 
-    # Step 1: OP/ED pre-replace
+    # Step 1: OP/ED pre-replace（只覆盖歌词，见 apply_oped_pre_replace）
     oped_replaced = 0
-    if op_zh or ed_zh:
-        oped_replaced = apply_oped_pre_replace(
-            cues, fname, op_zh, ed_zh,
-            op_texts or {}, ed_texts or {}
-        )
+    if oped and (oped.get('op_zh') or oped.get('ed_zh')):
+        oped_replaced = apply_oped_pre_replace(cues, fname, oped)
         if oped_replaced:
             print(f'  {fname}: OP/ED pre-replaced {oped_replaced} cues', file=sys.stderr)
 
@@ -783,16 +813,18 @@ def translate_dir(input_dir, output_dir, glossary_str, ja_to_zh,
     print(f'{len(srt_files)} files to translate', file=sys.stderr)
 
     # Phase 0: Collect & pre-translate OP/ED across all episodes
-    op_zh, ed_zh, op_texts, ed_texts = '', '', set(), set()
+    oped = None
     if not skip_oped:
         print('[oped] Scanning OP/ED across episodes...', file=sys.stderr)
-        op_zh, ed_zh, op_texts, ed_texts = collect_oped_across_episodes(
+        oped = collect_oped_across_episodes(
             input_dir, api_key, model, base_url, dry_run
         )
-        if op_zh:
-            print(f'  [oped] OP pre-translated: {len(op_texts)} episodes', file=sys.stderr)
-        if ed_zh:
-            print(f'  [oped] ED pre-translated: {len(ed_texts)} episodes', file=sys.stderr)
+        if oped.get('op_zh'):
+            print(f'  [oped] OP pre-translated: '
+                  f'{len(oped["op_texts"])} episodes', file=sys.stderr)
+        if oped.get('ed_zh'):
+            print(f'  [oped] ED pre-translated: '
+                  f'{len(oped["ed_texts"])} episodes', file=sys.stderr)
     else:
         print('[oped] Skipped (--skip-oped)', file=sys.stderr)
 
@@ -806,8 +838,7 @@ def translate_dir(input_dir, output_dir, glossary_str, ja_to_zh,
         total, translated, failed = translate_file(
             input_path, output_path, glossary_str, ja_to_zh,
             api_key, model, base_url,
-            op_zh=op_zh, ed_zh=ed_zh,
-            op_texts=op_texts, ed_texts=ed_texts,
+            oped=oped,
             dry_run=dry_run, source_lang=source_lang,
             extract_nouns=extract_nouns, extract_dir=extract_dir,
         )
