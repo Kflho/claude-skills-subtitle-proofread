@@ -563,6 +563,32 @@ python "<scripts-dir>/polish_zh.py" --input-dir "<SUBTITLE_DIR>"
 > **排查手法**：预替换后立刻统计「同一句中文在窗口内重复次数」，
 > 单句占比过高即是窗口过宽的信号 —— 歌词本就该重复，但正片对白不该。
 
+> 🚨 **ASS 输出：新译文必须走「新文件模式」，否则写出的是模板自己的台词**
+>
+> `_write_ass_cues` 的就地编辑按 `_start_line` 匹配 —— 那是「cue 在**该文件**
+> 里的行号」。传模板 + 从别处（SRT、另一集）解析来的 cue，一行都对不上，
+> 函数不报错，**原样把模板的对话写出去**：文件看着正常，内容整篇是错的。
+>
+> 已修：按输出文件是否存在分流。不存在 → 模板只提供 header/styles，
+> `[Events]` 段整段按 cues 重建（`_ass_time` 负责 SRT 时间码 → ASS 百分秒）。
+>
+> 编码同理：`write_ass_file` / `_write_raw_lines` 原先一律写 UTF-8，而 ASS 的
+> 行业惯例是 **UTF-16LE + BOM**，读写一轮格式就变了。现在走
+> `subtitle_write_encoding()` 沿用现有文件的编码。
+
+> 🚨 **编码探测：单字节编码会让 CJK 编码变成死代码**
+>
+> 旧的 `_ENCODING_CHAIN` 是「第一个解码不报错的编码」试探：
+> `utf-8-sig, utf-8, cp1251, koi8-r, shift-jis, gbk`。cp1251/koi8-r 是单字节
+> 编码，**对任意字节串都能解码成功**，且排在 shift-jis/gbk 前面 —— 后两者
+> 永远走不到。任何非 UTF-8 文件都被静默解成西里尔乱码：实测 12 集
+> UTF-16LE 的参考字幕全部解析出 **0 条 cue 且不抛异常**（Step 4 的各项验证
+> 也不会报警，因为「0 条」看起来像「没内容」而不是「读失败」）。
+>
+> 已修：BOM 嗅探优先 → 无 BOM 时按 NUL 字节奇偶分布探测 UTF-16 →
+> 单字节编码一律挪到试探链**末尾**。解码后还要 `lstrip('﻿')`，
+> 否则 `utf-16-le` 会把 BOM 变成正文首字符，`[Script Info]` 段头判断失配。
+
 ### 4. 验证
 
 **必须**执行，不靠 "Pipeline complete" 判断成功：
@@ -780,6 +806,10 @@ python "<scripts-dir>/fix/oped_fill.py" "<SUBTITLE_DIR>" \
 | 接受循环把回显记成成功 | 判据写成了 `out != src`。回显文本带编号，"不同"但没翻译。用 `is_untranslated()` 判 |
 | 片头/片尾一大段对白变成同一句歌词中文 | OP/ED 预替换按固定 180s 窗口无脑覆写，窗口宽于实际 OP。`_is_lyric()` 已改为只覆写真歌词；统计窗口内单句重复率即可确认 |
 | OP/ED 预替换后对白凭空少了一截 | 同上。被覆写的 cue 文本非空、非日文，**Step 4 各验证项都不会报警** —— 必须与日文源逐条对数量 |
+| 参考字幕/ASS 解析出 0 条 cue，但不报错 | 编码探测把 UTF-16 判成了 koi8-r。检查 `_detect_encoding()` 的 BOM 嗅探；UTF-16LE 是 ASS 惯例编码 |
+| 生成的 ASS 内容全是模板那一集的台词 | 新译文误走了就地编辑分支（`_start_line` 对不上、又不报错）。确认输出文件事先不存在，走新文件模式 |
+| ASS 写出来变成 UTF-8 | `write_ass_file(..., template_path=)` 没传，编码没沿用。ASS 交付要 UTF-16LE + BOM |
+| ASS 行的字段整体错位一格 | `build_dialogue_line` 兜底分支把 `format`(`Dialogue: {layer}`) 和 `layer` 并列输出。Events 是 10 字段，Layer 内嵌在首字段里 |
 
 ## AI 介入点
 
