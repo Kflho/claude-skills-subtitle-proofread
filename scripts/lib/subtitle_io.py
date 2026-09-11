@@ -22,10 +22,51 @@ from typing import Optional
 # Encoding detection
 # ═══════════════════════════════════════════════════════════════
 
-_ENCODING_CHAIN = ['utf-8-sig', 'utf-8', 'cp1251', 'koi8-r', 'shift-jis', 'gbk']
+# BOM 前缀 → 编码。排在最前：BOM 是文件自己声明的，比任何猜测都可靠。
+# ASS 的行业惯例就是 UTF-16LE + BOM —— 少了这一步，整类文件都读不出来。
+_BOMS = (
+    (b'\xef\xbb\xbf', 'utf-8-sig'),
+    (b'\xff\xfe\x00\x00', 'utf-32-le'),
+    (b'\x00\x00\xfe\xff', 'utf-32-be'),
+    (b'\xff\xfe', 'utf-16-le'),
+    (b'\xfe\xff', 'utf-16-be'),
+)
+
+# 无 BOM 时的试探顺序。**单字节编码必须排在最后**：cp1251/koi8-r/latin-1
+# 对任意字节串都能解码成功，一旦排在前面，后面的 shift-jis/gbk 就成了永远
+# 走不到的死代码，任何非 UTF-8 文件都会被静默解成西里尔乱码（实测：一份
+# UTF-16LE 的 ASS 被判定为 koi8-r，解析出 0 条 cue 且不报错）。
+_ENCODING_CHAIN = ['utf-8', 'gbk', 'big5', 'shift-jis', 'euc-kr',
+                   'cp1251', 'koi8-r', 'latin-1']
+
+
+def _looks_like_utf16(raw_bytes: bytes) -> str:
+    """无 BOM 的 UTF-16 探测：取前若干字节，看 NUL 的奇偶分布。
+
+    ASCII 为主的文本在 UTF-16 下每 2 字节就有 1 个 NUL，且固定落在同一侧。
+    """
+    sample = raw_bytes[:4096]
+    if len(sample) < 4:
+        return ''
+    even_nul = sum(1 for i in range(0, len(sample) - 1, 2) if sample[i] == 0)
+    odd_nul = sum(1 for i in range(1, len(sample), 2) if sample[i] == 0)
+    half = len(sample) // 2
+    if half and odd_nul / half > 0.3 and even_nul / half < 0.05:
+        return 'utf-16-le'
+    if half and even_nul / half > 0.3 and odd_nul / half < 0.05:
+        return 'utf-16-be'
+    return ''
 
 
 def _detect_encoding(raw_bytes: bytes) -> str:
+    for bom, enc in _BOMS:
+        if raw_bytes.startswith(bom):
+            return enc
+
+    guessed = _looks_like_utf16(raw_bytes)
+    if guessed:
+        return guessed
+
     for enc in _ENCODING_CHAIN:
         try:
             raw_bytes.decode(enc)
@@ -35,11 +76,19 @@ def _detect_encoding(raw_bytes: bytes) -> str:
     return 'utf-8'
 
 
+def decode_subtitle_bytes(raw: bytes) -> str:
+    """按探测出的编码解码，并剥掉行首 BOM。
+
+    `utf-16-le` 解码后 BOM 会变成正文首字符（`\\ufeff[Script Info]`），
+    让 `[...]` 段头判断失配 —— 必须剥掉。
+    """
+    return raw.decode(_detect_encoding(raw)).lstrip('﻿')
+
+
 def _read_raw_lines(path: str) -> list[str]:
     with open(path, 'rb') as f:
         raw = f.read()
-    encoding = _detect_encoding(raw)
-    return raw.decode(encoding).splitlines(True)
+    return decode_subtitle_bytes(raw).splitlines(True)
 
 
 def _write_raw_lines(path: str, lines: list[str]):

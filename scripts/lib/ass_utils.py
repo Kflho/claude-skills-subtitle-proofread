@@ -213,11 +213,10 @@ def read_ass_file(path: str) -> list[str]:
     if _is_srt_path(path):
         return srt_utils.read_srt_file(path)
     # ASS files: use same encoding detection as SRT
-    from lib.subtitle_io import _detect_encoding
+    from lib.subtitle_io import decode_subtitle_bytes
     with open(path, 'rb') as f:
         raw = f.read()
-    encoding = _detect_encoding(raw)
-    return raw.decode(encoding).splitlines(True)
+    return decode_subtitle_bytes(raw).splitlines(True)
 
 
 def write_ass_file(path: str, lines: list[str]):
