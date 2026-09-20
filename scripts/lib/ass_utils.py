@@ -238,7 +238,12 @@ def write_ass_file(path: str, lines: list[str], template_path: str = None):
             # 'utf-16' 会写出 BOM 并采用本机字节序（LE）；_detect_encoding
             # 返回的 'utf-16-le' 单独用 open() 是不带 BOM 的，不能直接用。
             encoding = 'utf-16' if enc.startswith('utf-16') else enc
-        with open(path, 'w', encoding=encoding) as f:
+        # newline='' is load-bearing: these lines carry their own terminators
+        # (read_ass_file uses splitlines(True)), and ASS files are CRLF.  Text
+        # mode would translate each '\n' to os.linesep, turning the existing
+        # '\r\n' into '\r\r\n' — one spurious blank line per header line, and
+        # the file stops being idempotent under read → write.
+        with open(path, 'w', encoding=encoding, newline='') as f:
             f.writelines(lines)
 
 

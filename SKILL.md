@@ -118,6 +118,31 @@ python "<scripts-dir>/auto_translate.py" \
 
 > **注意**：如果项目是 ASS 格式，`--input-dir` 指向包含 `.ass` 文件的目录即可。Pipeline 会像处理 SRT 一样处理 ASS，输出保持 ASS 格式。
 
+## 行为分级：哪些默认做，哪些等指令
+
+每个会**写盘**的行为都在 `lib/gates.py` 登记一个级别。判据只有一条：
+**这一步会不会在用户没要求的情况下改变字幕内容？** 会 → 至少 L1。
+
+| 级别 | 含义 | 包含 |
+|---|---|---|
+| **L0** | 默认必做，只读 | 扫描/编码探测、VAD 台词↔人声匹配（含「有人声无字幕」缺口清单）、交付校验 |
+| **L1** | 默认只检测并标注，写盘要开关 | VAD 删「无人声」条（`--vad-clean-apply`） |
+| **L2** | 只在明确要求时执行 | OP/ED 预替换、专名预替换、TV 复用覆写、润色、繁→简、`fixes.json` 改写 |
+| **L3** | 执行前必须确认 | 覆盖已交付字幕、覆盖既有 `.bak` |
+
+```bash
+# 看当前分级（run_all.py 每次启动也会打印）
+python -c "import sys; sys.path.insert(0,'<scripts-dir>'); from lib.gates import format_table; print(format_table())"
+```
+
+**为什么 VAD 删条是 L1 而不是 L0**：本作对白垫 BGM，「对白+BGM」会被判非语音 ——
+Silero 硬过滤单集丢过 243/463 条真实台词，`はい` 这类 2 假名真词也在删除名单里。
+所以默认只出清单，**VAD 只作提示，不作硬判据**。库级默认也取安全侧：
+`vad_delete_nonspeech(apply=False)`、`fix_by_whisper(vad_clean_apply=False)` ——
+漏传参数的调用方正是踩过坑的那一类。
+
+新增会写盘的功能时，先在这里加一条 `Gate(...)`，再写实现。
+
 ## 首次使用？
 
 检查项目 `CLAUDE.md` 末尾是否有 `## SKILL INITIALIZED: true`。
@@ -178,6 +203,7 @@ python "<scripts-dir>/run_all.py" \
 > `--input-dir` 指定字幕子目录（默认 `AI审查后`）。`--lang` 自动检测。
 > `--video-dir` 启用 VAD 语音检测 + Whisper 统一修复（乱码、部分重叠、缺字幕一次处理）。无视频时加 `--skip-whisper` 残血运行。
 > `--limit` 只限 Phase 2 修复集数，扫描覆盖全部文件。
+> **VAD 删条默认不写盘**（分级 L1）：先看清单，确认无误再 `--vad-clean-apply`。
 
 ### 模块化调用
 
@@ -501,11 +527,13 @@ Phase 1: Scan
 
 Phase 2: Triage
   → 若有参考字幕 → 注入 reference_text 到 AI fragments（原文，不翻译）
-  → VAD clean: 删除非人声 cue（[音楽][拍手] 等）
-  → build_fix_regions(): VAD 人声段落 → 统一检测三种 fix region
+  → VAD clean: 列出非人声 cue（[音楽][拍手] 等）—— 分级 L1，默认只列不删，
+     要真删加 --vad-clean-apply
+  → build_fix_regions(): VAD 人声段落 → 统一检测 fix region
      ├─ garbled:      人声覆盖乱码 cue → 清空重录
      ├─ partial_overlap: 人声部分覆盖 cue + 延伸到 uncovered → 清空重录
-     └─ missing:      人声完全无 cue → 插入新 cue
+     └─ missing:      人声完全无 cue → **只出清单，不插新 cue**
+                      （凭空多出来的内容要人来点头；见 lib/gates.py）
   → 转 cluster 格式 → Tier 1/2 Whisper → match back → triage
   → classify + triage → auto-keep ✅ / ai_fragments 🤖 / auto-cut 🗑️
   → Baidu 翻译 (--lang zh): Whisper 输出 ja→zh（无凭证时降级 AI 翻译）
@@ -657,6 +685,7 @@ python "<scripts-dir>/fix/oped_fill.py" "<SUBTITLE_DIR>" \
 | `-e EP005-EP010` | Specific episode range |
 | `--limit 5` | First N episodes only |
 | `--skip-whisper` | Skip audio processing (残血模式) |
+| `--vad-clean-apply` | **真正**按 VAD 删「无人声」条。默认只列清单（分级 L1，理由见上） |
 | `--resume` | Resume after AI noun review (Phase 3 only) |
 | `--force-rescan` | Re-scan even if cache fresh |
 | `LLM_API_KEY` (env) | LLM API key for polish (optional) + translate_srt.py (**required**). Separate from Claude Code's. |

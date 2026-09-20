@@ -86,5 +86,5 @@ python auto_translate.py --source-dir <日文源> --target-dir <中文翻译> --
 
 ## 成本
 
-- deepseek-chat：1260 条分词 42 批，~$0.01
+- deepseek-flash：1260 条分词 42 批，~$0.01（用当时的默认模型 deepseek-chat 实测；该名已下线）
 - 比手动审查节约大量 AI 上下文 token

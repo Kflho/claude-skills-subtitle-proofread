@@ -522,7 +522,7 @@ else:
 > {
 >   "env": {
 >     "LLM_API_KEY": "sk-...",
->     "LLM_MODEL": "deepseek-chat",
+>     "LLM_MODEL": "deepseek-flash",
 >     "LLM_BASE_URL": "https://api.deepseek.com/v1"
 >   }
 > }
@@ -541,7 +541,7 @@ else:
 
 询问用户是否需要自定义模型或端点：
 
-> 默认使用 DeepSeek（`deepseek-chat`）。需要换成其他模型吗？
+> 默认使用 DeepSeek（`deepseek-flash`）。需要换成其他模型吗？
 >
 > - 不换 → 直接用默认值
 > - 换 → 提供模型名和 base URL
@@ -556,7 +556,7 @@ else:
 python -c "
 import os, requests, json
 key = os.environ.get('LLM_API_KEY', '')
-model = os.environ.get('LLM_MODEL', 'deepseek-chat')
+model = os.environ.get('LLM_MODEL', 'deepseek-flash')
 base = os.environ.get('LLM_BASE_URL', 'https://api.deepseek.com/v1')
 if not key:
     print('⚠️ LLM_API_KEY 未设置，请在 CLAUDE.md 中配置后手动 export')
@@ -575,7 +575,7 @@ else:
 "
 ```
 
-期望输出 `✅ LLM API 配置成功 (deepseek-chat)`。
+期望输出 `✅ LLM API 配置成功 (deepseek-flash)`。
 
 **验证失败时**：
 - 401 → API key 错误

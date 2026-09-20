@@ -24,6 +24,7 @@ from lib.whisper_utils import (
 setup_windows_utf8()
 
 from fix.subtitle_session import SubtitleSession
+from lib.config import VAD_OVERLAP_DELETE_S, VAD_DELETE_MAX_DUR_S
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -38,18 +39,19 @@ class WhisperResult:
       - auto_keep_fixes → write to SRT (apply_fixes_to_srt), report step 2 ✅
       - ai_fragments    → build ai_fragments JSON, report step 2.5 ⬜
       - auto_cuts       → delete from SRT, report step 2 🗑️
-      - new_cues        → insert into SRT (missing_sub only)
+      - cues_to_clear   → delete from SRT, UNLESS the same cue has an
+                          auto_keep fix (then it is re-texted, not deleted)
     """
     source: str = 'whisper'
-    applied: int = 0          # auto-keep count
+    applied: int = 0          # repairs actually written (set by the orchestrator)
     ai_review: int = 0        # AI fragment count
     deleted: int = 0          # auto-cut + VAD-deleted count
     tier: int = 0
     auto_keep_fixes: list = field(default_factory=list)
     ai_fragments: list = field(default_factory=list)
     auto_cuts: list = field(default_factory=list)
-    new_cues: list = field(default_factory=list)   # for new cues inserted into gaps
     cues_to_clear: list = field(default_factory=list)  # v5.3: overlapped cues to delete
+    cleared_dropped: list = field(default_factory=list)  # cleared with no repair to restore
     details: list = field(default_factory=list)
 
     @classmethod
@@ -62,8 +64,15 @@ class WhisperResult:
 # Module-level helpers
 # ═══════════════════════════════════════════════════════════════
 
-def _apply_vad_clean_from_cache(speech_segs, cues, srt_path, target_lang='ja'):
-    """Apply VAD clean using cached speech timeline from Phase 1 scan."""
+def _apply_vad_clean_from_cache(speech_segs, cues, srt_path, target_lang='ja',
+                                apply=False):
+    """Apply VAD clean using cached speech timeline from Phase 1 scan.
+
+    Same L1 gate as vad_delete_nonspeech(): with ``apply=False`` the decision
+    is computed and reported and the file is left alone.  (This path used to
+    write unconditionally — the cache branch deleted cues no matter what the
+    caller asked for.)
+    """
     from fix.whisper_pipeline import cue_overlaps_speech, is_non_dialogue_marker
     from lib.whisper_utils import looks_like_plausible_text, write_srt
     kept, deleted = [], []
@@ -72,19 +81,28 @@ def _apply_vad_clean_from_cache(speech_segs, cues, srt_path, target_lang='ja'):
         if is_non_dialogue_marker(text, target_lang):
             deleted.append(c)
             continue
-        has_speech = cue_overlaps_speech(c, speech_segs, min_overlap_s=0.0)
+        has_speech = cue_overlaps_speech(c, speech_segs,
+                                         min_overlap_s=VAD_OVERLAP_DELETE_S)
         if not has_speech:
             if looks_like_plausible_text(text, target_lang):
                 kept.append(c)
                 continue
-            if c['end_s'] - c['start_s'] < 3.0:
+            if c['end_s'] - c['start_s'] < VAD_DELETE_MAX_DUR_S:
                 deleted.append(c)
                 continue
         kept.append(c)
     if deleted:
-        write_srt(srt_path, kept)
-        print(f'[VAD cache] Deleted {len(deleted)} cues (Phase 1 timeline)',
-              file=sys.stderr)
+        if apply:
+            from lib.project_utils import backup_file
+            backup_file(srt_path)
+            write_srt(srt_path, kept)
+            print(f'[VAD cache] Deleted {len(deleted)} cues (Phase 1 timeline)',
+                  file=sys.stderr)
+        else:
+            print(f'[VAD cache] 分级 L1：{len(deleted)} 条待删，未写盘'
+                  f'（要真删加 --vad-clean-apply）', file=sys.stderr)
+            for c in deleted:
+                print(f'  [{c["start"]}] {c["text"][:60]}', file=sys.stderr)
     return kept, deleted, speech_segs
 
 
@@ -201,7 +219,8 @@ class WhisperFixer:
 
     def fix_by_whisper(self, *, separate_vocals: bool = True,
                        force_tier2: bool = False,
-                       skip_vad_clean: bool = False) -> WhisperResult:
+                       skip_vad_clean: bool = False,
+                       vad_clean_apply: bool = False) -> WhisperResult:
         """Run Whisper auto-fix pipeline (unified VAD-driven).
 
         1. VAD clean: delete non-speech cues
@@ -259,28 +278,35 @@ class WhisperFixer:
                           file=sys.stderr)
                     cues, deleted, speech_segs = _apply_vad_clean_from_cache(
                         cached_segs, cues, self._srt_path,
-                        target_lang=self._target_lang)
-                    deleted_count = len(deleted)
+                        target_lang=self._target_lang,
+                        apply=vad_clean_apply)
+                    deleted_count = len(deleted) if vad_clean_apply else 0
                 else:
                     vad_audio = os.path.join(tmpdir, 'vad_full.wav')
                     try:
                         extract_audio_wav(self._video_path, vad_audio)
                         cues, deleted, speech_segs = vad_delete_nonspeech(
                             vad_audio, cues, self._srt_path,
-                            target_lang=self._target_lang)
-                        deleted_count = len(deleted)
+                            target_lang=self._target_lang,
+                            apply=vad_clean_apply)
+                        deleted_count = len(deleted) if vad_clean_apply else 0
                         self._session.save_speech_segs(speech_segs)
                     except Exception as e:
+                        # With speech_segs empty, build_fix_regions() returns []
+                        # and the whole Whisper repair path exits without doing
+                        # anything — so say that, rather than "continuing".
                         print(f'[whisper] VAD audio extraction failed: {e}',
                               file=sys.stderr)
-                        print(f'[whisper] Continuing without VAD clean',
-                              file=sys.stderr)
+                        print(f'[whisper] ⚠ 无语音时间线 → 本次不做 Whisper 修复'
+                              f'（纯文本层面的乱码也不会被处理）', file=sys.stderr)
 
             # ── Build unified fix regions from VAD speech segments ──
             # v5.3: Single function replaces build_clusters() +
             # find_missing_subtitle_gaps() + add_placeholder_cues().
-            # VAD speech segments are the ground truth — all affected cues
-            # (garbled, partial-overlap, missing) are handled in one pass.
+            # All affected cue types (garbled, partial-overlap, missing) are
+            # handled in one pass. NOTE: speech_segs is a hard gate here —
+            # build_fix_regions() returns [] without it, so a VAD failure
+            # stops even the purely textual repairs.
             from fix.whisper_pipeline import (
                 build_fix_regions, run_tier1, run_tier2,
                 UPGRADE_THRESHOLD,
@@ -290,8 +316,12 @@ class WhisperFixer:
                                          target_lang=self._target_lang)
 
             if not regions:
-                print(f'[whisper] {self._episode}: no fix regions found',
-                      file=sys.stderr)
+                if not speech_segs:
+                    print(f'[whisper] {self._episode}: ⚠ 无语音时间线，'
+                          f'{len(garbled)} 条乱码 cue 未处理', file=sys.stderr)
+                else:
+                    print(f'[whisper] {self._episode}: no fix regions found',
+                          file=sys.stderr)
                 return WhisperResult(source='whisper',
                                      deleted=deleted_count)
 

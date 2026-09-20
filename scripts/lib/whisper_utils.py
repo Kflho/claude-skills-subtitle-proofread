@@ -14,10 +14,7 @@ v2.1 变更:
 
 import sys, os, re, subprocess, json, io
 from lib.subprocess_utils import run_ffmpeg
-
-# ── OP/ED region boundaries (seconds from start/end) ──
-OP_BOUNDARY_SEC = 180   # cues before this → OP region (3min, covers cold opens)
-ED_BOUNDARY_SEC = 180   # cues within this many seconds of the end → ED+preview region
+from lib.config import OP_BOUNDARY_SEC, ED_BOUNDARY_SEC  # noqa: F401  (re-export)
 
 # ── Whisper confidence thresholds (for AI review flagging) ──
 AI_REVIEW_AVG_LOGPROB_THRESHOLD = -1.0     # avg_logprob below this → uncertain
@@ -429,7 +426,9 @@ def write_ass_cues(path, cues):
         parts[9] = f'{tag}{new_text}\n'
         lines[idx] = ','.join(parts)
 
-    with open(path, 'w', encoding='utf-8') as f:
+    # newline='' — lines carry their own terminators; text mode would double
+    # the CRLF of any line not rebuilt here.
+    with open(path, 'w', encoding='utf-8', newline='') as f:
         f.writelines(lines)
 
 
@@ -522,8 +521,8 @@ def filter_low_confidence(segs, no_speech_threshold=0.6, min_avg_logprob=-1.5,
 # 6. ffmpeg 音频
 # ═══════════════════════════════════════════════════════════════
 
-def vad_filter_audio(input_audio, output_audio, silence_db=-30, min_silence=0.8,
-                     min_speech=0.3, padding=0.15):
+def vad_filter_audio(input_audio, output_audio, silence_db=None, min_silence=None,
+                     min_speech=None, padding=None):
     """用 ffmpeg silencedetect 预过滤非语音段，减少 Whisper 幻觉触发源。
 
     原理：Whisper 在静音/音乐段产生幻觉（研究显示 99.97% 的非语音音频触发）。
@@ -532,10 +531,12 @@ def vad_filter_audio(input_audio, output_audio, silence_db=-30, min_silence=0.8,
     Args:
         input_audio: 输入 WAV 路径
         output_audio: 输出（仅含语音段拼接的）WAV 路径
-        silence_db: 静音判定 dB 阈值（默认 -30）
-        min_silence: 判定静音的最短时长（秒，默认 0.8）
-        min_speech: 保留语音段的最短时长（秒，默认 0.3）
-        padding: 语音段前后保留的缓冲（秒，默认 0.15）
+        silence_db: 静音判定 dB 阈值（默认取 SILENCE_DB）
+        min_silence: 判定静音的最短时长（秒，默认取 SILENCE_MIN_S）
+        min_speech: 保留语音段的最短时长（秒，默认取 SILENCE_MIN_SPEECH_S）
+        padding: 语音段前后保留的缓冲（秒，默认取 SILENCE_PADDING_S）
+
+    四个阈值都默认取 lib/config.py —— 就地传字面量会让调参只改到一半。
 
     Returns:
         (speech_segments, total_duration, speech_duration):
@@ -544,6 +545,13 @@ def vad_filter_audio(input_audio, output_audio, silence_db=-30, min_silence=0.8,
           speech_duration: 语音段总时长
     """
     import shutil
+
+    from lib.config import (SILENCE_DB, SILENCE_MIN_S,
+                            SILENCE_MIN_SPEECH_S, SILENCE_PADDING_S)
+    silence_db = SILENCE_DB if silence_db is None else silence_db
+    min_silence = SILENCE_MIN_S if min_silence is None else min_silence
+    min_speech = SILENCE_MIN_SPEECH_S if min_speech is None else min_speech
+    padding = SILENCE_PADDING_S if padding is None else padding
 
     # 1. 用 ffmpeg silencedetect 找静音区间
     proc = run_ffmpeg(

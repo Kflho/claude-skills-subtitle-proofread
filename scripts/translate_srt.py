@@ -24,7 +24,7 @@ Usage:
 
 Setup:
   LLM_API_KEY env var (required)
-  LLM_MODEL env var (optional, default deepseek-chat)
+  LLM_MODEL env var (optional, default deepseek-flash)
   LLM_BASE_URL env var (optional, default https://api.deepseek.com/v1)
 """
 
@@ -417,7 +417,7 @@ def apply_noun_pre_replace(cues, ja_to_zh):
 def _call_llm(messages, api_key, model, base_url):
     """Call OpenAI-compatible chat API, return response text.
 
-    ⚠️ 推理模型（deepseek-flash / deepseek-v4-pro）默认关闭思考。
+    ⚠️ 推理模型的思考 token 会吃光 max_tokens（踩坑 #8），默认关闭思考。
     不关的话思考 token 会吃光 max_tokens 预算 → content 为空串 →
     `_translate_batch` 判整批失败 → 该批 10 条 cue 全部保留日文原文，
     且**不打印任何错误**（表现为 mojibake 式的"翻译没生效"）。

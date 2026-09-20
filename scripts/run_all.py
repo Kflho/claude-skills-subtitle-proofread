@@ -202,7 +202,7 @@ def _filter_by_start(episodes, start_from):
 
 def step_fix_episodes(project_dir, lang, resources,
                       skip_whisper=False, episodes=None, limit=0, start_from=None,
-                      skip_if_clean=True, target_dir=None):
+                      skip_if_clean=True, target_dir=None, vad_clean_apply=False):
     """Phase 2: Unified error-fix via Fixer (reference → Whisper → AI fragments).
 
     Each episode goes through the cascading priority:
@@ -272,6 +272,8 @@ def step_fix_episodes(project_dir, lang, resources,
     class _Args:
         step = None
         dry_run = False
+        # 分级 L1：默认不按 VAD 删条（只出清单）。要真删走 --vad-clean-apply。
+        vad_clean_apply = vad_clean_apply
 
     can_whisper = can_use_whisper(resources, skip_whisper=skip_whisper)
     if skip_whisper:
@@ -482,8 +484,11 @@ def _dedup_fixes(fixes):
     return result
 
 
-def step_apply_all(project_dir, lang, target_dir=None):
-    """Layer 4: apply_fixes — collect all fixes, apply at once."""
+def step_apply_all(project_dir, lang, target_dir=None, dry_run=False):
+    """Layer 4: apply_fixes — collect all fixes, apply at once.
+
+    dry_run=True previews every fix without touching a subtitle file.
+    """
     target = target_dir or os.path.join(project_dir, DEFAULT_INPUT_DIR)
     apply_script = os.path.join(_SCRIPT_DIR, 'apply', 'apply_fixes.py')
 
@@ -517,16 +522,20 @@ def step_apply_all(project_dir, lang, target_dir=None):
     with open(fixes_path, 'w', encoding='utf-8') as f:
         json.dump(all_fixes, f, ensure_ascii=False, indent=2)
 
-    # Apply
+    # Apply — all_fixes.json is a temp artifact, so it is written either way;
+    # --dry-run is what keeps the subtitle files themselves untouched.
     report_path = os.path.join(project_dir, 'reports', '问题解决报告.md')
-    return _run([
+    apply_args = [
         'python', apply_script,
         '--target-dir', target,
         '--fixes', fixes_path,
         '--lang', lang,
         '--log-to-report', report_path,
         '--step', '4',
-    ], project_dir, desc='apply')
+    ]
+    if dry_run:
+        apply_args.append('--dry-run')
+    return _run(apply_args, project_dir, desc='apply')
 
 
 def step_ass_repair(project_dir, target_dir=None):
@@ -1090,6 +1099,8 @@ Examples:
                         help=f'Subtitle input directory name (default: {DEFAULT_INPUT_DIR}). '
                              'Use "." to point --target-dir directly at the subtitle files.')
     parser.add_argument('--dry-run', action='store_true')
+    parser.add_argument('--vad-clean-apply', action='store_true',
+                        help='真正按 VAD 删「无人声」条（默认只出清单，见 lib/gates.py）')
     args = parser.parse_args()
 
     project_dir = args.target_dir or os.getcwd()
@@ -1138,6 +1149,13 @@ Examples:
     print(f'  Project: {project_dir}', file=sys.stderr)
     print(f'  {resources_summary(resources)}', file=sys.stderr)
 
+    # 分级：把「哪些行为默认做、哪些等指令」摆在每次运行的开头。
+    # 定级理由见 lib/gates.py；L1 的闸门当前是否打开由 --vad-clean-apply 决定。
+    from lib.gates import format_table
+    print('', file=sys.stderr)
+    for line in format_table().rstrip().split('\n'):
+        print(f'  {line}' if line else '', file=sys.stderr)
+
     # ── Warn if missing critical resources ──
     missing = []
     if not resources['has_video']:
@@ -1157,10 +1175,27 @@ Examples:
     print(f'{"="*55}', file=sys.stderr)
 
     if args.dry_run:
-        print('\n[DRY RUN] — scan only, no files will be modified\n', file=sys.stderr)
+        # Phase 1 and the Phase 3 analysis passes only read subtitles and write
+        # into temp/; Phase 3's apply step is run with --dry-run. Phase 2 is the
+        # one that rewrites SRTs in place (VAD deletion + Whisper repairs) and
+        # has no safe preview, so it is skipped — say so instead of returning
+        # silently after the scan, which read as "the whole run was previewed".
+        print('\n[DRY RUN] — 预览模式，字幕文件不会被修改', file=sys.stderr)
+        print('  Phase 1 扫描        : 执行（只读）', file=sys.stderr)
+        print('  Phase 2 修复        : 跳过（会就地改写 SRT）', file=sys.stderr)
+        print('                       单独预览：fix/whisper_pipeline.py --dry-run', file=sys.stderr)
+        print('  Phase 3 专名/应用    : 执行（应用步骤带 --dry-run）', file=sys.stderr)
+        print('  Phase 3 交付/清理    : 跳过\n', file=sys.stderr)
+
         step_scan(project_dir, resolved_lang, force_rescan=args.force_rescan,
                   target_dir=target_dir, video_dir=video_dir, episodes=episodes)
         _print_progress(project_dir, 'Status: dry-run scan')
+
+        step_nouns(project_dir, resolved_lang, target_dir=target_dir)
+        step_apply_all(project_dir, resolved_lang, target_dir=target_dir,
+                       dry_run=True)
+        if fmt['primary'] == 'ass':
+            step_ass_repair(project_dir, target_dir=target_dir)
         return
 
     # ── Fast path: AI review apply only ──
@@ -1202,7 +1237,8 @@ Examples:
                                       skip_whisper=args.skip_whisper,
                                       episodes=episodes, limit=args.limit,
                                       start_from=args.start_from,
-                                      skip_if_clean=not args.no_skip_if_clean)
+                                      skip_if_clean=not args.no_skip_if_clean,
+                                      vad_clean_apply=args.vad_clean_apply)
 
         step_ai_review(project_dir, resolved_lang, target_dir=target_dir)
     else:
@@ -1225,7 +1261,7 @@ Examples:
     noun_results = step_nouns(project_dir, resolved_lang, target_dir=target_dir)
     print_ai_review_notice(noun_results, project_dir, resolved_lang)
 
-    step_apply_all(project_dir, resolved_lang)
+    step_apply_all(project_dir, resolved_lang, target_dir=target_dir)
 
     # ASS repair: only for ASS-format projects
     if fmt['primary'] == 'ass':

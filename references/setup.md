@@ -50,7 +50,7 @@ python -c "import jieba; jieba.initialize(); print('[OK] jieba', len(jieba.dt.FR
 # 支持 DeepSeek、OpenAI、Gemini 等任何 /chat/completions 端点
 export LLM_API_KEY="sk-..."
 # 可选：覆盖默认模型和端点
-export LLM_MODEL="deepseek-chat"                    # 默认
+export LLM_MODEL="deepseek-flash"                   # 默认
 export LLM_BASE_URL="https://api.deepseek.com/v1"   # 默认
 ```
 

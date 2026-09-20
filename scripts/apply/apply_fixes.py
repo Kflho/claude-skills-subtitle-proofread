@@ -79,6 +79,8 @@ from lib.subtitle_io import (
     _find_cue as _find_cue_by_timecode,
 )
 
+from lib.project_utils import backup_file
+
 
 # ═══════════════════════════════════════════════════════════════
 # SRT 辅助函数 — 使用 cue 模型（subtitle_io）
@@ -96,16 +98,6 @@ def _load_srt_cues(fpath: str) -> list[dict]:
 def _save_srt_cues(fpath: str, cues: list[dict]):
     """Write cue dicts back to SRT file via subtitle_io."""
     write_subtitles(fpath, cues)
-
-
-def _find_srt_cue_by_line(cues: list[dict], line_num: int) -> dict | None:
-    """Find cue by 1-based line number (fallback, kept for backward compat)."""
-    line_idx = line_num - 1
-    for cue in cues:
-        sl = cue.get('_start_line', -1)
-        if sl <= line_idx <= sl + 4:  # SRT blocks are ~4 lines
-            return cue
-    return None
 
 
 def _find_srt_cue(cues: list[dict], fix: dict) -> dict | None:
@@ -159,8 +151,12 @@ def apply_merge_cues(cues, fix):
     return True, f"合并 {count} 个 cues: {merged_text[:60]}..."
 
 
-def apply_replace_global(fpath, fix):
-    """Global text replacement — operates on cues, not raw file. Safer, no cross-line risk."""
+def apply_replace_global(fpath, fix, dry_run=False):
+    """Global text replacement — operates on cues, not raw file. Safer, no cross-line risk.
+
+    dry_run=True computes the hit count without touching the file — callers
+    must honour it, otherwise `--dry-run` would still rewrite every file.
+    """
     cues = _load_srt_cues(fpath)
     old = fix['original']
     new = fix['replacement']
@@ -170,13 +166,15 @@ def apply_replace_global(fpath, fix):
             cue['text'] = cue['text'].replace(old, new)
             count += 1
     if count > 0:
-        _save_srt_cues(fpath, cues)
+        if not dry_run:
+            backup_file(fpath)
+            _save_srt_cues(fpath, cues)
         return True, f"全局替换 {count} 处"
     return True, f"already correct: {old[:40]}"
 
 
-def apply_replace_global_regex(fpath, fix):
-    """Global regex replacement — operates on cues, not raw file."""
+def apply_replace_global_regex(fpath, fix, dry_run=False):
+    """Global regex replacement — operates on cues, not raw file. Honours dry_run."""
     cues = _load_srt_cues(fpath)
     pat = fix['pattern']
     repl = fix['replacement']
@@ -187,9 +185,70 @@ def apply_replace_global_regex(fpath, fix):
             cue['text'] = new_text
             total += n
     if total > 0:
-        _save_srt_cues(fpath, cues)
+        if not dry_run:
+            backup_file(fpath)
+            _save_srt_cues(fpath, cues)
         return True, f"正则替换 {total} 处"
     return True, f"already correct (regex): {fix['pattern'][:40]}"
+
+
+def _norm_timecode(tc: str) -> str:
+    """Normalize a timecode for comparison: strip, ',' → '.', pad H to 2 digits.
+
+    SRT uses `00:00:04,000`, ASS uses `0:00:04.00` — both must compare equal.
+    """
+    t = (tc or '').strip().replace(',', '.')
+    if not t:
+        return ''
+    hh, sep, rest = t.partition(':')
+    if not sep:
+        return t
+    # Drop sub-second precision differences by comparing whole centiseconds.
+    parts = rest.split(':')
+    if len(parts) != 2:
+        return t
+    sec, _, frac = parts[1].partition('.')
+    frac = (frac + '00')[:2]
+    return f'{int(hh):02d}:{int(parts[0]):02d}:{int(sec):02d}.{frac}'
+
+
+def _resolve_ass_fix_lines(lines: list, fixes: list) -> list:
+    """Map each ASS fix to a physical line index, then sort descending.
+
+    ASS fixes produced by oped_fixer / noun_checker carry only `start` (the
+    cue's timecode) — no `line`. Keying purely off `line` silently dropped
+    every one of them (fix.get('line', 0) - 1 == -1 → "行号超出范围").
+
+    Indices are resolved against the *original* line list for every fix
+    before any deletion happens, so removing a line can't shift a later fix.
+
+    Returns:
+        [(line_idx, fix, matched_by)] sorted by line_idx descending.
+    """
+    # Timecode → line index, built once. Later duplicates keep the last index
+    # (matches the "fix the last rendering" convention elsewhere).
+    by_start = {}
+    for idx, line in enumerate(lines):
+        d = parse_dialogue(line)
+        if d is not None:
+            by_start[_norm_timecode(d['start'])] = idx
+
+    resolved = []
+    for fix in fixes:
+        idx, matched_by = -1, ''
+        line_num = fix.get('line', 0)
+        if line_num:
+            i = line_num - 1
+            if 0 <= i < len(lines):
+                idx, matched_by = i, 'line'
+        if idx < 0 and fix.get('start'):
+            i = by_start.get(_norm_timecode(fix['start']), -1)
+            if i >= 0:
+                idx, matched_by = i, 'start'
+        resolved.append((idx, fix, matched_by))
+
+    resolved.sort(key=lambda t: t[0], reverse=True)
+    return resolved
 
 
 def apply_delete_style(lines, fix):
@@ -283,18 +342,22 @@ def main():
             already = 0
             for fname, fpath in iter_ass_files(args.target_dir):
                 if fix['action'] == 'replace_global':
-                    ok, msg = apply_replace_global(fpath, fix)
+                    ok, msg = apply_replace_global(fpath, fix, dry_run=args.dry_run)
                 else:
-                    ok, msg = apply_replace_global_regex(fpath, fix)
+                    ok, msg = apply_replace_global_regex(fpath, fix, dry_run=args.dry_run)
                 if ok and 'already correct' in msg:
                     already += 1
                 elif ok:
                     applied += 1
             if applied > 0:
                 total_applied += 1
-                print(f"  [OK] {fix.get('note', fix['action'])} -> 影响 {applied} 个文件")
+                tag = '[DRY-RUN] ' if args.dry_run else ''
+                print(f"  {tag}[OK] {fix.get('note', fix['action'])} -> 影响 {applied} 个文件")
             elif already > 0:
+                # Nothing matched anywhere: the pattern is either already applied
+                # or simply absent. Report it as a no-op instead of a silent success.
                 total_already += 1
+                print(f"  [--] {fix.get('note', fix['action'])} -> 无命中（{already} 个文件已是目标状态或不存在该文本）")
 
     # 2. 样式/注释级修复（仅 ASS）
     if style_fixes:
@@ -311,6 +374,7 @@ def main():
                     ok, msg = apply_delete_comment(lines, fix)
                 if ok:
                     if not args.dry_run:
+                        backup_file(fpath)
                         lines = [l for l in lines if l != '']
                         write_ass_file(fpath, lines)
                     applied += 1
@@ -389,29 +453,37 @@ def main():
 
                 if applied > 0:
                     if not args.dry_run:
+                        backup_file(fpath)
                         _save_srt_cues(fpath, cues)
                     total_applied += applied
-                    print(f"  {fname}: {applied} applied")
+                    print(f"  {'[DRY-RUN] ' if args.dry_run else ''}{fname}: {applied} applied")
 
             else:
-                # ── ASS: use existing line-based processing ──
+                # ── ASS: line-based, but fixes are located by `start` when present ──
                 lines = read_ass_file(fpath)
-                file_fixes_sorted = sorted(file_fixes, key=lambda f: f.get('line', 0), reverse=True)
+                file_fixes_sorted = _resolve_ass_fix_lines(lines, file_fixes)
                 applied = 0
 
-                for fix in file_fixes_sorted:
+                for i, fix, matched_by in file_fixes_sorted:
                     action = fix['action']
-                    i = fix.get('line', 0) - 1
+                    where = fix.get('line') or fix.get('start') or '?'
                     pre_time = ''
                     pre_text = ''
 
-                    if action == 'replace_text':
+                    if action in ('replace_text', 'replace_name'):
                         if i < 0 or i >= len(lines):
-                            ok, msg = False, f"行号 {fix['line']} 超出范围"
+                            ok, msg = False, f"未找到 cue（{where}）"
+                            if fix.get('start') and not fix.get('line'):
+                                msg += " — start 时间码在文件中无匹配 Dialogue 行"
                         else:
                             d = parse_dialogue(lines[i])
                             if d is None:
-                                ok, msg = False, f"第 {fix['line']} 行不是 Dialogue 行"
+                                ok, msg = False, f"第 {i + 1} 行不是 Dialogue 行"
+                            elif action == 'replace_name':
+                                old = d['name']
+                                d['name'] = fix['replacement']
+                                lines[i] = build_dialogue_line(d) + '\n'
+                                ok, msg = True, f"Name: {old} → {fix['replacement']}"
                             else:
                                 old = d['text']
                                 pre_text = old[:120]
@@ -422,25 +494,18 @@ def main():
                                     d['text'] = fix['replacement']
                                     lines[i] = build_dialogue_line(d) + '\n'
                                     ok, msg = True, f"{old[:40]} → {fix['replacement'][:40]}"
-                    elif action == 'replace_name':
+                    elif action == 'delete_line':
                         if i < 0 or i >= len(lines):
-                            ok, msg = False, f"行号 {fix['line']} 超出范围"
+                            ok, msg = False, f"未找到 cue（{where}）"
                         else:
                             d = parse_dialogue(lines[i])
                             if d is None:
-                                ok, msg = False, f"第 {fix['line']} 行不是 Dialogue 行"
+                                ok, msg = False, f"第 {i + 1} 行不是 Dialogue 行"
                             else:
-                                old = d['name']
-                                d['name'] = fix['replacement']
-                                lines[i] = build_dialogue_line(d) + '\n'
-                                ok, msg = True, f"Name: {old} → {fix['replacement']}"
-                    elif action == 'delete_line':
-                        if i < 0 or i >= len(lines):
-                            ok, msg = False, f"行号 {fix['line']} 超出范围"
-                        else:
-                            pre_text = lines[i].strip()[:60]
-                            lines[i] = ''
-                            ok, msg = True, f"删除: {pre_text}"
+                                pre_text = d['text'][:120]
+                                pre_time = d['start']
+                                lines[i] = ''
+                                ok, msg = True, f"删除: {pre_text[:60]}"
                     else:
                         ok, msg = False, f"ASS 不支持 action: {action}"
 
@@ -467,20 +532,27 @@ def main():
                                     })
                     else:
                         total_skipped += 1
-                        print(f"  ✗ {fname}:{fix.get('line', '?')} - {msg}")
+                        print(f"  ✗ {fname}:{where} - {msg}")
 
                 if applied > 0:
                     if not args.dry_run:
+                        backup_file(fpath)
                         lines = [l for l in lines if l != '']
                         write_ass_file(fpath, lines)
                     total_applied += applied
-                    print(f"  {fname}: {applied} applied")
+                    print(f"  {'[DRY-RUN] ' if args.dry_run else ''}{fname}: {applied} applied")
 
     # ── 报告日志 ──
+    # Not in dry-run: the entries describe changes that were never written, and
+    # the report file is a deliverable, not scratch space.
     if args.log_to_report and args.step and report_entries:
-        from utils.update_report import upsert_entries as _upsert
-        _upsert(args.log_to_report, step=args.step, entries=report_entries)
-        print(f'\n[apply] {len(report_entries)} entries logged to report layer {args.step}')
+        if args.dry_run:
+            print(f'\n[DRY-RUN] {len(report_entries)} entries would be logged '
+                  f'to report layer {args.step} (report not modified)')
+        else:
+            from utils.update_report import upsert_entries as _upsert
+            _upsert(args.log_to_report, step=args.step, entries=report_entries)
+            print(f'\n[apply] {len(report_entries)} entries logged to report layer {args.step}')
 
     print(f"\n{'[DRY-RUN] ' if args.dry_run else ''}"
           f"{total_applied} applied, {total_already} already correct, "
@@ -514,6 +586,7 @@ def _run_trad_to_simp(target_dir, dry_run=False):
         if changed > 0:
             total += changed
             if not dry_run:
+                backup_file(fpath)
                 write_ass_file(fpath, lines)
             print(f'  {"[DRY-RUN]" if dry_run else ""} {fname}: {changed} changed', file=sys.stderr)
     print(f'[trad→simp] {"preview" if dry_run else "done"}: {total} changed', file=sys.stderr)

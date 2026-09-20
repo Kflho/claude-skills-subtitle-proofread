@@ -24,7 +24,7 @@ Usage:
 
 Setup:
   环境变量 LLM_API_KEY（必需）
-  可选 LLM_MODEL（默认 deepseek-chat）
+  可选 LLM_MODEL（默认 deepseek-flash）
   可选 LLM_BASE_URL（默认 https://api.deepseek.com/v1）
 """
 

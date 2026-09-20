@@ -239,16 +239,20 @@ class Fixer:
 
     def fix_by_whisper(self, *, separate_vocals: bool = True,
                        force_tier2: bool = False,
-                       skip_vad_clean: bool = False) -> FixReport:
+                       skip_vad_clean: bool = False,
+                       vad_clean_apply: bool = False) -> FixReport:
         """Run Whisper auto-fix pipeline (v5.3: unified VAD-driven).
 
         Single call covers garbled cues + partial overlaps + missing
         subtitles. Delegates to WhisperFixer, then writes SRT + report.
+
+        ``vad_clean_apply=False``（默认，分级 L1）时 VAD 删条只出清单不写盘。
         """
         result = self._whisper_fixer.fix_by_whisper(
             separate_vocals=separate_vocals,
             force_tier2=force_tier2,
             skip_vad_clean=skip_vad_clean,
+            vad_clean_apply=vad_clean_apply,
         )
         return self._apply_whisper_result(result)
 
@@ -262,31 +266,54 @@ class Fixer:
         cues = parse_srt(self._srt_path, mark_garbled=True,
                          target_lang=self.target_lang)
 
-        # Auto-cuts: delete noise cues
-        if result.auto_cuts:
-            cut_starts = {f['start'] for f in result.auto_cuts}
-            cues = [c for c in cues if c.get('start') not in cut_starts]
+        # ── Resolve deletions against Whisper's repairs in a single pass ──
+        # A garbled cue appears in BOTH lists: `cues_to_clear` (its region
+        # overlapped it) and `auto_keep_fixes` (Whisper re-heard it). Deleting
+        # first and writing the SRT before apply_fixes_to_srt() ran meant the
+        # write-back matched no cue — every repair was dropped, while the
+        # report still logged it ✅ (result.applied was len(auto_keep), counted
+        # before any write). Resolve each cue against the repairs first.
+        keep_fixes = [f for f in result.auto_keep_fixes if f.get('replacement')]
+        fix_by_start = {f['start']: f for f in keep_fixes}
 
-        # v5.3: Delete cues_to_clear (overlapped cues from fix regions)
-        if result.cues_to_clear:
-            clear_starts = {c['start'] for c in result.cues_to_clear}
-            cues = [c for c in cues if c.get('start') not in clear_starts]
+        cut_starts = {f['start'] for f in result.auto_cuts}
+        clear_starts = {c['start'] for c in result.cues_to_clear}
+        repaired_starts = set()
+        dropped_clears = []
 
-        # New cues: insert into cue list (from missing-type regions)
-        if result.new_cues:
-            cues.extend(result.new_cues)
-            cues.sort(key=lambda c: c.get('start_s', c.get('start', '')))
+        if cut_starts or clear_starts:
+            kept = []
+            for c in cues:
+                start = c.get('start')
+                if start in cut_starts:
+                    continue                      # auto-cut: always drop
+                if start in clear_starts:
+                    f = fix_by_start.pop(start, None)
+                    if f is None:
+                        dropped_clears.append(c)  # nothing to put back — drop
+                        continue
+                    c['text'] = f['replacement']  # the repair is the point
+                    repaired_starts.add(start)
+                kept.append(c)
+            cues = kept
 
-        # Write SRT
-        if result.auto_cuts or result.cues_to_clear or result.new_cues:
+        if repaired_starts or cut_starts or clear_starts:
+            from lib.project_utils import backup_file
+            backup_file(self._srt_path)
             write_srt(self._srt_path, cues)
 
-        # Auto-keep: apply replacement text
-        if result.auto_keep_fixes:
-            keep_fixes = [f for f in result.auto_keep_fixes
-                         if f.get('replacement')]
-            if keep_fixes:
-                apply_fixes_to_srt(self._srt_path, keep_fixes)
+        # Repairs whose cue was never inside a fix region
+        leftover = list(fix_by_start.values())
+        if leftover:
+            repaired_starts.update(
+                f['start'] for f in leftover
+                if apply_fixes_to_srt(self._srt_path, [f]))
+
+        # Report what actually landed, not what was intended.
+        result.applied = len(repaired_starts)
+        # Cues that were cleared and NOT re-filled — the only ones the report
+        # should show as deleted.
+        result.cleared_dropped = dropped_clears
 
         # AI fragments: delegate to FragmentProcessor
         if result.ai_fragments:
@@ -316,13 +343,17 @@ class Fixer:
                      'corrected': '(VAD已删除)', 'status': '🗑️'}
                     for f in result.auto_cuts
                 ])
-            if result.cues_to_clear:
+            if result.cleared_dropped:
+                # Only the cues that were cleared and NOT re-filled. The rest
+                # were re-texted by a repair and are already logged ✅ above —
+                # listing them here too printed the same cue twice with
+                # contradictory statuses.
                 upsert_entries(self._report_path, step='2', entries=[
                     {'ep': self.episode, 'time': c.get('start', ''),
                      'original': c.get('text', '')[:120],
-                     'corrected': '(VAD部分重叠—已合并到相邻修复区域，Whisper重录)',
+                     'corrected': '(VAD区段内无 Whisper 修复，已整条删除)',
                      'status': '🗑️'}
-                    for c in result.cues_to_clear
+                    for c in result.cleared_dropped
                 ])
             if result.ai_fragments:
                 upsert_entries(self._report_path, step='2.5', entries=[

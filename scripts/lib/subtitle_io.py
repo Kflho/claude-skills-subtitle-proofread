@@ -108,7 +108,9 @@ def subtitle_write_encoding(path: str, default: str = 'utf-8-sig') -> str:
 
 def _write_raw_lines(path: str, lines: list[str], encoding: str = 'utf-8-sig'):
     os.makedirs(os.path.dirname(path) if os.path.dirname(path) else '.', exist_ok=True)
-    with open(path, 'w', encoding=encoding) as f:
+    # newline='' — lines already carry their terminators (splitlines(True)).
+    # Text-mode translation would rewrite an existing '\r\n' as '\r\r\n'.
+    with open(path, 'w', encoding=encoding, newline='') as f:
         f.writelines(lines)
 
 
@@ -437,17 +439,24 @@ def _find_cue(cues: list[dict], fix: dict) -> Optional[dict]:
             if ct == tc:
                 return cue
 
-    # Fallback: match by line number (1-based)
+    # Fallback: match by line number (1-based).
+    # A cue's block ends where the next cue starts — bounding by the next cue's
+    # _start_line is exact for any text-line count. (A fixed `line_idx - sl <= 4`
+    # window instead swallows the *next* cue's index line: with `_start_line` on
+    # the index line, offset 4 already belongs to the following cue — that is how
+    # a delete_line once removed the wrong subtitle.)
     line_num = fix.get('line', 0)
     if line_num:
         line_idx = line_num - 1  # 0-based
-        for cue in cues:
+        for i, cue in enumerate(cues):
             sl = cue.get('_start_line', -1)
-            if sl <= line_idx:
-                # Check if line_idx is within this cue's block
-                # SRT blocks are typically 3-4 lines (index + timecode + 1-2 text + blank)
-                if line_idx - sl <= 4:
-                    return cue
+            if sl < 0 or sl > line_idx:
+                continue
+            nxt = cues[i + 1].get('_start_line', -1) if i + 1 < len(cues) else -1
+            if nxt < 0:
+                nxt = sl + 5  # last cue: no next block to bound by — cap the span
+            if line_idx < nxt:
+                return cue
 
     return None
 

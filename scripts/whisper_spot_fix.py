@@ -30,7 +30,8 @@ import time
 import lib._path  # noqa: F401
 from lib.whisper_utils import extract_audio_wav, run_whisper
 from lib.config import (WHISPER_CLI, WHISPER_MODEL, LLM_API_KEY, LLM_MODEL,
-                        LLM_BASE_URL, apply_llm_params)
+                        LLM_MODEL_DEFAULT, LLM_BASE_URL, LLM_BASE_URL_DEFAULT,
+                        apply_llm_params)
 from lib.project_utils import find_video
 
 
@@ -94,9 +95,9 @@ def main():
                         help='Project root (default: CWD)')
     parser.add_argument('--no-translate', action='store_true',
                         help='Skip translation, output Japanese only')
-    parser.add_argument('--model', default=LLM_MODEL or 'deepseek-v4-pro',
+    parser.add_argument('--model', default=LLM_MODEL or LLM_MODEL_DEFAULT,
                         help='LLM model for translation')
-    parser.add_argument('--base-url', default=LLM_BASE_URL or 'https://api.deepseek.com/v1',
+    parser.add_argument('--base-url', default=LLM_BASE_URL or LLM_BASE_URL_DEFAULT,
                         help='API base URL')
     args = parser.parse_args()
 

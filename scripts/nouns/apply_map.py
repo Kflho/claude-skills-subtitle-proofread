@@ -273,8 +273,11 @@ def main():
     ap = argparse.ArgumentParser(
         description='专名统一应用工具（AI 决策的便利执行器）')
     ap.add_argument('map_path', help='running-map JSON（temp/noun_map.json）')
-    ap.add_argument('--target-dir', default='260806', help='中文字幕目录')
-    ap.add_argument('--dry-run', action='store_true', help='预览，不改文件')
+    # No default: a wrong directory here rewrites the wrong project's
+    # subtitles, and the old default ('260806') was one project's folder name.
+    ap.add_argument('--target-dir', help='中文字幕目录（除 --emit-mappings 外必填）')
+    ap.add_argument('--dry-run', action='store_true',
+                    help='预览，不改文件（默认行为；给出以显式声明意图）')
     ap.add_argument('--apply', action='store_true', help='实际写入文件')
     ap.add_argument('--emit-mappings', help='导出 ja→zh 预替换表到该路径')
     ap.add_argument('--merge-existing',
@@ -283,6 +286,9 @@ def main():
                     '（与 --apply 同用=记录实际统一项，与 --dry-run 同用=预览将统一项）')
     args = ap.parse_args()
 
+    if args.apply and args.dry_run:
+        ap.error('--apply 与 --dry-run 互斥')
+
     with open(args.map_path, 'r', encoding='utf-8') as f:
         noun_map = json.load(f)
 
@@ -290,6 +296,9 @@ def main():
         emit_ja_to_zh(noun_map, args.emit_mappings,
                       merge_with=args.merge_existing)
         return
+
+    if not args.target_dir:
+        ap.error('--target-dir 是必需的（除 --emit-mappings 外的所有模式）')
 
     report, per_episode_variants = run_map(
         noun_map, args.target_dir, dry_run=not args.apply)

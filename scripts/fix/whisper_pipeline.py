@@ -30,12 +30,19 @@ from lib.whisper_utils import (
     extract_audio_wav, is_valid_subtitle_text,
     separate_vocals, get_audio_duration,
 )
+from lib.config import (
+    VAD_FRAME_MS, VAD_AGGRESSIVENESS, VAD_MIN_SPEECH_S, VAD_MERGE_GAP_S,
+    VAD_OVERLAP_DELETE_S, VAD_OVERLAP_REGION_S,
+    VAD_DELETE_MAX_DUR_S, FIX_REGION_MIN_GAP_S, FIX_REGION_MAX_GAP_S,
+    WHISPER_REPLACE_MIN_COVERAGE, WHISPER_REPLACE_HIGH_COVERAGE,
+    GAP_SEC as GAP_SEC_DEFAULT,
+)
 setup_windows_utf8()
 
 # ── Tier 1 constants ──
 MAX_CLUSTER_GAP = 60.0   # seconds — max gap between garbled cues in a cluster
 UPGRADE_THRESHOLD = 15   # fragments > this → auto-upgrade to Tier 2
-GAP_SEC = 5.0            # padding around clusters
+GAP_SEC = GAP_SEC_DEFAULT   # padding around clusters
 
 _CPU_COUNT = os.cpu_count() or 4
 _TARGET = max(1, int(_CPU_COUNT * 0.8))
@@ -46,7 +53,7 @@ DEFAULT_THREADS = max(1, _TARGET // 2)
 # VAD pre-scan — delete non-speech cues before garbled detection
 # ═══════════════════════════════════════════════════════════════
 
-def get_speech_timeline(audio_path, aggressiveness=2):
+def get_speech_timeline(audio_path, aggressiveness=VAD_AGGRESSIVENESS):
     """Use WebRTC VAD to detect speech segments in 16kHz mono WAV.
 
     Unlike ffmpeg silencedetect (which only detects audio energy and can't
@@ -78,7 +85,7 @@ def get_speech_timeline(audio_path, aggressiveness=2):
             return _get_speech_timeline_silencedetect(audio_path)
 
         vad = webrtcvad.Vad(aggressiveness)
-        frame_ms = 30
+        frame_ms = VAD_FRAME_MS
         frame_samples = int(rate * frame_ms / 1000)
 
         speech_segs = []
@@ -104,17 +111,17 @@ def get_speech_timeline(audio_path, aggressiveness=2):
                 speech_start = t
                 in_speech = True
             elif not is_speech and in_speech:
-                if t - speech_start >= 0.3:  # min 300ms speech
+                if t - speech_start >= VAD_MIN_SPEECH_S:
                     speech_segs.append((speech_start, t))
                 in_speech = False
             pos += 1
 
         if in_speech:
             final_t = total_frames * frame_ms / 1000.0
-            if final_t - speech_start >= 0.3:
+            if final_t - speech_start >= VAD_MIN_SPEECH_S:
                 speech_segs.append((speech_start, final_t))
     # Merge nearby segments (<0.5s gap)
-    speech_segs = _merge_nearby_segments(speech_segs, gap=0.5)
+    speech_segs = _merge_nearby_segments(speech_segs, gap=VAD_MERGE_GAP_S)
     return speech_segs
 
 
@@ -130,7 +137,7 @@ def _get_speech_timeline_silencedetect(audio_path):
     return segs
 
 
-def _merge_nearby_segments(segs, gap=0.5):
+def _merge_nearby_segments(segs, gap=VAD_MERGE_GAP_S):
     """Merge speech segments separated by short gaps (e.g. breath pauses)."""
     if not segs:
         return segs
@@ -143,7 +150,7 @@ def _merge_nearby_segments(segs, gap=0.5):
     return [(s, e) for s, e in merged]
 
 
-def cue_overlaps_speech(cue, speech_segs, min_overlap_s=0.0):
+def cue_overlaps_speech(cue, speech_segs, min_overlap_s=VAD_OVERLAP_DELETE_S):
     """Check if cue overlaps with any speech segment by at least min_overlap_s."""
     cs, ce = cue['start_s'], cue['end_s']
     for ss, es in speech_segs:
@@ -172,7 +179,8 @@ def is_non_dialogue_marker(text, target_lang='ja'):
     return bool(_get_non_dialogue_re(target_lang).match(text.strip()))
 
 
-def vad_delete_nonspeech(audio_path, cues, srt_path, target_lang='ja'):
+def vad_delete_nonspeech(audio_path, cues, srt_path, target_lang='ja', apply=False,
+                         aggressiveness=VAD_AGGRESSIVENESS):
     """Delete non-dialogue cues. Two-tier strategy:
 
     Tier A — Content-based: Always delete known editorial markers
@@ -185,13 +193,18 @@ def vad_delete_nonspeech(audio_path, cues, srt_path, target_lang='ja'):
               This catches Whisper hallucinations in silence without
               risking false deletion of valid short dialogue.
 
-    Modifies SRT in-place.
+    Modifies SRT in-place — but only when ``apply`` is True.
+
+    ``apply`` 默认 **False**（分级 L1）：本作对白垫 BGM，VAD 硬过滤丢过大量
+    真实台词（单集 243/463），「はい」这类 2 假名真词也会被判非台词。所以
+    默认只算不写，调用方要写盘必须显式点名（CLI 上是 --vad-clean-apply）。
+    库级默认取安全侧，是因为漏传参数的调用方正是踩坑 #16 那一类。
 
     Returns:
-        (kept_cues, deleted_cues): both lists of cue dicts
+        (kept_cues, deleted_cues, speech_segs)
     """
     print('[VAD] Detecting speech segments ...', file=sys.stderr)
-    speech_segs = get_speech_timeline(audio_path)
+    speech_segs = get_speech_timeline(audio_path, aggressiveness=aggressiveness)
     speech_dur = sum(es - ss for ss, es in speech_segs)
     total_dur = get_audio_duration(audio_path) or 1
     print(f'[VAD] Speech: {speech_dur:.0f}s / {total_dur:.0f}s '
@@ -210,27 +223,38 @@ def vad_delete_nonspeech(audio_path, cues, srt_path, target_lang='ja'):
         # Tier B: text cues — delete only if NO speech at all AND short
         # Safety filter: if text looks like readable dialogue, keep it even
         # if VAD says no speech (VAD can miss short/spoken lines).
-        has_speech = cue_overlaps_speech(c, speech_segs, min_overlap_s=0.0)
+        has_speech = cue_overlaps_speech(c, speech_segs,
+                                         min_overlap_s=VAD_OVERLAP_DELETE_S)
         if not has_speech:
             from lib.whisper_utils import looks_like_plausible_text
             if looks_like_plausible_text(text, target_lang):
                 kept.append(c)
                 continue
             cue_dur = c['end_s'] - c['start_s']
-            if cue_dur < 3.0:
+            if cue_dur < VAD_DELETE_MAX_DUR_S:
                 deleted.append(c)
                 continue
 
         kept.append(c)
 
     if deleted:
-        print(f'[VAD] Deleting {len(deleted)} cues:', file=sys.stderr)
+        verb = 'Deleting' if apply else 'Would delete (not applied)'
+        print(f'[VAD] {verb} {len(deleted)} cues:', file=sys.stderr)
         for c in deleted:
             reason = 'marker' if is_non_dialogue_marker(c['text'].strip()) else 'no speech'
             print(f'  [{c["start"]}] [{reason}] {c["text"][:60]}', file=sys.stderr)
-        write_srt(srt_path, kept)
-        print(f'[VAD] {len(kept)} cues remain in {os.path.basename(srt_path)}',
-              file=sys.stderr)
+        if apply:
+            from lib.project_utils import backup_file
+            backup_file(srt_path)   # in-place rewrite, nothing else can undo it
+            write_srt(srt_path, kept)
+            print(f'[VAD] {len(kept)} cues remain in {os.path.basename(srt_path)}',
+                  file=sys.stderr)
+        else:
+            # 文件里还是 len(cues) 条；len(kept) 是「真删的话会剩几条」。
+            # 这两个数不一样，别把它们混成一句。
+            print(f'[VAD] {os.path.basename(srt_path)} unchanged '
+                  f'({len(cues)} cues still in file, '
+                  f'{len(kept)} would remain)', file=sys.stderr)
     else:
         print('[VAD] All cues kept — nothing to delete.', file=sys.stderr)
 
@@ -247,7 +271,9 @@ def vad_delete_nonspeech(audio_path, cues, srt_path, target_lang='ja'):
 # ═══════════════════════════════════════════════════════════════
 
 def build_fix_regions(speech_segs, cues, target_lang='ja',
-                       min_overlap_s=0.3, min_gap_s=3.0, max_gap_s=45.0):
+                       min_overlap_s=VAD_OVERLAP_REGION_S,
+                       min_gap_s=FIX_REGION_MIN_GAP_S,
+                       max_gap_s=FIX_REGION_MAX_GAP_S):
     """Build unified fix regions from VAD speech segments.
 
     Replaces BOTH build_clusters() AND find_missing_subtitle_gaps()
@@ -517,9 +543,19 @@ def regions_to_clusters(regions):
 
     Expands region boundaries to include adjacent context cues
     as acoustic context for better Whisper accuracy.
+
+    Regions with nothing to clear are dropped: a 'missing' region (speech with
+    no cue under it at all) carries ``cues_to_clear == []``, and the empty
+    cluster it used to produce bought a full Whisper pass that could never
+    write anything back — inserting new cues was never implemented. The gaps
+    are reported instead, so the information still reaches the user.
     """
     clusters = []
+    missing = []
     for region in regions:
+        if not region.get('cues_to_clear'):
+            missing.append(region)
+            continue
         left = region.get('context_left')
         right = region.get('context_right')
         ss = left['start_s'] if left else max(0, region['start_s'] - GAP_SEC)
@@ -532,6 +568,14 @@ def regions_to_clusters(regions):
             'left_text': left['text'] if left else '',
             'right_text': right['text'] if right else '',
         })
+    if missing:
+        total = sum(r['end_s'] - r['start_s'] for r in missing)
+        print(f'[VAD] {len(missing)} 段语音无字幕覆盖（共 {total:.1f}s）— '
+              f'不会自动补条，请人工确认', file=sys.stderr)
+        for r in missing[:10]:
+            print(f'  [{r["start_s"]:.1f}s–{r["end_s"]:.1f}s]', file=sys.stderr)
+        if len(missing) > 10:
+            print(f'  ... 另有 {len(missing) - 10} 段', file=sys.stderr)
     return clusters
 
 
@@ -796,12 +840,14 @@ def align_and_fix(cues, whisper_segs, save_transcript_to: str = None, target_lan
                         best_overlap = ratio
                         best_seg = wh
 
-        if best_seg and best_overlap >= 0.3 and is_valid_subtitle_text(best_seg['text'], target_lang):
+        if (best_seg and best_overlap >= WHISPER_REPLACE_MIN_COVERAGE
+                and is_valid_subtitle_text(best_seg['text'], target_lang)):
             fixes.append({
                 'start': c['start'], 'end': c['end'],
                 'original': c['text'][:80],
                 'replacement': best_seg['text'][:80],
-                'confidence': 'high' if best_overlap >= 0.5 else 'retry',
+                'confidence': ('high' if best_overlap >= WHISPER_REPLACE_HIGH_COVERAGE
+                               else 'retry'),
                 'model': 'tier2',
                 'lines': [c.get('line')] if c.get('line') else [],
                 # Whisper confidence metadata for AI review (Layer 2.5)
@@ -873,12 +919,10 @@ def main():
                         help='Use demucs to separate vocals before Whisper')
     parser.add_argument('--force-tier2', action='store_true',
                         help='Skip Tier 1, go directly to full-episode')
+    parser.add_argument('--vad-clean-apply', action='store_true',
+                        help='真正按 VAD 删「无人声」条（默认只出清单，见 lib/gates.py）')
     parser.add_argument('--no-vad-clean', action='store_true',
-                        help='Skip VAD pre-scan (keep all cues)')
-    parser.add_argument('--detect-missing-dialogue', action='store_true',
-                        help='Detect speech without subtitles and add placeholder cues')
-    parser.add_argument('--missing-dialogue-min-gap', type=float, default=3.0,
-                        help='Min gap (seconds) for missing dialogue detection (default: 3.0)')
+                        help='连 VAD 检测都跳过（省时间；默认会检测并出清单）')
     parser.add_argument('--vad-aggressiveness', type=int, default=2,
                         help='WebRTC VAD aggressiveness 0-3 (default: 2)')
     args = parser.parse_args()
@@ -889,21 +933,27 @@ def main():
         cues = parse_srt(args.srt)
         original_count = len(cues)
         deleted_count = 0
+        # Bound before the branch: the Tier 1 path below reads speech_segs even
+        # when --no-vad-clean skipped its only assignment (UnboundLocalError).
+        speech_segs = []
 
         if not args.no_vad_clean:
             print('[VAD] Extracting full audio for speech detection ...', file=sys.stderr)
             vad_audio = os.path.join(tmpdir, 'vad_full.wav')
             extract_audio_wav(args.video, vad_audio)
-            cues, deleted, speech_segs = vad_delete_nonspeech(vad_audio, cues, args.srt)
-            deleted_count = len(deleted)
-            # Optional: detect speech without subtitles → fix regions
-            if args.detect_missing_dialogue:
-                regions = build_fix_regions(speech_segs, cues)
-                if regions:
-                    print(f'[VAD] {len(regions)} fix regions detected '
-                          f'(garbled + partial + missing)', file=sys.stderr)
-        else:
-            print('[VAD] --no-vad-clean: skipping speech detection', file=sys.stderr)
+            # 分级 L1：VAD 删条默认**不写盘**，只出清单。要真删得显式
+            # --vad-clean-apply（理由见 lib/gates.py：本作对白垫 BGM，
+            # 硬过滤丢过大量真实台词）。--dry-run 永远压过一切。
+            from lib.gates import enabled
+            do_delete = enabled('vad_delete', args) and not args.dry_run
+            if not do_delete:
+                print('[VAD] 分级 L1：只检测不删条；'
+                      '要真删加 --vad-clean-apply', file=sys.stderr)
+            cues, deleted, speech_segs = vad_delete_nonspeech(
+                vad_audio, cues, args.srt,
+                apply=do_delete,
+                aggressiveness=args.vad_aggressiveness)
+            deleted_count = len(deleted) if do_delete else 0
 
         # ── Step 1: Find garbled cues in remaining ──
         garbled = [c for c in cues if c.get('is_garbled')]

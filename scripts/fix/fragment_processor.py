@@ -291,8 +291,12 @@ class FragmentProcessor:
                     except Exception:
                         pass
                     continue
+                # Fixed window from the cue's start (NOT its end) — a third,
+                # deliberately different criterion from the overlap tests used
+                # for deletion and region building. See lib/config.py.
+                from lib.config import VAD_FRAGMENT_WINDOW_S
                 has_speech = any(
-                    es >= start_s and ss <= start_s + 5.0
+                    es >= start_s and ss <= start_s + VAD_FRAGMENT_WINDOW_S
                     for ss, es in speech_segs
                 )
                 if has_speech:
@@ -464,12 +468,15 @@ class FragmentProcessor:
         Returns dict {start, end, text} if alignment succeeds,
         None if fallback needed.
         """
+        from lib.config import VAD_OVERLAP_REGION_S
         cluster_ss = cluster['ss']
         cluster_es = cluster['es']
         overlapping = []
         for ss, es in speech_segs:
             overlap = min(es, cluster_es) - max(ss, cluster_ss)
-            if overlap > 0.3:
+            # Region-membership criterion — same meaning as the one
+            # build_fix_regions() uses, so it reads from the same constant.
+            if overlap > VAD_OVERLAP_REGION_S:
                 overlapping.append((ss, es))
 
         n = len(overlapping)

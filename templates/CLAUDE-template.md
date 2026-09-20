@@ -67,9 +67,9 @@ export BAIDU_SECRET=''
 #
 # ⚠️ 实际 key 不要写在这里（会被 git 追踪）。
 # 正确方式：写入 ~/.claude/settings.json 的 "env" 字段，自动注入所有 session：
-#   "env": { "LLM_API_KEY": "sk-...", "LLM_MODEL": "deepseek-chat", "LLM_BASE_URL": "https://api.deepseek.com/v1" }
+#   "env": { "LLM_API_KEY": "sk-...", "LLM_MODEL": "deepseek-flash", "LLM_BASE_URL": "https://api.deepseek.com/v1" }
 export LLM_API_KEY=''
-export LLM_MODEL='deepseek-chat'
+export LLM_MODEL='deepseek-flash'
 export LLM_BASE_URL='https://api.deepseek.com/v1'
 ```
 

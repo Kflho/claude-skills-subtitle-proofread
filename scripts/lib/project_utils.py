@@ -8,6 +8,7 @@ Used by both run_all.py (top-level orchestrator) and episode_workflow.py
 import json
 import os
 import re
+import shutil
 import subprocess
 from lib.subprocess_utils import run_git
 from lib.config import (
@@ -408,6 +409,34 @@ def find_original_srt(project_dir, episode):
         if fname.endswith('.srt') and ep_num in fname:
             return os.path.join(orig_dir, fname)
     return None
+
+
+def backup_file(path):
+    """Copy ``path`` to ``path.bak`` before it is rewritten in place.
+
+    The first copy is the pristine one, so an existing .bak is never
+    overwritten — a second run would otherwise replace the original with
+    already-modified content and destroy the only way back.
+
+    Returns the backup path, or None when there was no file to back up.
+    """
+    if not path or not os.path.exists(path):
+        return None
+    bak = path + '.bak'
+    if os.path.exists(bak):
+        return bak
+    shutil.copyfile(path, bak)
+    return bak
+
+
+def backup_files(paths):
+    """backup_file() for an iterable; returns the backups actually created."""
+    made = []
+    for p in paths:
+        b = backup_file(p)
+        if b and b not in made:
+            made.append(b)
+    return made
 
 
 def git_backup(project_dir, message):

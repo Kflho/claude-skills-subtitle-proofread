@@ -140,11 +140,14 @@ def step_compare(project_dir, episode, scan_result, translated_path, dry_run=Fal
 # Step: audio — VAD + Whisper for audio-only mode (no reference subs)
 # ═══════════════════════════════════════════════════════════════
 
-def step_audio(project_dir, episode, scan_result, dry_run=False, video_dir=None, target_lang='ja'):
+def step_audio(project_dir, episode, scan_result, dry_run=False, video_dir=None,
+               target_lang='ja', vad_clean_apply=False):
     """Audio mode: dispatch garbled cues + missing subtitles to unified VAD+Whisper fix.
 
     v5.3: Single fix_by_whisper() call covers garbled, partial overlap,
     and missing subtitle fill — all driven by VAD speech segments.
+
+    ``vad_clean_apply`` 默认 False（分级 L1）：VAD 删条只出清单不写盘。
     """
     from fix.fix_orchestrator import Fixer, FixReport
 
@@ -164,7 +167,8 @@ def step_audio(project_dir, episode, scan_result, dry_run=False, video_dir=None,
 
     # v5.3: Single unified call — covers garbled + partial overlap + missing subs
     print(f'[audio] {len(garbled_issues)} garbled cue(s) → unified VAD+Whisper')
-    whisper_result = fixer.fix_by_whisper(separate_vocals=True)
+    whisper_result = fixer.fix_by_whisper(separate_vocals=True,
+                                          vad_clean_apply=vad_clean_apply)
     print(f'[audio] Done: {whisper_result.applied} fixed/inserted, '
           f'{whisper_result.ai_review} AI review, {whisper_result.failed} unfixable')
 
@@ -383,6 +387,8 @@ def main():
                         help='Project root directory (default: CWD)')
     parser.add_argument('--video-dir', default=None,
                         help='Video directory (default: auto-detect from project/video, project/videos)')
+    parser.add_argument('--vad-clean-apply', action='store_true',
+                        help='真正按 VAD 删「无人声」条（默认只出清单，见 lib/gates.py）')
 
     args = parser.parse_args()
 
@@ -439,7 +445,8 @@ def _run_pipeline(project_dir, episode, resources, args):
         if step == 'audio':
             fixes = step_audio(project_dir, episode, scan_result,
                                dry_run=args.dry_run, video_dir=args.video_dir,
-                               target_lang=target_lang)
+                               target_lang=target_lang,
+                               vad_clean_apply=getattr(args, 'vad_clean_apply', False))
 
         elif step == 'translate':
             translated_path = step_translate(project_dir, episode, scan_result,

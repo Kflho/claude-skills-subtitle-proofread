@@ -119,7 +119,7 @@ python translate_srt.py --input-dir 日文ai修复版/ --output-dir 中文翻译
 | `--output` / `--output-dir` | 输出路径 |
 | `--mappings` | noun_mappings.json（推荐） |
 | `--glossary` | proper-nouns.md（兼容旧版，不推荐） |
-| `--model` | LLM 模型（默认 deepseek-chat） |
+| `--model` | LLM 模型（默认 deepseek-flash） |
 | `--base-url` | API 端点 |
 | `--batch` | 每批翻译句数（默认 10） |
 | `--dry-run` | 预览，不调 API |
@@ -134,7 +134,7 @@ python translate_srt.py --input-dir 日文ai修复版/ --output-dir 中文翻译
 
 ```bash
 export LLM_API_KEY="sk-..."          # 必须
-export LLM_MODEL="deepseek-chat"     # 可选
+export LLM_MODEL="deepseek-flash"    # 可选
 export LLM_BASE_URL="https://api.deepseek.com/v1"  # 可选
 ```
 
