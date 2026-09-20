@@ -79,6 +79,10 @@ GATES = (
          '整篇改字形。--lang zh 会自动带上，日志里有 [trad→simp] 一行'),
     Gate('apply_fixes', L2, '按 fixes.json 逐条改写/删条', '--fixes FILE',
          '没有 fixes.json 就什么都不做'),
+    Gate('transcribe_overwrite', L2, '重跑转录（覆盖 temp/ja_raw/*.srt）',
+         'whisper_batch_transcribe.py（显式发起）',
+         '下游的翻译、复用、OP/ED 定本全建在这份转录上，重跑等于把它们全部作废。'
+         '脚本已加 .bak，但「作废」这件事本身要人来决定'),
 
     # ── L3：停下问 ──
     Gate('overwrite_deliverable', L3, '覆盖已交付字幕（.ass / 定稿 SRT）', '人工确认',

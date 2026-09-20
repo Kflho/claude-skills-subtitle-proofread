@@ -153,6 +153,11 @@ def main():
             })
 
         srt_path = os.path.join(args.output_dir, f'{episode}.srt')
+        # 重跑会盖掉上一轮的转录，而下游（翻译、复用、OP/ED 定本）全都建在它上面。
+        # 备份一次，别让「重跑转录」变成不可逆操作（temp/ 不受 git 管）。
+        if os.path.exists(srt_path):
+            from lib.project_utils import backup_file
+            backup_file(srt_path)
         write_srt(srt_path, cues)
 
         # Cleanup
