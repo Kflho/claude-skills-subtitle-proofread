@@ -289,6 +289,30 @@ python "<scripts-dir>/whisper_batch_transcribe.py" \
 > 在某些 build 上不对第 2..N 块施加时间偏移，表现为分块边界之后时间戳集体塌成 0。
 > 脚本检测到此类损坏会自动改用 `-p 1` 重跑一次并打印告警，无需人工干预。
 
+**参考字幕复用**（同一部作品的现成译文 → 覆盖我们的机译）
+
+参考字幕若与目标是**同一部作品**且共用素材（总集篇、重制版、特别篇拿原片片段），
+其中整句的人工译文可直接覆盖机译。**先看命中分布判断有没有素材，再动手。**
+
+```bash
+# 1. 配对（LLM 拿源语言原句逐对复核；结果有缓存，重跑只补新对）
+python "<scripts-dir>/reuse/align.py" -e SP01,SP02 \
+  --source-dir "<源语言转录>" --target-dir "<我们的译文>" \
+  --reference-dir "<参考字幕目录>" --reference-glob '*.SC.ass' \
+  --variants temp/reuse_variants.json --report temp/reuse/report.txt
+
+# 2. 🤖 看报告：命中是连续成段（真复用）还是均匀散布（巧合）
+
+# 3. 改写：先 dry-run 看判据，再 --apply（留 <集号>.srt.bak）
+python "<scripts-dir>/reuse/apply.py" -e SP01 \
+  --source-dir "<源语言转录>" --target-dir "<我们的译文>" \
+  --reference-dir "<参考字幕目录>" --variants temp/reuse_variants.json
+python "<scripts-dir>/reuse/apply.py" -e SP01 ... --apply
+```
+
+→ 分布判定、采纳判据 R1–R6、`--variants` 写法归一 config 见
+[references/reuse-reference-subs.md](references/reuse-reference-subs.md)
+
 **Whisper 切段修复**（全量翻译后补 `[???]` 标记的 cue）
 
 全片 Whisper 在多人争吵/对话密集场景会把多句合并成一条长 cue，导致 VAD 分段失准、输出乱码。LLM 无力翻译乱码时标 `[???]`。
@@ -619,6 +643,7 @@ python "<scripts-dir>/fix/oped_fill.py" "<SUBTITLE_DIR>" \
 → [references/phase2-triage.md](references/phase2-triage.md) — Phase 2 Whisper 修复命令参考。
 → [references/phase3-unify.md](references/phase3-unify.md) — Phase 3 专名统一 + 交付命令参考。
 → [references/full-mode.md](references/full-mode.md) — 有参考字幕时的完整工作流。
+→ [references/reuse-reference-subs.md](references/reuse-reference-subs.md) — 参考字幕复用（总集篇/同一作品）的判定与判据。
 → [references/architecture.md](references/architecture.md) — 脚本架构与数据流（调试时查阅）。
 
 ## Flags

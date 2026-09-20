@@ -21,6 +21,7 @@ scripts/
 │   ├── auto_clean_glossary.py     ← 专名词表清理（独立工具，pipeline 不调用）
 │   └── build_glossary.py          ← 术语表自动生成
 ├── apply/apply_fixes.py           ← 批量修复：繁→简 + 翻译腔 + fixes
+├── reuse/                         ← 参考字幕复用：align（LLM 配对）+ apply（覆盖机译）
 ├── ass/ass_repair.py              ← ASS 格式修补（SRT 项目跳过）
 ├── utils/
 │   ├── update_report.py           ← 问题解决报告读写

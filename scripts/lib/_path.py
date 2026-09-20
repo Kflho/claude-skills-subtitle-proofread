@@ -3,7 +3,7 @@
 Usage (one line, replaces 4-line boilerplate):
     import lib._path  # noqa: F401
 
-All 13 executable scripts under scripts/ use this single source of truth.
+Every executable script under scripts/ uses this single source of truth.
 lib/ modules themselves do NOT import _path — their callers already have.
 """
 import os
