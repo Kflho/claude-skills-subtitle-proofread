@@ -64,6 +64,34 @@ def test_build_system_prompt_language_specific_rules():
     assert 'JSON' in ru
 
 
+def test_build_system_prompt_hard_constraints():
+    prompt = tr._build_system_prompt('ja', max_chars=20, max_cps=12)
+    assert '每行最多 20 个字符' in prompt
+    assert '12 字/秒' in prompt
+    assert '硬约束' in prompt
+
+    plain = tr._build_system_prompt('ja')
+    assert '硬约束' not in plain
+
+
+def test_write_qa_report(tmp_path):
+    src = tmp_path / 'src.srt'
+    out = tmp_path / 'out.srt'
+    src.write_text(_srt('おはよう', 'アグモン'), encoding='utf-8')
+    out.write_text(_srt('早上好', 'アグモン'), encoding='utf-8')
+    report = tmp_path / 'qa.json'
+
+    data = tr.write_qa_report(str(src), str(out), {'アグモン': '亚古兽'},
+                              20, 12, str(report))
+
+    assert report.exists()
+    assert data['summary']['total'] == 2
+    assert data['summary']['japanese_residual'] == 1
+    assert data['summary']['glossary_miss'] == 1
+    saved = json.loads(report.read_text(encoding='utf-8'))
+    assert saved['summary']['echo'] == 1
+
+
 # ═══════════════════════════════════════════════════════════════
 # Glossary / mappings loading
 # ═══════════════════════════════════════════════════════════════

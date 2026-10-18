@@ -1179,6 +1179,9 @@ Examples:
                         help='run FireRedVAD/AED on the extracted audio and write '
                              'temp/scans/<EP>.audio_hints.json (advisory only; '
                              'never used as a gate)')
+    parser.add_argument('--translate', action='store_true',
+                        help='after fixing, translate the final source SRT to '
+                             'zh in translated/zh/ and write a QA report')
     args = parser.parse_args()
 
     project_dir = args.target_dir or os.getcwd()
@@ -1345,6 +1348,22 @@ Examples:
     print_ai_review_notice(noun_results, project_dir, resolved_lang)
 
     step_apply_all(project_dir, resolved_lang, target_dir=target_dir)
+
+    # Final translation is a separate, optional phase: source SRT → zh SRT
+    # in translated/zh/, with QA report.  Never overwrites the source.
+    if args.translate:
+        if resolved_lang == 'zh':
+            print('[translate] source language is already zh — skipped.',
+                  file=sys.stderr)
+        else:
+            from fix.translation_stage import step_translate_final
+            chosen = processed if processed else episodes
+            print(f'\n{"─"*40}', file=sys.stderr)
+            print('  Translation: fixed SRT → 中文（translated/zh/）',
+                  file=sys.stderr)
+            print(f'{"─"*40}', file=sys.stderr)
+            step_translate_final(project_dir, chosen, target_dir=target_dir,
+                                 target_lang='zh', dry_run=args.dry_run)
 
     # ASS repair: only for ASS-format projects
     if fmt['primary'] == 'ass':

@@ -47,6 +47,7 @@ from lib.config import (
     LLM_MODEL_DEFAULT, LLM_BASE_URL_DEFAULT,
     LLM_MAX_TOKENS, LLM_REASONING_EFFORT,
 )
+from lib.translation.qa import qa_report
 
 # ═══════════════════════════════════════════════════════════════
 # Config
@@ -100,7 +101,8 @@ def _detect_source_lang(cues, sample_size=20):
     return 'other'
 
 
-def _build_system_prompt(source_lang):
+def _build_system_prompt(source_lang, max_chars: int = 0,
+                         max_cps: float = 0.0):
     """Build system prompt with language-specific rules."""
     lang_name = {'ja': '日语', 'ru': '俄语', 'zh': '中文', 'other': '外语'}.get(source_lang, '外语')
 
@@ -122,6 +124,15 @@ def _build_system_prompt(source_lang):
         base += """
    - 省略冗余主语（日语主语常可省略）
    - 敬语适度（です/ます 不一定翻成"请"）"""
+
+    if max_chars > 0 or max_cps > 0:
+        limits = []
+        if max_chars > 0:
+            limits.append(f'每行最多 {max_chars} 个字符')
+        if max_cps > 0:
+            limits.append(f'阅读速度不超过 {max_cps:g} 字/秒')
+        base += f"""
+6. **硬约束**：{'；'.join(limits)}。超限时必须压缩措辞，不能删信息。"""
 
     base += f"""
 
@@ -542,7 +553,9 @@ def _parse_json_response(response):
     return None
 
 
-def _translate_batch(cues, api_key, model, base_url, glossary_str, ja_context=None, source_lang='ja'):
+def _translate_batch(cues, api_key, model, base_url, glossary_str, ja_context=None,
+                     source_lang='ja', max_chars: int = 0,
+                     max_cps: float = 0.0):
     """Translate one batch of cues. Returns list of translated text or None.
 
     Args:
@@ -567,7 +580,8 @@ def _translate_batch(cues, api_key, model, base_url, glossary_str, ja_context=No
     )
 
     messages = [
-        {'role': 'system', 'content': _build_system_prompt(source_lang)},
+        {'role': 'system', 'content': _build_system_prompt(
+            source_lang, max_chars=max_chars, max_cps=max_cps)},
         {'role': 'user', 'content': user_msg},
     ]
 
@@ -608,6 +622,25 @@ def bad_ratio(batch_cues, result):
     return bad / n
 
 
+def write_qa_report(input_path, output_path, glossary, max_chars, max_cps,
+                    report_path):
+    """Compare source/output cues and write the per-cue QA report."""
+    src = parse_subtitles(input_path, mark_garbled=False)
+    out = parse_subtitles(output_path, mark_garbled=False)
+    report = qa_report(src, out, glossary=glossary,
+                       max_chars=max_chars, max_cps=max_cps)
+    os.makedirs(os.path.dirname(os.path.abspath(report_path)), exist_ok=True)
+    with open(report_path, 'w', encoding='utf-8') as handle:
+        json.dump(report, handle, ensure_ascii=False, indent=2)
+    s = report['summary']
+    print(f'  [qa] cues {s["output"]}/{s["total"]}, violations '
+          f'{s["violations"]}, japanese {s["japanese_residual"]}, '
+          f'echo {s["echo"]}, glossary {s["glossary_miss"]}, '
+          f'length {s["max_chars"]}, cps {s["max_cps"]} -> {report_path}',
+          file=sys.stderr)
+    return report
+
+
 # ═══════════════════════════════════════════════════════════════
 # Single file translation
 # ═══════════════════════════════════════════════════════════════
@@ -616,7 +649,8 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
                    api_key, model, base_url,
                    oped=None,
                    dry_run=False, source_lang=None,
-                   extract_nouns=False, extract_dir=None):
+                   extract_nouns=False, extract_dir=None,
+                   max_chars: int = 0, max_cps: float = 0.0):
     """Translate a single subtitle file (SRT or ASS).
 
     Args:
@@ -680,18 +714,21 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
         """Translate a single batch with retry. Returns (batch_idx, result_list_or_None)."""
         batch_idx, batch_cues, ja_ctx = idx_batch
         result = _translate_batch(batch_cues, api_key, model, base_url, glossary_str,
-                                  ja_context=ja_ctx, source_lang=source_lang)
+                                  ja_context=ja_ctx, source_lang=source_lang,
+                                  max_chars=max_chars, max_cps=max_cps)
         if result is None:
             time.sleep(1)
             result = _translate_batch(batch_cues, api_key, model, base_url, glossary_str,
-                                      ja_context=ja_ctx, source_lang=source_lang)
+                                      ja_context=ja_ctx, source_lang=source_lang,
+                                      max_chars=max_chars, max_cps=max_cps)
         # 整批回显/未翻译也重试一次：prompt 过长或语义混乱时，模型会直接
         # 把带编号的原文照抄回来。这类结果非 None、且与原文"不同"（多了编号），
         # 光看 None 判不出来。
         elif bad_ratio(batch_cues, result) > 0.5:
             time.sleep(1)
             retry = _translate_batch(batch_cues, api_key, model, base_url, glossary_str,
-                                     ja_context=ja_ctx, source_lang=source_lang)
+                                     ja_context=ja_ctx, source_lang=source_lang,
+                                     max_chars=max_chars, max_cps=max_cps)
             if retry is not None and bad_ratio(batch_cues, retry) < bad_ratio(batch_cues, result):
                 result = retry
         return batch_idx, batch_cues, result
@@ -887,6 +924,14 @@ def main():
                         help='Preview only, no API calls')
     parser.add_argument('--batch', type=int, default=BATCH_SIZE,
                         help=f'Cues per batch (default: {BATCH_SIZE})')
+    parser.add_argument('--max-chars', type=int, default=0,
+                        help='Hard max visible chars per subtitle line '
+                             '(0 = no prompt constraint; QA still reports 20)')
+    parser.add_argument('--max-cps', type=float, default=0.0,
+                        help='Hard max reading speed chars/sec '
+                             '(0 = no prompt constraint; QA still reports 12)')
+    parser.add_argument('--qa-report', default='',
+                        help='Write per-cue QA JSON (single-file mode)')
     parser.add_argument('--source-lang', choices=['ja', 'ru', 'zh', 'other'],
                         default=None,
                         help='Source language (default: auto-detect from cues)')
@@ -935,7 +980,12 @@ def main():
                        api_key, model, base_url, dry_run=args.dry_run,
                        source_lang=args.source_lang,
                        extract_nouns=args.extract_nouns,
-                       extract_dir=args.extract_dir)
+                       extract_dir=args.extract_dir,
+                       max_chars=args.max_chars, max_cps=args.max_cps)
+        if args.qa_report and not args.dry_run:
+            write_qa_report(args.input, args.output, ja_to_zh,
+                            args.max_chars or 20, args.max_cps or 12,
+                            args.qa_report)
     # Directory mode
     elif args.input_dir:
         episodes = _parse_episodes(args.episodes) if args.episodes else None

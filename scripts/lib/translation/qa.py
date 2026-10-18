@@ -24,15 +24,23 @@ def clean_text(text: str) -> str:
 
 
 def is_untranslated(source: str, target: str) -> bool:
-    """True when the target is the source, or a numbered echo of it."""
+    """True when the target is the source, or a numbered echo of it.
+
+    A kanji-only line can be a legitimate proper noun (武之内空 / 泉光子郎),
+    so exact equality is only an echo when the source is actually Japanese
+    (contains kana) or Latin script.  Numbered echoes still count.
+    """
     src = (source or '').strip()
     tgt = (target or '').strip()
     if not tgt:
         return True
-    if tgt == src:
-        return True
     stripped = NUMBERING_RE.sub('', tgt).strip()
-    return stripped == src
+    equal = stripped == src
+    if not equal:
+        return False
+    if NUMBERING_RE.match(tgt):
+        return True
+    return bool(KANA_RE.search(src) or re.search(r'[A-Za-z]', src))
 
 
 def cue_violations(cue: dict, *, max_chars: int = 20,

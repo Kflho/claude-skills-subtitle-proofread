@@ -14,6 +14,9 @@ def test_count_kana_and_echo():
     assert is_untranslated('おはよう', '1. おはよう')
     assert not is_untranslated('おはよう', '早上好')
     assert is_untranslated('おはよう', '')
+    # Kanji-only proper names are identical in ja/zh; not an echo.
+    assert not is_untranslated('武之内空', '武之内空')
+    assert not is_untranslated('泉光子郎', '泉光子郎')
 
 
 def test_cue_violations_length_and_cps():
