@@ -1,0 +1,79 @@
+# 字幕校对 Skill — 迭代记录
+
+> 每次校对结束后，经人工审核确认后追加一条。
+> 此文件独立于 SKILL.md，仅在需要回顾历史时读取，不占用 skill 加载上下文。
+>
+> **记录规则**：只记架构/流程/接口级变更（新增/删除/重命名脚本、工作流顺序调整、报告格式变更）。不记修 bug、调参数、加 flag 等正常开发活动。
+
+## 2026-10-18 — 文档分层 + ASR 稳定核心/插件架构
+
+### 架构变更
+- ASR 层改为 **稳定核心 + 插件适配器**：`lib/asr/base.py`（契约）、
+  `registry.py`（自动发现）、`router.py`（路由）；新模型只加
+  `lib/asr/adapters/<name>.py`，不改 router/CLI/评测。
+- 默认行为不变：`ASR_ENGINE=whisper`；Qwen3-ASR / Qwen3-FA 通过
+  `--engine qwen3` 显式启用。详见 `docs/adr/006-stable-asr-core.md`。
+- 文档分层：
+  - `SKILL.md`：只放运行时操作（711 → 487 行）
+  - `references/`：运行时参考；删除 `references/architecture.md`
+  - `dev/`：实现/根因/算法（本地，多数被 .gitignore）
+  - `docs/`：ADR/技术路线/进度（git 跟踪）
+
+### 新增
+- `scripts/lib/asr/` 稳定核心 + `adapters/qwen3.py`、`qwen3_aligner.py`、`whisper.py`
+- `scripts/asr/qwen3_worker.py`、`qwen3_transcribe.py`、`setup_qwen3.ps1`
+- `scripts/eval/asr_eval.py`、`eval/`
+- `dev/noun-extraction.md`、`translation-pipeline.md`、`troubleshooting.md`
+- `docs/tech-route-2026.md`、`docs/tech-route-progress.md`、ADR-005/006
+
+### 合并/删除
+- `references/architecture.md` → `dev/technical-details.md` §1/§15，删除原文件
+- SKILL.md 的专名实现 → `dev/noun-extraction.md`
+- SKILL.md 的翻译并行/模型细节 → `dev/translation-pipeline.md`
+- SKILL.md 的错误根因 → `dev/troubleshooting.md`
+- SKILL.md 的 Whisper 批量/切段/幻觉 → `dev/whisper-pipeline.md`
+- SKILL.md 的 gates 理由 → `dev/technical-details.md` §16
+
+### 避坑
+- `Path.write_text()` 在 Windows 默认把 `\n` 转 CRLF；改 SKILL.md 后要
+  显式写回 LF，否则 `git diff --check` 全文件 trailing whitespace。
+- `dev/` 被 `.gitignore` 忽略；合并进 dev 的文档要进 git 需 `git add -f`
+  或迁到 `docs/`。
+
+## 2026-07-20 — Whisper 集成 + 架构重构
+
+### 架构变更
+- SKILL.md 精简到 ~180 行，可选步骤拆为 4 个独立 md（setup-guide / full-mode / ai-asr-fix / whisper-stage）
+- 报告改为 `reports/` 下两份持续更新文件（proper-nouns.md + whisper-pending.md）
+- 启动流程增加路径确认清单
+
+### 新增脚本
+- `whisper_transcribe.py`：调用 whisper.cpp CLI 重转录乱码段
+- `issue_tracker.py`：扫描 SRT 生成每集问题清单，自动匹配视频
+
+### 修改脚本
+- `generate_romaji_fixes.py`：支持 `--stdin` 管道输入
+
+---
+
+### 2026-07-19 — 多语言残留审查 + 繁体→简体（魔法使莎莉）
+
+**发现**：
+- Name字段俄语残留：2011 处，164 个唯一俄语名称（如 `Мама Осаму`、`Мужик`、`Контролёр`）
+- 繁体字混入简体文本：3358 处（如 `對不起`、`沒關係`、`這裡`）
+- 文本中残留西里尔字母：58 处（如 `А!`、`и`、`папа`），其中 7 处在对话文本、48 处在特效层
+- 英语/日语假名残留：149+30 处（如 `Tonkichi`、`And so`、`Fi`）
+
+**改进**：
+- 新增 `trad_to_simp_detect.py` — 繁体→简体检测与自动转换脚本（200+ 字符映射表，支持 `--auto` 模式）
+- 增强 `source_char_detect.py` — 完全重写为多语言版（支持 `--langs en,jp,ru`，内建 4 种语言预设，支持 `--mode text|names|all`）
+- 增强 `names_detect.py` — 新增 `--lang-check` 模式，自动按语言分类 Name 值，标记非目标语言名称
+- 新增错误#14（繁体中文残留）和错误#15（Name字段多语言审查）
+- 独立/完整模式工作流均新增繁体转换步骤和多语言残留检测步骤
+- `script-templates.md` 新增模板 #14，更新模板 #3、#12
+
+**避坑**：
+- 西里尔字母 `А`（U+0410）与拉丁字母 `A`（U+0041）外观完全相同但编码不同，需用 Cyrillic 正则而非 Latin 正则检测
+- 繁简同形字（如 `真`、`黑`、`只`）不能加入映射表，否则误报
+- Name 字段替换必须在 `apply_fixes.py` 的全局替换中加逗号限定（`,Name,`），避免替换到文本内容
+- 特效层（Episode/Display/Title）中的西里尔字母可能是动画/卡拉OK 效果的一部分，不应批量替换
