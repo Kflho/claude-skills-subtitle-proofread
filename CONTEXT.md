@@ -108,12 +108,13 @@ scripts/
 ## 测试
 
 ```bash
-cd <skill>/tests && pytest -q    # 576 tests, ~5s, 无外部依赖
-pytest -q --cov --cov-report=term-missing   # 覆盖率 36.3%，矩阵见 docs/test-plan.md
+cd <skill>/tests && pytest -q    # 858 tests, ~6s, 无外部依赖
+pytest -q --cov --cov-report=term-missing   # 覆盖率 56.2%，矩阵见 docs/test-plan.md
 ```
 
 分层: Tier 1 (纯函数) → Tier 2 (tempfile) → Tier 3 (mock 外部二进制)。
 原则：真实项目只用于发现问题；修之前先抽最小 fixture test（见 `tests/README.md`）。
+P0 链路（Whisper 编排/VAD、翻译、专名、OP/ED、编排）已补齐；剩余缺口见 `docs/test-plan.md` §3。
 
 ## 技术路线
 
@@ -127,7 +128,7 @@ P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 
 
 素材现状：莎莉 110 集、阿童木 193 集视频都在本地；**两者都没有可信日语参考字幕**（莎莉源字幕是俄语；阿童木 sidecar SRT 是机翻中文、2s 粗轴，不能当金标）。因此 CER/边界验收仍需人工听校；参考无关 A/B 可直接用视频跑。
 
-测试：576 passed / 0 failed / 36.3% 覆盖；矩阵与 P0 缺口见 `docs/test-plan.md`。
+测试：858 passed / 0 failed / 56.2% 覆盖；矩阵与剩余 P1 缺口见 `docs/test-plan.md`。
 
 ## 配置
 

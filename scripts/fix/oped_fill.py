@@ -514,7 +514,7 @@ class OpedFill:
                     modified = True
 
             if modified and not self.dry_run:
-                write_subtitles(cues, fpath)
+                write_subtitles(fpath, cues)
 
         self.fixes = fixes
         n_eps = len(set(f['file'] for f in fixes))

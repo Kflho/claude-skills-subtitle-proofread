@@ -25,6 +25,19 @@ def load_json(path):
         return json.load(f)
 
 
+def display_path(path):
+    """Shorten a path for logs: relative to cwd when possible, else as-is.
+
+    Windows raises ValueError when cwd and the target sit on different drives
+    (project on D:, temp file on C:). A display detail must never kill a full
+    pipeline run.
+    """
+    try:
+        return os.path.relpath(path)
+    except ValueError:
+        return str(path)
+
+
 def get_target_dir(project_dir):
     """Return the directory containing subtitle files to process.
 

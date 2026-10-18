@@ -5,6 +5,29 @@
 >
 > **记录规则**：只记架构/流程/接口级变更（新增/删除/重命名脚本、工作流顺序调整、报告格式变更）。不记修 bug、调参数、加 flag 等正常开发活动。
 
+## 2026-10-18 — 测试 P0 链路补齐 + 三处解析/写盘修正
+
+### 架构变更
+- 无核心架构变更；`lib/`、`fix/`、`nouns/` 的模块边界不变。
+- 新增 `lib.project_utils.display_path()`：日志用相对路径，跨盘时退回原路径
+  （原 `os.path.relpath` 在 Windows 跨盘会抛 `ValueError`，一条日志能打死流水线）。
+
+### 行为修正（接口级）
+- `translate_srt.load_glossary`：先滤空单元格再取列，表头不再被当成
+  「日语→中文」映射；只有第二列含汉字才算译名（`build_glossary` 的
+  「日语|次数|变体」表不再产生映射）。
+- `fix/oped_fill._apply_templates`：`write_subtitles(path, cues)` 参数顺序修正
+  （此前歌词模板永远写不回文件）。
+
+### 测试
+- 576 → 858 passed；覆盖 36.3% → 56.2%；新增 11 个测试文件
+  （Whisper 编排/VAD、翻译、专名、OP/ED、编排）。详见 `docs/test-plan.md` §0。
+
+### 避坑
+- 不要用 PowerShell `Get-Content | Set-Content` 往返改 UTF-8 源文件：中文会被写成
+  mojibake（本轮误伤过 `tests/test_find_suspect_nouns.py`，只能整文件重写恢复）。
+  编辑中文文件用编辑器/写入工具，并确认 UTF-8。
+
 ## 2026-10-18 — 文档分层 + ASR 稳定核心/插件架构
 
 ### 架构变更

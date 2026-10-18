@@ -41,6 +41,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import lib._path  # noqa: F401
 from lib.whisper_utils import parse_subtitles, write_subtitles, OP_BOUNDARY_SEC, ED_BOUNDARY_SEC
 from lib.video_scan import episode_token, parse_episode_spec
+from lib.project_utils import display_path
 from lib.config import (
     LLM_API_KEY, LLM_MODEL, LLM_BASE_URL,
     LLM_MODEL_DEFAULT, LLM_BASE_URL_DEFAULT,
@@ -146,6 +147,11 @@ USER_TEMPLATE = """上下文（前几条日文原文，帮助理解语流）：
 # Glossary loading (ja→zh mapping)
 # ═══════════════════════════════════════════════════════════════
 
+def _is_cjk_term(text):
+    """单元格是否像一个中文译名（含汉字）。纯数字/拉丁不是译名。"""
+    return any('\u4e00' <= ch <= '\u9fff' for ch in str(text))
+
+
 def load_glossary(path):
     """从 proper-nouns.md 提取专有名词列表（用于 prompt 注入）。
 
@@ -165,22 +171,24 @@ def load_glossary(path):
         line = line.strip()
         if not line.startswith('|') or line.startswith('|--'):
             continue
-        cells = [c.strip() for c in line.split('|')]
+        # split('|') 首尾各多一个空串；先滤掉空单元格，下标才对应表格列。
+        # 之前直接用 cells[1]/cells[2]，于是「| 日语 | 中文 |」表头被当成
+        # 一条 日语→中文 的映射（踩坑 #17）。
+        cells = [c.strip() for c in line.split('|') if c.strip()]
+        if not cells:
+            continue
         # 跳过标题行
-        if any(h in cells[0].lower() for h in ('日语', '术语', '原文', '---')):
+        if any(h in cells[0] for h in ('日语', '术语', '原文', '中文', '---')):
             continue
 
-        # 尝试提取 ja → zh 映射（单元格1=日语, 单元格2=中文）
-        if len(cells) >= 3 and cells[1] and cells[2]:
-            ja_term = cells[1]
-            zh_term = cells[2]
-            if len(ja_term) >= 2 and len(zh_term) >= 1:
-                terms.add(zh_term)
-                ja_to_zh[ja_term] = zh_term
-        elif len(cells) >= 2 and cells[1]:
-            term = cells[1]
-            if len(term) >= 2:
-                terms.add(term)
+        # 只有「日语 | 中文」才是可用的译名映射。build_glossary.py 产出的
+        # `| 日语 | 出现次数 | 拼写变体 |` 没有中文列，硬当映射会把「96」
+        # 当成译名塞进 prompt，并被 apply_noun_pre_replace 替换进正文。
+        if len(cells) >= 2 and _is_cjk_term(cells[1]):
+            ja_to_zh[cells[0]] = cells[1]
+            terms.add(cells[1])
+        elif len(cells) == 1 and len(cells[0]) >= 2:
+            terms.add(cells[0])
 
     glossary_str = ', '.join(sorted(terms)) if terms else ''
     return glossary_str, ja_to_zh
@@ -733,7 +741,7 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
                                'chunks': stats},
                               f, ensure_ascii=False, indent=2)
                 print(f'  {fname}: 专名提取 {len(entities)} 实体 → '
-                      f'{os.path.relpath(out_path)}', file=sys.stderr)
+                      f'{display_path(out_path)}', file=sys.stderr)
         except Exception as e:
             print(f'  {fname}: 专名提取失败（不影响翻译结果）: {e}',
                   file=sys.stderr)

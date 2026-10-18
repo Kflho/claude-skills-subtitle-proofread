@@ -54,6 +54,7 @@ import lib._path  # noqa: F401,E402
 
 from lib.llm import call_chat  # noqa: E402
 from lib.config import LLM_API_KEY, LLM_MODEL, LLM_BASE_URL  # noqa: E402
+from lib.project_utils import display_path  # noqa: E402
 from lib.whisper_utils import parse_subtitles, extract_ep_number  # noqa: E402
 
 DEFAULT_CHUNK_SIZE = 120   # 每批 cue 对数量（一次 LLM 调用）
@@ -372,7 +373,7 @@ def extract_episode(ja_dir, zh_dir, ep, output_dir=None, api_key=None,
         status = '⚠ 部分失败' if n_fail else 'OK'
         print(f'  [extractor] {ep_id}: {len(entities)} 实体 '
               f'({status}, chunk {n_fail}/{stats.get("chunks_total", 0)} 失败) → '
-              f'{os.path.relpath(out_path)}', file=sys.stderr)
+              f'{display_path(out_path)}', file=sys.stderr)
 
     return ep_id, entities
 

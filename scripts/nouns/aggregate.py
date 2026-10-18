@@ -48,6 +48,7 @@ import lib._path  # noqa: F401,E402
 
 from lib.llm import call_chat, extract_json_array  # noqa: E402
 from lib.config import LLM_API_KEY, LLM_MODEL, LLM_BASE_URL  # noqa: E402
+from lib.project_utils import display_path  # noqa: E402
 
 AGGREGATE_SYSTEM_PROMPT = (
     '你是动画字幕专名归一专家。系统给出现有"标准译名表"（已确认的专名规范译法）'
@@ -409,7 +410,7 @@ def main():
 
     with open(out_path, 'w', encoding='utf-8') as f:
         json.dump(noun_map, f, ensure_ascii=False, indent=2)
-    print(f'[aggregate] map → {os.path.relpath(out_path)} '
+    print(f'[aggregate] map → {display_path(out_path)} '
           f'（共 {len(noun_map)} 条）', file=sys.stderr)
 
 

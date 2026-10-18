@@ -1,6 +1,8 @@
 """Tests for lib/whisper_backends.py — dispatch and whisper.cpp JSON parsing."""
 
 import json
+import sys
+import types
 from types import SimpleNamespace
 
 from lib import whisper_backends as wb
@@ -121,3 +123,153 @@ def test_detect_available_backends_auto(monkeypatch):
     monkeypatch.setattr(wb, '_check_backend',
                         lambda backend: backend == 'whisper-cpp')
     assert wb.detect_available_backends() == ['whisper-cpp']
+
+
+# ═══════════════════════════════════════════════════════════════
+# Backend: faster-whisper (fake module, no CTranslate2 install)
+# ═══════════════════════════════════════════════════════════════
+
+def _install_fake_faster_whisper(monkeypatch, segments,
+                                 raise_on_transcribe=False):
+    calls = {}
+
+    class FakeModel:
+        def __init__(self, model_path, device=None, compute_type=None,
+                     cpu_threads=0):
+            calls['init'] = {'model_path': model_path, 'device': device,
+                             'compute_type': compute_type,
+                             'cpu_threads': cpu_threads}
+
+        def transcribe(self, audio_path, **kwargs):
+            calls['transcribe'] = {'audio_path': audio_path, **kwargs}
+            if raise_on_transcribe:
+                raise RuntimeError('boom')
+            return segments, SimpleNamespace(language='ja')
+
+    mod = types.ModuleType('faster_whisper')
+    mod.WhisperModel = FakeModel
+    monkeypatch.setitem(sys.modules, 'faster_whisper', mod)
+    return calls
+
+
+def test_faster_whisper_maps_segments(monkeypatch):
+    segments = [
+        SimpleNamespace(start=0.0, end=1.5, text=' こんにちは ',
+                        no_speech_prob=0.02, avg_log_prob=-0.25,
+                        compression_ratio=1.1),
+        SimpleNamespace(start=2.0, end=3.0, text='   ',
+                        no_speech_prob=0.0, avg_log_prob=-0.1,
+                        compression_ratio=1.0),
+    ]
+    calls = _install_fake_faster_whisper(monkeypatch, segments)
+
+    out = wb._transcribe_faster_whisper('ep.wav', 'model.bin', 'ja')
+
+    assert out == [{'start_s': 0.0, 'end_s': 1.5, 'text': 'こんにちは',
+                    'no_speech_prob': 0.02, 'avg_logprob': -0.25,
+                    'compression_ratio': 1.1}]
+    assert calls['init'] == {'model_path': 'model.bin', 'device': 'auto',
+                             'compute_type': 'auto', 'cpu_threads': 0}
+    assert calls['transcribe']['vad_filter'] is True
+    assert calls['transcribe']['vad_parameters']['threshold'] == 0.6
+    assert calls['transcribe']['temperature'] == [0.0, 0.2, 0.4]
+
+
+def test_faster_whisper_nth_zero_disables_vad_and_fallback(monkeypatch):
+    calls = _install_fake_faster_whisper(monkeypatch, [])
+
+    out = wb._transcribe_faster_whisper(
+        'ep.wav', 'model.bin', 'ja', nth=0, no_fallback=True,
+        compute_type='int8', cpu_threads=4)
+
+    assert out == []
+    assert calls['init']['compute_type'] == 'int8'
+    assert calls['init']['cpu_threads'] == 4
+    assert calls['transcribe']['vad_filter'] is False
+    assert calls['transcribe']['vad_parameters'] is None
+    assert calls['transcribe']['temperature'] == 0.0
+
+
+def test_faster_whisper_failure_returns_empty(monkeypatch, capsys):
+    _install_fake_faster_whisper(monkeypatch, [], raise_on_transcribe=True)
+
+    assert wb._transcribe_faster_whisper('ep.wav', 'm', 'ja') == []
+    assert 'faster-whisper transcription failed' in capsys.readouterr().err
+
+
+def test_faster_whisper_missing_package_returns_empty(monkeypatch, capsys):
+    monkeypatch.setitem(sys.modules, 'faster_whisper', None)
+
+    assert wb._transcribe_faster_whisper('ep.wav', 'm', 'ja') == []
+    assert 'faster-whisper not installed' in capsys.readouterr().err
+
+
+# ═══════════════════════════════════════════════════════════════
+# Backend: openai-whisper (fake module)
+# ═══════════════════════════════════════════════════════════════
+
+def _install_fake_openai_whisper(monkeypatch, result):
+    calls = {}
+
+    class FakeModel:
+        def transcribe(self, audio_path, **kwargs):
+            calls['audio_path'] = audio_path
+            calls['kwargs'] = kwargs
+            return result
+
+    def load_model(model_path):
+        calls['model_path'] = model_path
+        return FakeModel()
+
+    mod = types.ModuleType('whisper')
+    mod.load_model = load_model
+    monkeypatch.setitem(sys.modules, 'whisper', mod)
+    return calls
+
+
+def test_openai_whisper_maps_segments(monkeypatch):
+    result = {'segments': [
+        {'start': 0.5, 'end': 2.0, 'text': ' さようなら ',
+         'no_speech_prob': 0.01, 'avg_logprob': -0.3,
+         'compression_ratio': 1.0},
+        {'start': 2.5, 'end': 3.0, 'text': '  ', 'no_speech_prob': 0.0},
+    ]}
+    calls = _install_fake_openai_whisper(monkeypatch, result)
+
+    segs = wb._transcribe_openai_whisper('ep.wav', 'large-v3', 'ja')
+
+    assert segs == [{'start_s': 0.5, 'end_s': 2.0, 'text': 'さようなら',
+                     'no_speech_prob': 0.01, 'avg_logprob': -0.3,
+                     'compression_ratio': 1.0}]
+    assert calls['model_path'] == 'large-v3'
+    assert calls['kwargs']['language'] == 'ja'
+    assert calls['kwargs']['no_speech_threshold'] == 0.6
+    assert calls['kwargs']['temperature'] == [0.0, 0.2, 0.4]
+
+
+def test_openai_whisper_omits_threshold_when_disabled(monkeypatch):
+    calls = _install_fake_openai_whisper(monkeypatch, {'segments': []})
+
+    assert wb._transcribe_openai_whisper('ep.wav', 'm', 'ja', nth=0,
+                                         no_fallback=True) == []
+    assert 'no_speech_threshold' not in calls['kwargs']
+    assert calls['kwargs']['temperature'] == 0.0
+
+
+def test_openai_whisper_failure_returns_empty(monkeypatch, capsys):
+    def broken_load(model_path):
+        raise RuntimeError('no cuda')
+
+    mod = types.ModuleType('whisper')
+    mod.load_model = broken_load
+    monkeypatch.setitem(sys.modules, 'whisper', mod)
+
+    assert wb._transcribe_openai_whisper('ep.wav', 'm', 'ja') == []
+    assert 'openai-whisper transcription failed' in capsys.readouterr().err
+
+
+def test_openai_whisper_missing_package_returns_empty(monkeypatch, capsys):
+    monkeypatch.setitem(sys.modules, 'whisper', None)
+
+    assert wb._transcribe_openai_whisper('ep.wav', 'm', 'ja') == []
+    assert 'openai-whisper not installed' in capsys.readouterr().err
