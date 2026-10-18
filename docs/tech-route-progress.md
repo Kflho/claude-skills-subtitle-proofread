@@ -208,6 +208,7 @@ RTF=0.387（warmup 后，含 ASR+FA）
 - **0.6B 复测**：见 §4 “0.6B 复测” 小节（同机同音频、60s 分块）。
 - **待决策 / 清理**：`episode_workflow._write_ai_review_json` 无调用方（死代码）；`--mode` 是已废除的残留 flag；`auto_classify` / `auto_clean_glossary` 0 覆盖旧入口。
 - **素材**：金标仍等用户「完整字幕 + 视频」；A/B、chunk 调参继续等素材。
+- **基线提交**：`7a82f60`（代码/测试/文档）；本记录为随后的文档提交。
 
 ### 第五轮测试基线（2026-10-18：1295 tests / 78.9%）
 
