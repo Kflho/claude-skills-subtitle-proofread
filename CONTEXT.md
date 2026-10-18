@@ -108,8 +108,8 @@ scripts/
 ## 测试
 
 ```bash
-cd <skill>/tests && pytest -q    # 935 tests, ~9s, 无外部依赖
-pytest -q --cov --cov-report=term-missing   # 覆盖率 62.0%，矩阵见 docs/test-plan.md
+cd <skill>/tests && pytest -q    # 967 tests, ~6s, 无外部依赖
+pytest -q --cov --cov-report=term-missing   # 覆盖率 64.0%，矩阵见 docs/test-plan.md
 ```
 
 分层: Tier 1 (纯函数) → Tier 2 (tempfile) → Tier 3 (mock 外部二进制)。

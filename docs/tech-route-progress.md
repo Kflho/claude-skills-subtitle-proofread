@@ -107,7 +107,7 @@
 - [x] T7：专名链路（extractor 对齐/sidecar、aggregate 机械合并+LLM 决策、build_glossary 过滤与输出、find_suspect 规则与聚类）
 - [x] T8：OP/ED（器乐/歌词/正片三分类、AI review/apply、只填空行、±3s 模板匹配）
 - [x] T9：编排（`run_all.main` 顺序/`--resume`/`--dry-run`/`--apply-ai-review`/ASR 路由；`_run_pipeline` 步骤选择；`step_audio` 分派）
-- [x] T10：本轮修掉 3 个真 bug 并各配回归测试（见 §4）
+- [x] T10：本轮修掉 4 个真 bug 并各配回归测试（见 §4）
 
 ## 4. 验证记录
 
@@ -184,7 +184,16 @@ RTF=0.387（warmup 后，含 ASR+FA）
 
 说明：`warmup`/`load` 把模型加载排除在计时外；4s 短样本的 RTF 不代表 24 分钟整集。评测脚本、manifest、BOM 容错、报表链路均已跑通。
 
-### 测试基线（2026-10-18 第二轮：967 tests / 64.0%）
+### 本轮会话记录（2026-10-18 第三轮）
+
+- **测试收尾**：`whisper_fixer` 22→93%、`fragment_processor` 30→90%、`find_suspect_nouns` 37→74%、`reuse` 10→62%、`noun_checker` 39→79%、`apply_map` 28→96%；全量 967 passed / 64.0% / 0 failed。
+- **相邻 cue 联动求解**：`_resolve_joint_time_fixes`；EP001 +0.5s 回放自动应用 89 → 262，50ms 还原 70 → 247（有整集偏移时 364/370 vs 旧 365/370）。
+- **修复 4 个真 bug + 1 处补强**（均有回归测试，见下表）：glossary 表头/计数表误当译名、跨盘 `relpath` 崩溃、`oped_fill` 写盘参数顺序、`reuse` 复核结果被丢弃；中文呼称正则补全角逗号。
+- **素材策略变更（用户要求）**：莎莉/阿童木字幕质量差，**不再用于测试/验收**；阿童木 A/B 任务已取消，`temp/asr/atom` 临时音频已清理；两者历史数据只保留机制/吞吐回放。
+- **当前阻塞**：金标素材（完整字幕 + 视频）**待用户提供**。到位后：建 `eval/manifest.json` → 跑 CER / 边界 P50/P90 → 同批视频跑 Qwen3 vs Whisper A/B → chunk 调参 → 达标才切默认。
+- **基线提交**：`de899b9`（代码/测试/文档）；本记录更新在 `f79a5e9` 之后。
+
+### 测试基线（2026-10-18 第三轮：967 tests / 64.0%）
 
 ```text
 python -m pytest -q
@@ -430,6 +439,22 @@ coverage: 64.0% (13,607 statements)     # 上轮 576 / 36.3%
 ## 8. 环境命令
 
 ```powershell
+# ── 用户金标素材到位后的接入流程（P2-14）──
+# 1) 按 eval/README.md 填 eval/manifest.json：
+#    {"project": "...", "language": "Japanese", "episodes": [
+#      {"id": "EP001", "category": "clean|overlap|bgm",
+#       "video": "<视频路径或目录>", "reference_srt": "<可信字幕>"}]}
+# 2) 旧管线基线
+python scripts\eval\asr_eval.py --manifest eval\manifest.json `
+  --engine whisper --json-out reports\asr_eval_whisper.json `
+  --output reports\asr_eval_whisper.md
+# 3) 2026 链路
+python scripts\eval\asr_eval.py --manifest eval\manifest.json `
+  --engine qwen3 --python .venv-qwen\Scripts\python.exe `
+  --json-out reports\asr_eval_qwen3.json --output reports\asr_eval_qwen3.md
+# 4) 结构回归（不需要音频，任意可信字幕）
+python scripts\eval\alignment_bench.py --srt "<参考字幕>"
+
 # ── 测试（日常/CI，不需要模型和素材）──
 python -m pytest -q
 python -m pytest -q --cov --cov-report=term-missing
