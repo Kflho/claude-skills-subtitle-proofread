@@ -159,7 +159,10 @@ def pair_up(tag, tgt, ref, args, fold):
 
         answered = 0
         with ThreadPoolExecutor(args.workers) as ex:
-            for b, res in zip(batches, ex.map(work, batches)):
+            # work() already returns (batch, answers); zipping with `batches`
+            # again would make `res` the whole tuple and every `r` truthy —
+            # every pair got cached as verified no matter what the LLM said.
+            for b, res in ex.map(work, batches):
                 for (key, _, _), r in zip(b, res):
                     if r is not None:      # 失败不入缓存，下次重试
                         cache[key] = bool(r)

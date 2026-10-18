@@ -108,8 +108,8 @@ scripts/
 ## 测试
 
 ```bash
-cd <skill>/tests && pytest -q    # 866 tests, ~6s, 无外部依赖
-pytest -q --cov --cov-report=term-missing   # 覆盖率 56.3%，矩阵见 docs/test-plan.md
+cd <skill>/tests && pytest -q    # 935 tests, ~9s, 无外部依赖
+pytest -q --cov --cov-report=term-missing   # 覆盖率 62.0%，矩阵见 docs/test-plan.md
 ```
 
 分层: Tier 1 (纯函数) → Tier 2 (tempfile) → Tier 3 (mock 外部二进制)。
@@ -128,7 +128,7 @@ P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 
 
 素材现状：莎莉 110 集、阿童木 193 集视频都在本地；**两者都没有可信日语参考字幕**（莎莉源字幕是俄语；阿童木 sidecar SRT 是机翻中文、2s 粗轴，不能当金标）。因此 CER/边界验收仍需人工听校；参考无关 A/B 可直接用视频跑。
 
-测试：866 passed / 0 failed / 56.3% 覆盖；矩阵与剩余 P1 缺口见 `docs/test-plan.md`。
+测试：935 passed / 0 failed / 62.0% 覆盖；矩阵与剩余 P1 缺口见 `docs/test-plan.md`。
 
 ## 配置
 

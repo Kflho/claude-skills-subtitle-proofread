@@ -2,12 +2,12 @@
 
 > **用途**：跨会话续跑。新会话先读本文件，再读 [`tech-route-2026.md`](tech-route-2026.md)、[`ADR-006`](adr/006-stable-asr-core.md)、[`ADR-007`](adr/007-cue-alignment.md)、[`ADR-008`](adr/008-qwen3-long-audio-chunking.md)、[`test-plan.md`](test-plan.md)。
 > **最后更新**：2026-10-18（HEAD `f9719db`；相邻 cue 联动求解 + 测试 P0 链路补齐）
-> **当前阶段**：P2 对齐 + `run_all --asr` + 实机验证完成；测试 P0 补完（866 tests / 56.3%）；默认仍走 Whisper。下一步 = **P2-14 人工金标 + P1-10 阿童木 A/B**。
+> **当前阶段**：P2 对齐 + `run_all --asr` + 实机验证完成；测试 P0 补完（935 tests / 62.0%）；默认仍走 Whisper。下一步 = **P2-14 人工金标 + P1-10 阿童木 A/B**。
 > **总目标**：把音频链路从 `WebRTC VAD → kotoba Whisper → 时间重叠匹配` 迁移到 `Qwen3-ASR → Qwen3-ForcedAligner → 全局文本对齐`；默认行为在 P2 验收前保持不变。
 
 ## 0. 当前一句话（clear 后从这里开始）
 
-已经完成：P1 稳定 ASR 核心、P2 对齐层、`run_all --asr` 接入、莎莉 EP001 实机验证（发现并修复 `qwen_asr` 180s 分块导致的时间戳塌缩：worker 自切 60s + 补零，RTF 0.83→0.207–0.295）、整集偏移估计、**相邻 cue 联动求解（无偏移回放自动应用 89 → 262）**；**测试 P0 链路补齐：866 passed / 56.3%（上轮 576 / 36.3%）**，并顺带修掉 3 个真 bug（glossary 表头/计数表误当译名、跨盘 `relpath` 崩溃、`oped_fill` 写盘参数顺序反了）。
+已经完成：P1 稳定 ASR 核心、P2 对齐层、`run_all --asr` 接入、莎莉 EP001 实机验证（发现并修复 `qwen_asr` 180s 分块导致的时间戳塌缩：worker 自切 60s + 补零，RTF 0.83→0.207–0.295）、整集偏移估计、**相邻 cue 联动求解（无偏移回放自动应用 89 → 262）**；**测试 P0 链路补齐 + P1 补洞：935 passed / 62.0%（上轮 576 / 36.3%）**，并顺带修掉 3 个真 bug（glossary 表头/计数表误当译名、跨盘 `relpath` 崩溃、`oped_fill` 写盘参数顺序反了）。
 
 **下一步按顺序：**
 
@@ -25,7 +25,7 @@
 | P0 | 评测金标清单 + 基线指标 | 🟡 代码就绪，待真实素材 | `eval/manifest.json` 填 12 集；旧管线 CER/边界可复现 |
 | P1 | 稳定核心 + Qwen3/Whisper 适配 + 评测/CLI | 🟡 smoke 通过；阿童木 A/B 可跑（仅参考无关） | 3 集跑通；A/B 有记录；默认不变 |
 | P2 | Qwen3-FA + cue mapper + align_repair | 🟡 核心/CLI/run_all/实机验证完成；默认未切 | 边界 P50 ≤100ms / P90 ≤300ms（待人工金标） |
-| 测试 | 866 tests / 56.3% 覆盖 / 0 failed | 🟡 P0 链路补齐；P1 缺口见 test-plan | 关键路径每个分支至少一条测试 |
+| 测试 | 935 tests / 62.0% 覆盖 / 0 failed | 🟡 P0 链路补齐；P1 缺口见 test-plan | 关键路径每个分支至少一条测试 |
 | P3 | FireRedVAD/AED，VAD 降级为提示 | ⬜ 未开始 | speech/music/singing 时间线对比 |
 | P4 | glossary-first + 翻译 prompt，百度下线 | ⬜ 未开始 | 专名 F1 / 翻译人工评分 |
 | P5 | VibeVoice / 云兜底 | ⬜ 未开始 | 单集实验 + 成本/隐私评估 |
@@ -184,38 +184,41 @@ RTF=0.387（warmup 后，含 ASR+FA）
 
 说明：`warmup`/`load` 把模型加载排除在计时外；4s 短样本的 RTF 不代表 24 分钟整集。评测脚本、manifest、BOM 容错、报表链路均已跑通。
 
-### 测试基线（2026-10-18 第二轮：866 tests / 56.3%）
+### 测试基线（2026-10-18 第二轮：935 tests / 62.0%）
 
 ```text
 python -m pytest -q
-866 passed in ~6.3s          # 无网络、无模型、无真实项目
-coverage: 56.3% (13,607 statements)     # 上轮 576 / 36.3%
+935 passed in ~8.5s          # 无网络、无模型、无真实项目
+coverage: 62.0% (13,607 statements)     # 上轮 576 / 36.3%
 ```
 
 覆盖变化（按目录）：
 
 | 目录 | 语句 | 本轮 | 上轮 | 说明 |
 |---|---:|---:|---:|---|
-| `lib` | 3,313 | 75.3% | 73.7% | whisper_backends 44→59%（faster/openai fake 模块） |
-| `fix` | 3,220 | **61.4%** | 28.4% | whisper_pipeline 36→81%、oped_fixer 0→77%、oped_fill 0→70% |
-| `nouns` | 2,424 | **47.4%** | 9.5% | aggregate 86%、build_glossary 92%、extractor 85%、find_suspect 37% |
+| `lib` | 3,313 | 75.4% | 73.7% | whisper_backends 44→59%（faster/openai fake 模块） |
+| `fix` | 3,220 | **72.6%** | 28.4% | whisper_pipeline 36→81%、whisper_fixer 22→93%、fragment_processor 30→90%、oped 0→70–77% |
+| `nouns` | 2,424 | **55.8%** | 9.5% | aggregate 86%、build_glossary 92%、extractor 85%、find_suspect 37→74% |
 | 根脚本 | 2,005 | **42.3%** | 7.5% | translate_srt 85%、polish_zh 99%、run_all 34% |
-| `asr` / `scan` / `apply` / `reuse` / `eval` / `ass` / `utils` | — | 10–80% | 同左 | 本轮未动 |
+| `reuse` | 389 | **62.2%** | 10.3% | align 0→70%、apply 0→65%、common 38→46% |
+| `asr` / `scan` / `apply` / `eval` / `ass` / `utils` | — | 10–80% | 同左 | 两轮均未动 |
 
-新增 11 个测试文件 + 4 个扩展：`test_whisper_pipeline`、`test_whisper_backends`、
-`test_align_repair`、`test_fix_by_asr`（以上为扩展）；新文件为 `test_translate_srt`、
-`test_baidu_translate`、`test_polish_zh`、`test_nouns_aggregate`、`test_build_glossary`、
-`test_nouns_extractor`、`test_find_suspect_nouns`、`test_oped_fixer`、`test_oped_fill`、
-`test_run_all_steps`、`test_episode_workflow`。
+两轮共新增 13 个测试文件 + 6 个扩展：
+`test_translate_srt`、`test_baidu_translate`、`test_polish_zh`、`test_nouns_aggregate`、
+`test_build_glossary`、`test_nouns_extractor`、`test_find_suspect_nouns`、`test_oped_fixer`、
+`test_oped_fill`、`test_run_all_steps`、`test_episode_workflow`、`test_whisper_fixer`、
+`test_reuse`；扩展 `test_whisper_pipeline`、`test_whisper_backends`、`test_align_repair`、
+`test_fix_by_asr`、`test_fragment_processor`、`test_find_suspect_nouns`。
 矩阵、剩余 P1 缺口与渐进门槛见 [`docs/test-plan.md`](test-plan.md)。
 
-**本轮测试顺带修掉的 3 个真 bug**（各配回归测试）：
+**测试顺带修掉的 4 个真 bug**（各配回归测试）：
 
 | 位置 | 问题 | 影响 |
 |---|---|---|
 | `translate_srt.load_glossary` | `split('|')` 的空首列没滤掉，表头被当成「日语→中文」映射；`build_glossary` 的「日语\|次数\|变体」表被当译名表 | 数字（96）会被 `apply_noun_pre_replace` 替换进正文，prompt 也被污染 |
 | `nouns/aggregate.py`、`nouns/extractor.py`、`translate_srt.py` | Windows 跨盘 `os.path.relpath` 抛 `ValueError` | 日志行能打死整条流水线（temp 在 C:、项目在 D: 时） |
 | `fix/oped_fill._apply_templates` | `write_subtitles(cues, fpath)` 参数顺序反了 | 歌词模板永远写不回字幕文件 |
+| `reuse/align.pair_up` | `zip(batches, ex.map(work, ...))` 把 work 返回的 `(batch, answers)` 又包了一层，`r` 变成批次列表（恒真） | **LLM 复核结果被丢弃，所有候选一律缓存为 verified**；`--apply` 前只剩 apply 的 R1–R6 兜底 |
 
 - 原则：**真实项目只用于发现问题；修之前先落最小 fixture test。**
 
@@ -335,9 +338,9 @@ coverage: 56.3% (13,607 statements)     # 上轮 576 / 36.3%
 - ✅ P2 对齐核心 + 修复计划 + CLI + `run_all --asr` 完成；P2 专项 101 项测试、真实 cue 结构回归已跑（§4）。
 - ✅ 莎莉日语视频已到位（110 集 MKV）：`D:\videos\Animation\TV\[1966-1981] Toei Majokko series_東映魔女大系(東映魔女っ子シリーズ)_TV\[1966-1991] Sally_小仙女莎莉(魔法使いサリー)_TV\[1966-1968] Sally_小仙女莎莉 第1作(魔法使いサリー)_TV`。
 - ✅ P2-13 实机验证完成：180s 分块塌缩 → 自切 60s + 补零；RTF 0.83→0.207–0.295，零时长 48%→8.4%（§4）。
-- ✅ 测试基线：全量 **866 passed / 0 failed / 56.3%**（上轮 576 / 36.3%）；P0 链路（Whisper 编排/VAD、翻译、专名、OP/ED、编排）补齐；相邻 cue 联动求解有回归 + 实机回放；3 个真 bug 修复并配回归测试。
+- ✅ 测试基线：全量 **935 passed / 0 failed / 62.0%**（上轮 576 / 36.3%）；P0 链路 + P1 补洞（whisper_fixer/fragment_processor、find_suspect 聚类、reuse）完成；相邻 cue 联动求解有回归 + 实机回放；4 个真 bug 修复并配回归测试。
 - ⬜ 莎莉没有日语参考字幕（源字幕是俄语），CER/边界金标仍缺（P2-14）。
-- ⬜ P1 测试缺口：`whisper_fixer` / `fragment_processor`、`find_suspect_nouns` 聚类、`noun_checker` / `apply_map`、`reuse/*`、`run_all` 各 `step_*`（见 `test-plan.md` §3）。
+- ⬜ P1 测试缺口：`noun_checker`（39%）/ `apply_map`（28%）、`scan` / `apply` / `run_all` 各 `step_*`、worker chunk（见 `test-plan.md` §3）。
 - ⬜ 整集 0.6B（880s）与热态 RTF 0.122 反常，需散热稳定后复测。
 - ✅ 阿童木视频已到位：`D:\videos\Animation\TV\[Anonymoose] 鉄腕アトム (DVD, 10bit)`，193 MKV + 193 同名 SRT。
 - ⚠️ 阿童木同目录 SRT 是**机翻中文、2s 粗轴**（样例：`嗯` / `飞雄啊——！`），不是日语参考，也**不能当金标**。
@@ -416,6 +419,8 @@ coverage: 56.3% (13,607 statements)     # 上轮 576 / 36.3%
 | `tests/test_nouns_aggregate.py` / `test_build_glossary.py` / `test_nouns_extractor.py` / `test_find_suspect_nouns.py` | 专名链路（合并/输出/sidecar/规则） | ✅ |
 | `tests/test_oped_fixer.py` / `test_oped_fill.py` | OP/ED（三分类 / 只改歌词 / 只填空行） | ✅ |
 | `tests/test_run_all_steps.py` / `test_episode_workflow.py` | 编排（顺序 / flag / 资源驱动步骤 / Whisper-ASR 分派） | ✅ |
+| `tests/test_whisper_fixer.py` / `test_reuse.py`（扩展 `test_fragment_processor.py` / `test_find_suspect_nouns.py`） | P1 补洞：修复 / 片段 / 复用 | ✅ |
+| `scripts/reuse/align.py` | 复核结果解包修复（double zip） | ✅ |
 | `tests/test_align_repair.py` / `test_fix_by_asr.py`（扩展） | 相邻 cue 联动求解（密集同时移动 / 冲突 review / 端到端写回） | ✅ |
 | `scripts/lib/project_utils.py` | 新增 `display_path()`（跨盘 `relpath` 兜底） | ✅ |
 | `scripts/translate_srt.py` / `nouns/aggregate.py` / `nouns/extractor.py` / `fix/oped_fill.py` | 本轮 bug 修复（glossary 解析 / relpath / 写盘参数顺序） | ✅ |
@@ -496,15 +501,16 @@ python scripts\run_all.py --lang ja --target-dir temp\proj_asr --input-dir subs 
 - **长音频必须自切 60s + 补零**：`qwen_asr` 内部 180s 分块会让 27–48% token 变零时长并慢 2.8×（ADR-008）。
 - **吞吐按实测算**：1.7B 60s 分块 5.2–7.4 min/集 → 193 集约 17–24h；不要沿用方案里的 6–12h。
 - **0.6B 不默认**：热态快 1.5×，但整集反而慢、质量更差；需复测后再定草稿模式。
-- **测试优先（第二轮）**：866 tests / 56.3% 覆盖 / 0 failed；P0 链路每条安全策略都有断言（dry-run 不写、VAD 默认不删、OP/ED 只改歌词、只填空行）；真实项目发现的问题必须先落最小 fixture test，矩阵见 [`docs/test-plan.md`](test-plan.md)。
+- **测试优先（第二轮）**：935 tests / 62.0% 覆盖 / 0 failed；P0/P1 链路每条安全策略都有断言（dry-run 不写、VAD 默认不删、OP/ED 只改歌词、只填空行）；真实项目发现的问题必须先落最小 fixture test，矩阵见 [`docs/test-plan.md`](test-plan.md)。
 - **glossary 表格解析规则**：只有「日语\|中文」两列才当译名映射；`build_glossary` 的「日语\|出现次数\|拼写变体」表不产生映射（踩坑 #17：否则数字会被预替换进正文）。
 - **日志路径用 `display_path`**：Windows 跨盘 `os.path.relpath` 抛 `ValueError`，不能出现在主流程里（temp 在 C:、项目在 D: 就会触发）。
 - **`write_subtitles(path, cues)` 顺序固定**：`oped_fill` 曾写成 `(cues, fpath)`，模板永远写不回去；有回归测试锁定。
+- **reuse 复核结果不能丢**：`pair_up` 的双重 zip 让所有候选一律通过；修好后 `test_reuse` 锁定「LLM 说 no/失败就不缓存」这条底线。
 - **金标来源规则**：机翻 / ASR / LLM 润色后的字幕都不能当参考。阿童木同目录 SRT 是机翻中文、2s 粗轴，只能用于参考无关 A/B；CER/边界必须人工听校（规则写进 `eval/README.md`）。
 - **进程隔离**：主环境不 import torch/qwen-asr；worker JSON lines。
 - **Windows**：vLLM 不支持；走 Transformers 后端 + SDPA。
 - **模型下载**：HF 直连被墙；用 ModelScope（已验证 200）/ 镜像。
 - **已知精度边界**：段级 ASR（无 token）P50 ≈300ms；Qwen3-FA 在真实动画音频上仍有 8.4% 零时长 token。
 - **相邻 cue 联动已落地**：`_resolve_joint_time_fixes` 让密集字幕一起重排；无整集偏移时 EP001 +0.5s 回放的自动应用从 89 提到 262（50ms 还原 70→247），有偏移时 364/370 vs 旧 365/370（唯一差异是一条 24.5s 长 cue 的 163ms 边界修正）。
-- **既存失败已清零**：OP/ED 常量断言改成行为测试、`MockWhisperResult` 补 `cues_to_clear`；全量 866 passed。
+- **既存失败已清零**：OP/ED 常量断言改成行为测试、`MockWhisperResult` 补 `cues_to_clear`；全量 935 passed。
 - **续跑原则**：先看 §0 的 6 步，再看 §4 的验证数据；不要重写核心，只加 adapter/adapter 测试。

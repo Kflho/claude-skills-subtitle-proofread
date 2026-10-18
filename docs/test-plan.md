@@ -7,19 +7,20 @@
 
 ```text
 python -m pytest -q
-866 passed in ~6.3s          # 无网络、无模型、无真实项目依赖
-coverage: 56.3% (13,607 statements)
+935 passed in ~8.5s          # 无网络、无模型、无真实项目依赖
+coverage: 62.0% (13,607 statements)
 ```
 
-本轮 **+290 tests**（576 → 866），覆盖率 **36.3% → 56.3%**，0 failed。
+本轮 **+359 tests**（576 → 935），覆盖率 **36.3% → 62.0%**，0 failed。
 
-新增测试文件（11 个新增 + 3 个扩展）：
+新增/扩展测试文件：
 
 | 文件 | 覆盖对象 |
 |---|---|
 | `test_whisper_pipeline.py`（扩展） | VAD 时间线、Tier 1 合并音频映射、Tier 2、`align_and_fix`、`main()` 的 VAD 闸门/分级/--dry-run |
 | `test_whisper_backends.py`（扩展） | faster-whisper / openai-whisper 后端（fake 模块）、错误/缺依赖分支 |
 | `test_align_repair.py`（扩展） | 相邻 cue 联动求解（7 项）：密集同时移动 / 冲突提议双方 review / 静止邻居仍拦截 |
+| `test_fragment_processor.py`（扩展） | apply_ai_fragments：文本/删除/配对/VAD 对齐、未填条目自动删与 [???] 升级、Whisper 上下文 |
 | `test_translate_srt.py` | 语言检测、prompt 组装、glossary/mappings、OP/ED 歌词判定、LLM JSON 容错、回显检测、批量重试、目录过滤、CLI |
 | `test_baidu_translate.py` | 百度签名/QPS 参数、错误码/HTTP 错误、语言检测、resume、失败保留原文 |
 | `test_polish_zh.py` | 批量 prompt 窗口、JSON 解析、dry-run 不写盘、单条批次跳过、成本估算 |
@@ -31,17 +32,19 @@ coverage: 56.3% (13,607 statements)
 | `test_oped_fill.py` | 边界检测（skip/API）、器乐/人声分类、歌词模板匹配（区间/±3s）、只填空行不碰正片、dry-run |
 | `test_run_all_steps.py` | `main()` 步骤顺序、`--resume`、`--dry-run`、`--apply-ai-review`、ASR 路由跳过 clean 检查、失败继续 |
 | `test_episode_workflow.py` | 资源驱动步骤选择、findings 注入、dry-run、`step_audio` 分派 Whisper/ASR、`step_apply` 只报不写 |
+| `test_whisper_fixer.py` | VAD 缓存 L1 闸门、Tier1 三分类、Tier2 升级、重试模型、ja→zh 译文替换 |
+| `test_reuse.py` | judge R1–R5、复核 JSON 解析、锚点单调链、pair_up 缓存/失败、apply dry-run/写盘 |
 
 ### 覆盖率按目录（本轮 vs 上轮）
 
 | 目录 | 语句 | 覆盖 | 上轮 | 说明 |
 |---|---:|---:|---:|---|
 | `scripts/lib` | 3,313 | **75.3%** | 73.7% | 对齐/ASR 契约、gates、llm、video_scan 较稳；whisper_backends 59% |
-| `scripts/fix` | 3,220 | **61.4%** | 28.4% | whisper_pipeline 81%、oped_fixer 77%、oped_fill 70%、align_repair 92.5%；whisper_fixer 22%、fragment_processor 30% |
-| `scripts/nouns` | 2,424 | **47.4%** | 9.5% | aggregate 86%、build_glossary 92%、extractor 85%；find_suspect_nouns 37%、noun_checker 39%、apply_map 28% |
+| `scripts/fix` | 3,220 | **72.6%** | 28.4% | whisper_pipeline 81%、whisper_fixer 93%、fragment_processor 90%、align_repair 92.5%、oped 70–77% |
+| `scripts/nouns` | 2,424 | **55.8%** | 9.5% | aggregate 86%、build_glossary 92%、extractor 85%、find_suspect_nouns 74%；noun_checker 39%、apply_map 28% |
 | `scripts` 根 | 2,005 | **42.3%** | 7.5% | translate_srt 85%、polish_zh 99%、run_all 34% |
 | `scripts/asr` | 574 | 42.5% | 42.5% | worker 37%（模型分支）、CLI 27%/78% |
-| `scripts/reuse` | 389 | 10.3% | 10.3% | common 38%；align/apply 为 0 |
+| `scripts/reuse` | 389 | **62.2%** | 10.3% | align 70%、apply 65%、common 46% |
 | `scripts/scan` | 372 | 37.6% | 37.6% | 纯函数与 scan_file 已测；VAD/scan_all 未测 |
 | `scripts/apply` | 373 | 35.1% | 35.1% | cue 级操作已测；ASS/main 未测 |
 | `scripts/eval` | 339 | 61.9% | 61.9% | asr_eval 47%；bench 84% |
@@ -81,12 +84,12 @@ coverage: 56.3% (13,607 statements)
 | Phase 1 扫描 | `scan/unified_scanner.py` | `test_unified_scanner` | 38% | `scan_all`、VAD、main/CLI 未测 |
 | Phase 2 修复编排 | `fix/whisper_pipeline.py` | `test_whisper_pipeline` | **81%** | VAD/Tier1/Tier2/main 已测；`_cluster_garbled_cues` 回退路径可补 |
 | Whisper 后端 | `lib/whisper_backends.py` | `test_whisper_backends` | **59%** | faster/openai 已测；`validate_backend`、缺失参数的 branch 未测 |
-| Fixer/片段 | `fix/whisper_fixer.py`, `fragment_processor.py` | `test_whisper_pipeline` 间接 | 22–30% | `fix_by_whisper` 的 cues_to_clear/cut 组合、AI 片段 JSON 仍缺 |
+| Fixer/片段 | `fix/whisper_fixer.py`, `fragment_processor.py` | `test_whisper_fixer`, `test_fragment_processor` | **90–93%** | 剩余：paired `__DELETE__` 分支、报告更新异常路径 |
 | OP/ED | `fix/oped_fixer.py`, `oped_fill.py`, `ass/ass_repair.py` | `test_oped_fixer`, `test_oped_fill`, `test_ass_repair` | **70–77%** | 器乐/歌词/正片分类与填空已测；Whisper 采样与 API 边界仍需 fake |
-| Phase 3 专名 | `nouns/aggregate`, `build_glossary`, `extractor`, `find_suspect_nouns` | 4 个新测试文件 | **37–92%** | find_suspect 的聚类/纠错搜索、noun_checker 的主流程 |
+| Phase 3 专名 | `nouns/aggregate`, `build_glossary`, `extractor`, `find_suspect_nouns` | 4 个测试文件 | **73–92%** | noun_checker / apply_map 的主流程仍缺 |
 | 翻译 | `translate_srt.py`, `fix/translate_srt.py`, `polish_zh.py` | 3 个新测试文件 | **85–99%** | 只剩 `main` 的少量分支与真实 API 形状 |
 | 批量应用 | `apply/apply_fixes.py` | `test_apply_fixes` | 35% | `main`、ASS 分支、trad→simp |
-| 参考复用 | `reuse/*` | `test_reuse_common` | 10% | `align` / `apply` 的采纳判定 |
+| 参考复用 | `reuse/*` | `test_reuse`, `test_reuse_common` | **62%** | align CLI 主流程未测 |
 | 总编排 | `run_all.py`, `fix/episode_workflow.py` | `test_run_all_*`, `test_episode_workflow` | 34–36% | 步骤序列/闸门已测；各 `step_*` 的实际副作用仍缺 |
 | 评测/回归 | `eval/*` | `test_asr_eval`, `test_alignment_bench` | 47–84% | manifest 缺路径分支 |
 
@@ -104,13 +107,13 @@ coverage: 56.3% (13,607 statements)
 - [x] 编排：`run_all.main` 顺序与 fast-path、`_run_pipeline` 的资源驱动步骤、`step_audio` 的 Whisper/ASR 分派。
 - [x] 相邻 cue 联动求解（`_resolve_joint_time_fixes`）：EP001 +0.5s 回放自动应用 89 → 262、50ms 还原 70 → 247；`fix_by_asr` 端到端测试锁定。
 
-### P1（下一轮）
+### P1（本轮已完成大半）
 
-- `fix/whisper_fixer.py`（22%）与 `fix/fragment_processor.py`（30%）：`_apply_whisper_result` 的 cues_to_clear/cut 组合、AI 片段 JSON 的生成与应用。
-- `nouns/find_suspect_nouns.py` 的 `_cluster_by_source` / `search_corrections` / `_apply_correction_fixes` / `_format_candidates`。
-- `nouns/noun_checker.py`（39%）与 `nouns/apply_map.py`（28%）的主流程。
-- `run_all.step_scan/step_nouns/step_apply_all/step_deliver/step_clean` 的副作用分支（本轮只测了 main 的调用顺序）。
-- `reuse/align.py`、`reuse/apply.py`（0%）：参考/目标双字幕 fixture，断言 R1/R2 采纳与「不采纳总集篇」规则。
+- [x] `fix/whisper_fixer.py`（93%）与 `fix/fragment_processor.py`（90%）：VAD 缓存闸门、Tier1 三分类、Tier2/重试、AI 片段生成与应用。
+- [x] `nouns/find_suspect_nouns.py`（74%）的 `_cluster_by_source` / `search_corrections` / `_apply_correction_fixes` / `_format_candidates`。
+- [x] `reuse/align.py`（70%）、`reuse/apply.py`（65%）：R1–R5 采纳规则、复核缓存与失败、锚点链、dry-run/写盘。
+- [ ] `nouns/noun_checker.py`（39%）与 `nouns/apply_map.py`（28%）的主流程。
+- [ ] `run_all.step_scan/step_nouns/step_apply_all/step_deliver/step_clean` 的副作用分支（只测了 main 的调用顺序）。
 
 ### P2
 
@@ -160,14 +163,14 @@ python -m pytest -q tests/test_alignment_base.py tests/test_alignment_timeline.p
 
 ## 6. 覆盖率门槛（渐进）
 
-当前 **56.3%**。不追求一次到 80%，按缺口补：
+当前 **62.0%**。不追求一次到 80%，按缺口补：
 
 | 阶段 | 目标 | 重点 |
 |---|---:|---|
 | 上轮 | 36% | 基线 |
-| **现在** | **56.3%** | Whisper 链路 + 翻译 mock + 专名链路 + OP/ED + 编排 + 相邻联动 |
-| 下一轮 | ≥65% | whisper_fixer / fragment_processor、find_suspect 聚类、reuse |
-| 再下一轮 | ≥70% | scan / apply / run_all 各 step、worker chunk |
+| **现在** | **62.0%** | P0 链路 + 相邻联动 + 修复/片段/复用补齐 |
+| 下一轮 | ≥70% | noun_checker / apply_map、scan / apply 主流程、run_all 各 step |
+| 再下一轮 | ≥75% | worker chunk、scan VAD、CLI 主流程 |
 
 > 覆盖率不是目的：**关键路径（扫描→修复→专名→翻译→应用→交付）每个分支至少有一条测试**，比总百分比更重要。
 

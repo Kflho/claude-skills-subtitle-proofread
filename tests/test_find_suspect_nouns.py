@@ -1,6 +1,7 @@
 """Tests for nouns/find_suspect_nouns.py — known-term loading and detection."""
 
 import json
+import os
 
 from nouns import find_suspect_nouns as fsn
 
@@ -237,3 +238,192 @@ def test_find_suspect_nouns_translation_mode_clusters(monkeypatch, tmp_path):
 
     assert len(result['groups']) == 1
     assert '阿童木' not in [s['text'] for s in result['singletons']]
+
+
+# ═══════════════════════════════════════════════════════════════
+# Source clustering
+# ═══════════════════════════════════════════════════════════════
+
+def _patch_tokenizers(monkeypatch):
+    monkeypatch.setattr(fsn, '_segment_zh', lambda text: text.split())
+    monkeypatch.setattr(fsn, '_segment_ja', lambda text: text.split())
+    monkeypatch.setattr(fsn, '_norm_ja_reading', lambda term: term)
+
+
+def test_cluster_by_source_groups_variants(tmp_path, monkeypatch):
+    target = tmp_path / 'zh'
+    source = tmp_path / 'ja'
+    target.mkdir()
+    source.mkdir()
+    (target / 'EP001.srt').write_text(_srt('阿托姆 来了'), encoding='utf-8')
+    (target / 'EP002.srt').write_text(_srt('阿圖姆 来了'), encoding='utf-8')
+    (source / 'EP001.srt').write_text(_srt('アトム きた'), encoding='utf-8')
+    (source / 'EP002.srt').write_text(_srt('アトム きた'), encoding='utf-8')
+    _patch_tokenizers(monkeypatch)
+
+    groups = fsn._cluster_by_source(
+        [{'text': '阿托姆'}, {'text': '阿圖姆'}],
+        str(target), str(source), {'アトム': '阿童木'}, set())
+
+    assert len(groups) == 1
+    group = groups[0]
+    assert group['suspected_canonical'] == '阿童木'
+    assert group['source_ja'] == 'アトム'
+    assert {v['text'] for v in group['variants']} == {'阿托姆', '阿圖姆'}
+    atuomu = [v for v in group['variants'] if v['text'] == '阿托姆'][0]
+    assert atuomu['locations'][0]['file'] == 'EP001.srt'
+
+
+def test_cluster_by_source_skips_unmapped_tokens(tmp_path, monkeypatch):
+    target = tmp_path / 'zh'
+    source = tmp_path / 'ja'
+    target.mkdir()
+    source.mkdir()
+    (target / 'EP001.srt').write_text(_srt('阿托姆 来了'), encoding='utf-8')
+    (target / 'EP002.srt').write_text(_srt('阿圖姆 来了'), encoding='utf-8')
+    (source / 'EP001.srt').write_text(_srt('サリー きた'), encoding='utf-8')
+    (source / 'EP002.srt').write_text(_srt('サリー きた'), encoding='utf-8')
+    _patch_tokenizers(monkeypatch)
+
+    groups = fsn._cluster_by_source(
+        [{'text': '阿托姆'}, {'text': '阿圖姆'}],
+        str(target), str(source), {'アトム': '阿童木'}, set())
+
+    assert groups == []
+
+
+def test_cluster_by_source_needs_two_variants(tmp_path, monkeypatch):
+    target = tmp_path / 'zh'
+    source = tmp_path / 'ja'
+    target.mkdir()
+    source.mkdir()
+    (target / 'EP001.srt').write_text(_srt('阿托姆 来了'), encoding='utf-8')
+    (source / 'EP001.srt').write_text(_srt('アトム きた'), encoding='utf-8')
+    _patch_tokenizers(monkeypatch)
+
+    assert fsn._cluster_by_source(
+        [{'text': '阿托姆'}], str(target), str(source),
+        {'アトム': '阿童木'}, set()) == []
+
+
+# ═══════════════════════════════════════════════════════════════
+# Correction search / apply
+# ═══════════════════════════════════════════════════════════════
+
+def test_search_corrections_reports_hits_and_source_confirmation(tmp_path,
+                                                                monkeypatch):
+    target = tmp_path / 'zh'
+    source = tmp_path / 'ja'
+    target.mkdir()
+    source.mkdir()
+    (target / 'EP001.srt').write_text(_srt('阿托姆 来了'), encoding='utf-8')
+    (target / 'EP002.srt').write_text(_srt('阿托姆 走了'), encoding='utf-8')
+    (source / 'EP001.srt').write_text(_srt('アトム きた'), encoding='utf-8')
+    (source / 'EP002.srt').write_text(_srt('アトム いった'), encoding='utf-8')
+    _patch_tokenizers(monkeypatch)
+    out = tmp_path / 'hits.json'
+    corrections = [{'wrong': ['阿托姆'], 'correct': '阿童木',
+                    'source_ja': 'アトム'}]
+
+    results = fsn.search_corrections(
+        str(target), corrections, source_dir=str(source), lang='zh',
+        output_path=str(out))
+
+    assert len(results) == 1
+    assert results[0]['total_hits'] == 2
+    assert results[0]['eps_affected'] == ['EP001', 'EP002']
+    hit = results[0]['hits'][0]
+    assert hit['suggested_text'] == '阿童木 来了'
+    assert hit['source_confirmed'] is True
+    saved = json.loads(out.read_text(encoding='utf-8'))
+    assert saved[0]['total_hits'] == 2
+
+
+def test_apply_correction_fixes_replaces_and_backs_up(tmp_path):
+    srt = tmp_path / 'EP001.srt'
+    srt.write_text(_srt('阿托姆 来了', '别的台词'), encoding='utf-8')
+    results = [{
+        'correction': {'wrong': ['阿托姆'], 'correct': '阿童木'},
+        'hits': [{
+            'ep': 'EP001', 'cue_index': 0,
+            'original_text': '阿托姆 来了',
+            'suggested_text': '阿童木 来了',
+        }],
+    }]
+
+    fsn._apply_correction_fixes(str(tmp_path), results)
+
+    text = srt.read_text(encoding='utf-8')
+    assert '阿童木 来了' in text
+    assert '别的台词' in text
+    assert (tmp_path / 'EP001.srt.bak').exists()
+
+
+def test_apply_correction_fixes_skips_when_text_changed(tmp_path, capsys):
+    srt = tmp_path / 'EP001.srt'
+    srt.write_text(_srt('已经改过了'), encoding='utf-8')
+    results = [{
+        'correction': {'wrong': ['阿托姆'], 'correct': '阿童木'},
+        'hits': [{'ep': 'EP001', 'cue_index': 0,
+                  'original_text': '阿托姆 来了',
+                  'suggested_text': '阿童木 来了'}],
+    }]
+
+    fsn._apply_correction_fixes(str(tmp_path), results)
+
+    assert '阿童木' not in srt.read_text(encoding='utf-8')
+    assert not (tmp_path / 'EP001.srt.bak').exists()
+
+
+# ═══════════════════════════════════════════════════════════════
+# Candidate formatting
+# ═══════════════════════════════════════════════════════════════
+
+def test_format_candidates_flattens_groups_and_singletons(tmp_path):
+    locations = [
+        {'file': f'EP{i:03d}.srt', 'timestamp': '00:00:01,000',
+         'text': '阿托姆来了'} for i in range(1, 13)
+    ]
+    raw = {
+        'groups': [
+            {'source_ja': 'アトム', 'suspected_canonical': '阿童木',
+             'variants': [
+                 {'text': '阿童木', 'locations': locations[:1]},
+                 {'text': '阿托姆', 'locations': locations},
+                 {'text': '阿圖姆', 'locations': locations[:3]},
+             ]},
+            {'source_ja': 'x', 'suspected_canonical': '[未知: トビ]',
+             'variants': [{'text': '飞雄', 'locations': []},
+                          {'text': '飞夫', 'locations': []}]},
+            {'source_ja': 'y', 'suspected_canonical': '莎莉',
+             'variants': [{'text': '莎莉', 'locations': locations[:1]}]},
+        ],
+        'singletons': [
+            {'text': 'ウラン', 'count': 5,
+             'contexts': [{'ep': 'EP001', 'cue_start': '00:00:02,000',
+                           'cue_text': 'ウランが来た'}]},
+            {'text': '阿童木', 'count': 2, 'contexts': []},
+            {'text': 'あ', 'count': 1, 'contexts': []},
+        ],
+    }
+    out = tmp_path / 'candidates.json'
+
+    result = fsn._format_candidates(
+        raw, {'アトム': '阿童木'}, str(out))
+
+    assert result['stats'] == {'total': 2, 'inconsistency': 1,
+                               'unknown_suspect': 1}
+    inconsistency = result['candidates'][0]
+    assert inconsistency['type'] == 'inconsistency'
+    assert inconsistency['zh_canonical_in_mappings'] == '阿童木'
+    wrong = [a for a in inconsistency['zh_appearances']
+             if a['text'] == '阿托姆'][0]
+    assert wrong['count'] == 12
+    assert len(wrong['sample_locations']) == 10
+    assert len(inconsistency['sample_contexts']) == 5
+
+    unknown = result['candidates'][1]
+    assert unknown['type'] == 'unknown_suspect'
+    assert unknown['zh_term'] == 'ウラン'
+    assert unknown['frequency'] == 5
+    assert json.loads(out.read_text(encoding='utf-8'))['stats']['total'] == 2
