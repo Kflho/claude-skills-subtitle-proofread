@@ -24,7 +24,8 @@
 
 7. **修复分级**（`fix/align_repair.py`）：
    - 文本 match 且边界误差 ≤150ms → 不动（`clean_boundary`）。
-   - 文本 match、150ms < 误差 ≤2s、且不与原本不重叠的 cue 撞车 → 自动改时间码。
+   - 文本 match、150ms < 误差 ≤2s、且**联动求解后**不与非移动 cue 撞车 → 自动改时间码。
+     相邻 cue 若也在移动，可以占用对方的旧窗口（见 Consequences 的联求解）。
    - 误差 >2s → 转 review，不自动改（`max_time_shift`）。
    - 文本替换只在 `allow_text_replace=True` 且 cue 可判定为 garbled 时执行；默认只出提案。
    - `no_speech` / `missing_asr` / `extra_text` **永不自动删除**，只进审查清单。
@@ -41,12 +42,15 @@
 - ✅ 默认不写盘、不删除、不换文本，"干净 cue 破坏率" 的风险面被压到只改时间码。
 - ✅ 机制回归可复现：`scripts/eval/alignment_bench.py --srt <字幕>` 用真实 cue 反推合成 ASR，不需要音频。
 - ⚠️ 段级 ASR（无 token）的 cue 边界 P50 只有 ~300ms，达不到 100ms 目标；Qwen3-FA 的 token 时间轴是必要前提。
-- ⚠️ 全局漂移超过 `search_seconds`（默认 6s）时整集失配，只会报 `no_speech`/`missing_asr`；需要先做整集偏移估计（未实现）。
+- ⚠️ 全局漂移超过 `search_seconds`（默认 6s）时整集失配，只会报 `no_speech`/`missing_asr`；需要先做整集偏移估计（已实现，见下）。
 - ⚠️ 同一时刻完全重复的 cue（OP 双行）仍可能映射到相邻的同一句，误差在 ±3s 内会被标成 review 而不是自动改。
 - ✅ **整集统一偏移已实现**：`estimate_global_offset` 只在「≥20 条高相似 match + MAD ≤150ms」时
   认定整集漂移，然后把所有 cue 一起平移。EP001 的 +0.5s 平移测试里 367/370 恢复原位。
-- ⚠️ 没有整集偏移时，相邻 cue 的逐条时间修正仍会被「与上一条重叠」挡下（EP001 端到端只有 89/344 自动应用）；
-  需要相邻 cue 联动的求解器，见 follow-up。
+- ✅ **相邻 cue 联动求解已实现**（`_resolve_joint_time_fixes`）：候选时间窗先全部提出，
+  再按「移动者用新窗口、不动者用旧窗口」做冲突消解；两两提议重叠且原本不重叠 → 双方转 review，
+  重复直到稳定。EP001 +0.5s 回放（370 cue）：无整集偏移时自动应用 **89 → 262**，
+  50ms 内还原 **70 → 247**；有整集偏移时 365 → 364（唯一差异是一条 24.5s 长 cue 的
+  163ms 边界修正），精度没有实质退化。
 - ⚠️ 对齐依赖 cue 文本可读；纯图形/矢量（ASS `\p1`）cue 无文本，天然是 `empty_text`/`no_speech`。
 - ⚠️ ASS 写回目前只更新文本、不更新时间码，`align_cues.py --write` 对 `.ass` 直接拒绝（退出码 4），避免「成功但什么都没改」。
 
@@ -65,6 +69,8 @@
 
 - ✅ 已接 `run_all --asr qwen3` / `fix_orchestrator.fix_by_asr()`（默认仍 Whisper）。
 - ✅ 整集偏移估计已落地（`estimate_global_offset` + `shift_cues`）。
-- 相邻 cue 联动的逐条求解：当前逐条修正遇到重叠就转 review，密集字幕修不动。
+- ✅ 相邻 cue 联动的逐条求解已落地：`_prepare_time_fix` 只做单条合法性检查，
+  `_resolve_joint_time_fixes` 做集合级冲突消解；回归测试见 `tests/test_align_repair.py`
+  （密集相邻 cue 同时移动、冲突提议双方 review、静止邻居仍拦截、既有重叠容忍）。
 - P3 FireRedVAD 的 speech 时间线替换 `speech_coverage` 的 ASR 近似。
 - 用真实日语视频（莎莉 EP001 已到位；阿童木 193 集待视频）跑 §9 的 A/B，填 progress §4。

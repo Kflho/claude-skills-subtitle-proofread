@@ -12,8 +12,10 @@ Design rules:
   new timecodes.  Replacing text requires ``AlignmentConfig(
   allow_text_replace=True)`` and even then only for garbled-but-plausible
   cues.
-* **neighbour-safe** — a proposed time fix that would overlap the previous
-  or next cue is downgraded to review instead of applied.
+* **neighbour-safe** — proposed time fixes are solved jointly: dense cues may
+  move onto a neighbour's *old* window when both are moving, but a fix that
+  would land on a cue staying put (or on another moving cue's proposal) is
+  downgraded to review.
 
 The module depends on ``ASRResult``/``CueAlignment`` only; it does not
 import Qwen3 or Whisper (ADR-006 follow-up).
@@ -114,10 +116,16 @@ class PlannedRepair:
 
 def plan_repairs(cues, alignments, *,
                  config: AlignmentConfig | None = None) -> list[PlannedRepair]:
-    """Build the per-cue repair list (in cue order)."""
+    """Build the per-cue repair list (in cue order).
+
+    Time fixes are planned as a set: a cue may take over a neighbour's *old*
+    window when that neighbour is moving too, as long as the two proposed
+    windows do not overlap.  Cues that stay put are still protected.
+    """
     cfg = config or AlignmentConfig()
     by_index = {al.cue_index: al for al in alignments}
     plan: list[PlannedRepair] = []
+    candidates: dict[int, tuple[float, float]] = {}
 
     for index, cue in enumerate(cues):
         al = by_index.get(index)
@@ -141,7 +149,7 @@ def plan_repairs(cues, alignments, *,
         )
 
         if action == ACTION_FIX_TIME:
-            _plan_time_fix(entry, cues, index, al, cfg)
+            _prepare_time_fix(entry, al, cfg, candidates)
         elif action == ACTION_REPLACE_TEXT:
             entry.new_text = al.asr_text
             entry.auto = bool(cfg.allow_text_replace and al.asr_text)
@@ -155,11 +163,14 @@ def plan_repairs(cues, alignments, *,
 
         plan.append(entry)
 
+    _resolve_joint_time_fixes(cues, plan, candidates)
     return plan
 
 
-def _plan_time_fix(entry: PlannedRepair, cues, index: int,
-                   al: CueAlignment, cfg: AlignmentConfig) -> None:
+def _prepare_time_fix(entry: PlannedRepair, al: CueAlignment,
+                      cfg: AlignmentConfig,
+                      candidates: dict[int, tuple[float, float]]) -> None:
+    """Validate one time fix and record it as a candidate (not yet auto)."""
     if al.start is None or al.end is None:
         entry.action = ACTION_REVIEW_AI
         entry.reasons.append('alignment has no matched times')
@@ -172,41 +183,86 @@ def _plan_time_fix(entry: PlannedRepair, cues, index: int,
                              f'max_time_shift={cfg.max_time_shift:.2f}s')
         return
 
-    new_start, new_end = al.start, al.end
+    new_start, new_end = float(al.start), float(al.end)
     if new_end - new_start < cfg.min_cue_duration:
         new_end = new_start + cfg.min_cue_duration
 
-    # A time fix must not land on top of a cue that was previously clear.
-    # Pre-existing overlaps (signs, simultaneous speakers) are tolerated.
-    conflict = _overlapping_cue(cues, index, new_start, new_end,
-                                entry.cue_start, entry.cue_end)
-    if conflict is not None:
-        entry.action = ACTION_REVIEW_AI
-        entry.reasons.append(f'new window overlaps cue #{conflict}')
-        return
-
     entry.new_start = new_start
     entry.new_end = new_end
-    entry.auto = True
+    candidates[entry.cue_index] = (new_start, new_end)
 
 
-def _overlapping_cue(cues, index: int, new_start: float, new_end: float,
-                     old_start: float, old_end: float) -> int | None:
-    """Index of a previously non-overlapping cue the fix would collide with."""
-    for i, other in enumerate(cues):
-        if i == index:
-            continue
-        other_start = float(other.get('start_s', 0.0) or 0.0)
-        other_end = float(other.get('end_s', other_start) or other_start)
-        touches_new = (other_end > new_start + 1e-3
-                       and other_start < new_end - 1e-3)
-        if not touches_new:
-            continue
-        overlapped_before = (other_end > old_start + 1e-3
-                             and other_start < old_end - 1e-3)
-        if not overlapped_before:
-            return i
-    return None
+def _cue_window(cue) -> tuple[float, float]:
+    start = float(cue.get('start_s', 0.0) or 0.0)
+    return start, float(cue.get('end_s', start) or start)
+
+
+def _windows_overlap(a: tuple[float, float],
+                     b: tuple[float, float]) -> bool:
+    return (min(a[1], b[1]) - max(a[0], b[0])) > 1e-3
+
+
+def _resolve_joint_time_fixes(cues, plan: list[PlannedRepair],
+                              candidates: dict[int, tuple[float, float]]) -> None:
+    """Approve time fixes in one pass; downgrade the ones still colliding.
+
+    Cues scheduled to move are compared using their *proposed* windows, so
+    dense subtitles can be re-timed together.  Any cue pair whose proposed
+    windows overlap while their original windows did not is sent to review,
+    and the pass is repeated — a rejected cue falls back to its old window,
+    which can expose a new collision for its neighbour.  Pre-existing overlaps
+    (signs, simultaneous speakers) are tolerated as before.
+    """
+    if not candidates:
+        return
+
+    entries = {e.cue_index: e for e in plan}
+    old = [_cue_window(cue) for cue in cues]
+    active = set(candidates)
+
+    while active:
+        dropped: set[int] = set()
+        conflict_with: dict[int, int] = {}
+
+        for index in sorted(active):
+            if index in dropped:
+                continue
+            for other in range(len(cues)):
+                if other == index:
+                    continue
+                other_window = (candidates[other]
+                                if other in active and other not in dropped
+                                else old[other])
+                if not _windows_overlap(candidates[index], other_window):
+                    continue
+                if _windows_overlap(old[index], old[other]):
+                    continue
+                dropped.add(index)
+                conflict_with[index] = other
+                if other in active:
+                    dropped.add(other)
+                    conflict_with.setdefault(other, index)
+                break
+
+        if not dropped:
+            break
+
+        for index in sorted(dropped):
+            if index not in active:
+                continue
+            active.discard(index)
+            entry = entries[index]
+            entry.action = ACTION_REVIEW_AI
+            entry.auto = False
+            entry.new_start = None
+            entry.new_end = None
+            partner = conflict_with.get(index)
+            entry.reasons.append(
+                f'new window overlaps cue #{partner}' if partner is not None
+                else 'new window overlaps a neighbouring cue')
+
+    for index in active:
+        entries[index].auto = True
 
 
 # ═══════════════════════════════════════════════════════════════

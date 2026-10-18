@@ -67,6 +67,107 @@ def test_preexisting_overlap_does_not_block_time_fix():
     assert plan[0].auto is True
 
 
+# ═══════════════════════════════════════════════════════════════
+# Joint neighbour resolution (dense subtitles)
+# ═══════════════════════════════════════════════════════════════
+
+def test_adjacent_moving_cues_can_take_each_others_old_window():
+    """Dense cues: each proposal overlaps the neighbour's *old* window only."""
+    cues = [cue(10.0, 12.0, 'いち'), cue(12.0, 14.0, 'に')]
+    alignments = [
+        aligned(0, 10.0, 12.0, start=10.6, end=12.4),
+        aligned(1, 12.0, 14.0, start=12.6, end=14.0),
+    ]
+
+    plan = plan_repairs(cues, alignments)
+
+    assert [e.action for e in plan] == [ACTION_FIX_TIME, ACTION_FIX_TIME]
+    assert [e.auto for e in plan] == [True, True]
+    assert plan[0].new_end == pytest.approx(12.4)
+    assert plan[1].new_start == pytest.approx(12.6)
+
+
+def test_run_of_three_dense_cues_moves_together():
+    cues = [cue(0.0, 2.0, 'a'), cue(2.0, 4.0, 'b'), cue(4.0, 6.0, 'c')]
+    alignments = [
+        aligned(0, 0.0, 2.0, start=0.5, end=2.5),
+        aligned(1, 2.0, 4.0, start=2.5, end=4.5),
+        aligned(2, 4.0, 6.0, start=4.5, end=6.5),
+    ]
+
+    plan = plan_repairs(cues, alignments)
+
+    assert all(e.auto for e in plan)
+    assert [e.new_start for e in plan] == [0.5, 2.5, 4.5]
+
+
+def test_stationary_neighbour_still_blocks_one_fix_only():
+    cues = [cue(0.0, 5.0, 'まえ'), cue(5.0, 7.0, 'あと'), cue(7.0, 9.0, 'さらに')]
+    alignments = [
+        aligned(0, 0.0, 5.0),                                # stays put
+        aligned(1, 5.0, 7.0, start=4.5, end=7.0),            # hits cue #0
+        aligned(2, 7.0, 9.0, start=7.2, end=9.0),            # clean, moves
+    ]
+
+    plan = plan_repairs(cues, alignments)
+    by_index = {e.cue_index: e for e in plan}
+
+    assert by_index[1].action == ACTION_REVIEW_AI
+    assert by_index[1].auto is False
+    assert 'overlaps cue #0' in by_index[1].reasons[-1]
+    assert by_index[1].new_start is None
+    assert by_index[2].auto is True
+
+
+def test_conflicting_proposals_downgrade_both():
+    cues = [cue(10.0, 12.0, 'いち'), cue(12.0, 14.0, 'に')]
+    alignments = [
+        aligned(0, 10.0, 12.0, start=10.6, end=12.4),
+        aligned(1, 12.0, 14.0, start=11.8, end=13.6),
+    ]
+
+    plan = plan_repairs(cues, alignments)
+
+    assert [e.action for e in plan] == [ACTION_REVIEW_AI, ACTION_REVIEW_AI]
+    assert [e.auto for e in plan] == [False, False]
+    assert 'overlaps cue #1' in plan[0].reasons[-1]
+    assert 'overlaps cue #0' in plan[1].reasons[-1]
+
+
+def test_preexisting_overlap_lets_both_dense_cues_move():
+    cues = [cue(0.0, 5.0, 'まえ'), cue(4.0, 7.0, 'あと')]
+    alignments = [
+        aligned(0, 0.0, 5.0, start=0.2, end=5.2),
+        aligned(1, 4.0, 7.0, start=4.2, end=7.2),
+    ]
+
+    plan = plan_repairs(cues, alignments)
+
+    assert [e.auto for e in plan] == [True, True]
+
+
+def test_moving_cue_blocked_by_unmatched_kept_neighbour():
+    """A cue with no alignment (ACTION_KEEP path) still protects its window."""
+    cues = [cue(0.0, 5.0, 'まえ'), cue(5.0, 7.0, 'あと')]
+    alignments = [aligned(1, 5.0, 7.0, start=4.6, end=7.0)]
+
+    plan = plan_repairs(cues, alignments)
+
+    assert plan[0].cue_index == 1
+    assert plan[0].action == ACTION_REVIEW_AI
+    assert 'overlaps cue #0' in plan[0].reasons[-1]
+
+
+def test_min_duration_is_enforced_before_overlap_checks():
+    cues = [cue(10.0, 12.0, 'いち')]
+    alignments = [aligned(0, 10.0, 12.0, start=11.0, end=11.1)]
+
+    plan = plan_repairs(cues, alignments)
+
+    assert plan[0].auto is True
+    assert plan[0].new_end - plan[0].new_start == pytest.approx(0.3)
+
+
 def test_time_fix_beyond_max_shift_downgrades_to_review():
     cues = [cue(10.0, 12.0, 'お前何してんだよ')]
     al = aligned(0, 10.0, 12.0, start=16.0, end=18.0)

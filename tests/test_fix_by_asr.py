@@ -137,6 +137,31 @@ def test_fix_by_asr_applies_consistent_global_offset(project):
     assert payload['global_offset'] == pytest.approx(-0.5)
 
 
+def test_fix_by_asr_moves_two_adjacent_cues_together(project):
+    """Dense cues: each fix lands on the neighbour's old window; both apply."""
+    srt = project / 'EP011.srt'
+    srt.write_text(
+        "1\n00:00:05,000 --> 00:00:06,000\nおはよう\n\n"
+        "2\n00:00:06,000 --> 00:00:07,000\nさようなら\n\n",
+        encoding='utf-8')
+    result = make_result([
+        ('おはよう', 5.2, 6.2),
+        ('さようなら', 6.2, 7.2),
+    ])
+
+    fixer = Fixer('EP011', str(project), srt_dir=str(project))
+    report = fixer.fix_by_asr(asr_result=result)
+
+    assert report.applied == 2
+    text = srt.read_text(encoding='utf-8')
+    assert '00:00:05,200 --> 00:00:06,200' in text
+    assert '00:00:06,200 --> 00:00:07,200' in text
+    payload = json.loads(
+        (project / 'temp' / 'scans' / 'EP011.alignment.json')
+        .read_text(encoding='utf-8'))
+    assert payload['plan']['auto'] == 2
+
+
 def test_step_fix_episodes_threads_asr_flags(monkeypatch, tmp_path):
     import run_all
 

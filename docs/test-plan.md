@@ -7,18 +7,19 @@
 
 ```text
 python -m pytest -q
-858 passed in ~6.3s          # 无网络、无模型、无真实项目依赖
-coverage: 56.2% (13,577 statements)
+866 passed in ~6.3s          # 无网络、无模型、无真实项目依赖
+coverage: 56.3% (13,607 statements)
 ```
 
-本轮 **+282 tests**（576 → 858），覆盖率 **36.3% → 56.2%**，0 failed。
+本轮 **+290 tests**（576 → 866），覆盖率 **36.3% → 56.3%**，0 failed。
 
-新增测试文件（11 个）：
+新增测试文件（11 个新增 + 3 个扩展）：
 
 | 文件 | 覆盖对象 |
 |---|---|
 | `test_whisper_pipeline.py`（扩展） | VAD 时间线、Tier 1 合并音频映射、Tier 2、`align_and_fix`、`main()` 的 VAD 闸门/分级/--dry-run |
 | `test_whisper_backends.py`（扩展） | faster-whisper / openai-whisper 后端（fake 模块）、错误/缺依赖分支 |
+| `test_align_repair.py`（扩展） | 相邻 cue 联动求解（7 项）：密集同时移动 / 冲突提议双方 review / 静止邻居仍拦截 |
 | `test_translate_srt.py` | 语言检测、prompt 组装、glossary/mappings、OP/ED 歌词判定、LLM JSON 容错、回显检测、批量重试、目录过滤、CLI |
 | `test_baidu_translate.py` | 百度签名/QPS 参数、错误码/HTTP 错误、语言检测、resume、失败保留原文 |
 | `test_polish_zh.py` | 批量 prompt 窗口、JSON 解析、dry-run 不写盘、单条批次跳过、成本估算 |
@@ -36,7 +37,7 @@ coverage: 56.2% (13,577 statements)
 | 目录 | 语句 | 覆盖 | 上轮 | 说明 |
 |---|---:|---:|---:|---|
 | `scripts/lib` | 3,313 | **75.3%** | 73.7% | 对齐/ASR 契约、gates、llm、video_scan 较稳；whisper_backends 59% |
-| `scripts/fix` | 3,190 | **61.0%** | 28.4% | whisper_pipeline 81%、oped_fixer 77%、oped_fill 70%、align_repair 91%；whisper_fixer 22%、fragment_processor 30% |
+| `scripts/fix` | 3,220 | **61.4%** | 28.4% | whisper_pipeline 81%、oped_fixer 77%、oped_fill 70%、align_repair 92.5%；whisper_fixer 22%、fragment_processor 30% |
 | `scripts/nouns` | 2,424 | **47.4%** | 9.5% | aggregate 86%、build_glossary 92%、extractor 85%；find_suspect_nouns 37%、noun_checker 39%、apply_map 28% |
 | `scripts` 根 | 2,005 | **42.3%** | 7.5% | translate_srt 85%、polish_zh 99%、run_all 34% |
 | `scripts/asr` | 574 | 42.5% | 42.5% | worker 37%（模型分支）、CLI 27%/78% |
@@ -75,7 +76,7 @@ coverage: 56.2% (13,577 statements)
 | ASR 契约/注册/路由 | `lib/asr/*` | `test_asr_*`, `test_qwen3_client` | 75–97% | worker 的 chunk 分支需要 fake `model.transcribe` |
 | Qwen3 worker | `asr/qwen3_worker.py` | `test_qwen3_worker` | 37% | 分块/offset 合并逻辑无模型级测试（已拆 `_fill_zero_durations` 纯函数） |
 | 对齐核心 | `lib/alignment/*` | `test_alignment_*`, `test_cue_*` | 90–98% | 基本齐全 |
-| 对齐修复 | `fix/align_repair.py` | `test_align_repair`, `test_fix_by_asr` | 91% | realign 的 ffmpeg 错误分支可补 |
+| 对齐修复 | `fix/align_repair.py` | `test_align_repair`, `test_fix_by_asr` | **92.5%** | 相邻联动求解已测；realign 的 ffmpeg 错误分支可补 |
 | 对齐 CLI | `asr/align_cues.py` | `test_align_cues_cli` | 78% | `--video` 抽音频分支未测（mock ffmpeg） |
 | Phase 1 扫描 | `scan/unified_scanner.py` | `test_unified_scanner` | 38% | `scan_all`、VAD、main/CLI 未测 |
 | Phase 2 修复编排 | `fix/whisper_pipeline.py` | `test_whisper_pipeline` | **81%** | VAD/Tier1/Tier2/main 已测；`_cluster_garbled_cues` 回退路径可补 |
@@ -101,6 +102,7 @@ coverage: 56.2% (13,577 statements)
 - [x] 专名链路：extractor / aggregate / build_glossary / find_suspect_nouns 的纯函数与边界；
 - [x] OP/ED：ASS/SRT 双 style 下只改歌词、只填空行、不碰正片；
 - [x] 编排：`run_all.main` 顺序与 fast-path、`_run_pipeline` 的资源驱动步骤、`step_audio` 的 Whisper/ASR 分派。
+- [x] 相邻 cue 联动求解（`_resolve_joint_time_fixes`）：EP001 +0.5s 回放自动应用 89 → 262、50ms 还原 70 → 247；`fix_by_asr` 端到端测试锁定。
 
 ### P1（下一轮）
 
@@ -158,12 +160,12 @@ python -m pytest -q tests/test_alignment_base.py tests/test_alignment_timeline.p
 
 ## 6. 覆盖率门槛（渐进）
 
-当前 **56.2%**。不追求一次到 80%，按缺口补：
+当前 **56.3%**。不追求一次到 80%，按缺口补：
 
 | 阶段 | 目标 | 重点 |
 |---|---:|---|
 | 上轮 | 36% | 基线 |
-| **现在** | **56%** | Whisper 链路 + 翻译 mock + 专名链路 + OP/ED + 编排 |
+| **现在** | **56.3%** | Whisper 链路 + 翻译 mock + 专名链路 + OP/ED + 编排 + 相邻联动 |
 | 下一轮 | ≥65% | whisper_fixer / fragment_processor、find_suspect 聚类、reuse |
 | 再下一轮 | ≥70% | scan / apply / run_all 各 step、worker chunk |
 
