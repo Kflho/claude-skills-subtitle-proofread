@@ -102,3 +102,37 @@ P2 align：match 55/286，garbled 115，missing_asr 74，no_speech 40
 参考按「只保留对白」过滤（含字幕卡/角色名剔除），并单独记录 ASR 漏掉的短语气词；
 token 时间轴问题需要单独修（或改用分段重对齐）。
 
+## 7. clear 后恢复入口
+
+```powershell
+# 0) 看视频是否下完（只认完整 .mkv，不认 .downloading）
+Get-ChildItem -LiteralPath 'D:\videos\Animation\TV\数码宝贝' -Filter '*.mkv*'
+
+# 1) 主故事音频（95–1233s，三集同结构）
+ffmpeg -y -v error -ss 95 -t 1138 -i "<EP02/EP03.mkv>" -vn -ac 1 -ar 16000 `
+  -c:a pcm_s16le temp\asr\digimon_epXXX_main.wav
+
+# 2) Qwen3 1.7B 转写（本地模型）
+.\.venv-qwen\Scripts\python.exe scripts\asr\qwen3_transcribe.py `
+  --audio temp\asr\digimon_epXXX_main.wav --asr models\Qwen3-ASR-1.7B `
+  --aligner models\Qwen3-ForcedAligner-0.6B --timestamps `
+  --output temp\asr\digimon_epXXX_main.qwen3.json `
+  --srt temp\asr\digimon_epXXX_main.qwen3.srt
+
+# 3) P2 对齐（主故事参考需相对音频起点 -95s；EP001 已生成 digimon_ep001_main_ref.srt）
+python scripts\asr\align_cues.py --srt temp\references\digimon\digimon_epXXX_main_ref.srt `
+  --asr-json temp\asr\digimon_epXXX_main.qwen3.json `
+  --output temp\reports\digimon_epXXX_main_align.json
+```
+
+当前状态（2026-10-18 22:15）：
+
+```text
+EP01 视频 ✅，用户已人工核对 CC 同步；EP02/03 .mkv.downloading 0 B 🟡
+日文 CC S01E01–S54 ✅；已清洁到 temp/references/digimon/
+主故事参考：EP001/002/003.main.srt 已切；EP001 另有 -95s 平移版
+压缩包： C:\Users\54238\Desktop\数码宝贝.zip.downloading ≈20.54GB 🟡
+测试：1306 passed / 79.0%；提交 141b1f1
+```
+
+

@@ -6,10 +6,26 @@
       "id": "EP001",
       "category": "TODO(clean|overlap|bgm)",
       "video": "D:/videos/Animation/TV/数码宝贝/01、漂流？冒険の島！.mkv",
-      "reference_srt": "D:/videos/Animation/TV/数码宝贝/日语字幕/デジモンアドベンチャー.S01E01.WEBRip.ja[cc].srt",
+      "reference_srt": "D:/data/local/software/programming/skill/projects/sk_01/temp/references/digimon/EP001.main.srt",
       "context": "",
-      "timestamps": true,
-      "_note": "raw CC: strip speaker tags/furigana/music before CER"
+      "timestamps": true
+    },
+    {
+      "id": "EP002",
+      "category": "TODO(clean|overlap|bgm)",
+      "video": "D:/videos/Animation/TV/数码宝贝/02、爆裂進化！グレイモン.mkv",
+      "reference_srt": "D:/data/local/software/programming/skill/projects/sk_01/temp/references/digimon/EP002.main.srt",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP003",
+      "category": "TODO(clean|overlap|bgm)",
+      "video": "D:/videos/Animation/TV/数码宝贝/03、蒼き狼！ガルルモン.mkv",
+      "reference_srt": "D:/data/local/software/programming/skill/projects/sk_01/temp/references/digimon/EP003.main.srt",
+      "context": "",
+      "timestamps": true
     }
-  ]
+  ],
+  "_note": "draft: EP002/003 videos still downloading at 2026-10-18 22:15; reference_srt is cleaned main-story window 95-1233s. Evaluate main-window audio, not full episode (OP/ED token collapse). See eval/materials.md."
 }

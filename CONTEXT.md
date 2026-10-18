@@ -126,7 +126,7 @@ ASR 架构已按「稳定核心 + 插件适配器」落地：`lib/asr/base.py`�
 
 P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 → 信号/置信度）、`fix/align_repair.py`（修复计划/时间码/整集偏移/相邻 cue 联动）、`scripts/asr/align_cues.py`（端到端 CLI，默认 dry-run）、`run_all --asr`（flag 控制）。莎莉 EP001 历史实机验证：`qwen_asr` 180s 分块会塌缩 → worker 自切 60s + 补零（ADR-008；机械/吞吐验证，不作金标）。
 
-素材现状：**验收作品定为数码宝贝（Digimon Adventure）**，目录 `D:\videos\Animation\TV\数码宝贝`。EP01 视频已完整（1386s，H264+FLAC 48k stereo，日语）；**日文参考已到位**：`日语字幕\` 下 S01E01–S01E54 共 54 集 `ja[cc].srt`（原生日语；含说话人/振假名/♪ 标签，算 CER 前需清洁；EP01 末条 22:48，可能未收 ED）。01–05 另有中文字幕（`.sc`/`.tc` ASS），只能做参考无关/翻译复用。**当前唯一阻塞是视频数量**：至少再补 2 集（凑 3 集，clean/overlap/bgm 各 1 更好），P2-14 尚未开始。素材台账 `eval/materials.md`，草稿 `eval/manifest.digimon.json`。莎莉/阿童木历史素材只保留机制/吞吐回放，不再用于验收。
+素材现状：**验收作品定为数码宝贝（Digimon Adventure）**，目录 `D:\videos\Animation\TV\数码宝贝`。EP01 视频完整（1386s，日语 FLAC），**用户已人工核对日文 CC 与视频同步**；EP02/03 视频仍 `.mkv.downloading`（0 B）。日文参考已到位：`日语字幕\` 下 S01E01–S01E54 共 54 集 `ja[cc].srt`，已用 `scripts/eval/clean_cc_reference.py` 清洁（去说话人/振假名/♪；主故事窗口 95–1233s）。01–05 另有中文字幕，只能做参考无关/翻译复用。**当前等 EP02/03 视频**；期间可做 EP01 token 时间轴诊断、评测协议与剩余补测。素材台账 `eval/materials.md`，草稿 `eval/manifest.digimon.json`。莎莉/阿童木历史素材只保留机制/吞吐回放。
 
 测试：1306 passed / 0 failed / 79.0% 覆盖；矩阵与剩余缺口见 `docs/test-plan.md`。
 

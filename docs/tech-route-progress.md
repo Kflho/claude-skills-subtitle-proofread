@@ -1,8 +1,8 @@
 # 2026 技术路线实施进度
 
 > **用途**：跨会话续跑。新会话先读本文件，再读 [`tech-route-2026.md`](tech-route-2026.md)、[`ADR-006`](adr/006-stable-asr-core.md)、[`ADR-007`](adr/007-cue-alignment.md)、[`ADR-008`](adr/008-qwen3-long-audio-chunking.md)、[`test-plan.md`](test-plan.md)。
-> **最后更新**：2026-10-18（第五轮：测试收尾 2 + 0.6B 复测；1306 tests / 79.0%；数码宝贝 EP01 视频 + 54 集日文 CC 到位，视频数量仍缺）
-> **当前阶段**：P2 对齐 + `run_all --asr` + 实机验证完成；测试主链补洞完成（1306 tests / 79.0%）；默认仍走 Whisper。下一步 = **补视频（至少 3 集）→ 清洁日文 CC → 跑 P2-14 验收**；莎莉/阿童木不再作金标。
+> **最后更新**：2026-10-18（第五轮：测试收尾 2 + 0.6B 复测；1306 tests / 79.0%；数码宝贝 EP01 视频 + 54 集日文 CC；EP02/03 下载中）
+> **当前阶段**：P2 对齐 + `run_all --asr` + 实机验证完成；测试主链补洞完成（1306 tests / 79.0%）；默认仍走 Whisper。下一步 = **等 EP02/03 视频 → 三集主故事窗口评测**；等待期间做 EP01 token 时间轴诊断、评测协议、剩余补测。莎莉/阿童木不再作金标。
 > **总目标**：把音频链路从 `WebRTC VAD → kotoba Whisper → 时间重叠匹配` 迁移到 `Qwen3-ASR → Qwen3-ForcedAligner → 全局文本对齐`；默认行为在 P2 验收前保持不变。
 
 ## 0. 当前一句话（clear 后从这里开始）
@@ -11,12 +11,40 @@
 
 **下一步按顺序：**
 
-1. **P2-14 金标验收（当前阻塞：视频数量）**：素材目录 `D:\videos\Animation\TV\数码宝贝`；EP01 视频已到位，**日文 CC 已有 54 集**（`日语字幕\`，需清洁标签/振假名/♪）。至少再补 **2 集视频凑 3 集**（clean/overlap/bgm 各 1 更好）；到齐后填 `eval/manifest.digimon.json` → 清洁参考 → 跑 CER / 边界 P50/P90/±100ms。**中文字幕不能当日文 CER 金标；莎莉/阿童木不再用于验收。**
+1. **P2-14 验收（当前等 EP02/03 视频）**：素材目录 `D:\videos\Animation\TV\数码宝贝`；EP01 视频完整，**用户已人工核对 EP01 日文 CC 与视频同步**；日文 CC 共 54 集已清洁。EP02/03 的 `.mkv.downloading` 目前 0 B（22:15）。齐后按主故事窗口 95–1233s 跑三集 CER / P2 对齐。**中文字幕不能当日文 CER 金标；莎莉/阿童木不再用于验收。**
 2. **参考无关 A/B（改用用户素材）**：阿童木 A/B 已停（原任务取消）；素材到位后用同一批视频跑 Qwen3 1.7B 60s 分块 vs Whisper large-v3 q5（RTF、字数、零时长、时间轴覆盖、跨引擎一致度）。
 3. **chunk 调参**：45/60/90s 在金标上的边界误差 vs 耗时，确定默认。
 4. **0.6B 复测（不依赖金标）**：本轮已跑整集；结果与解释见 §4，待定是否保留草稿模式。
 5. **剩余补测（不阻塞验收）**：根脚本部分分支（65.7%）、`nouns` 旧入口（67.2%）、`whisper_backends`（59%）、`align_cues`（78%）；确认 `auto_classify` / `auto_clean_glossary` 与 `_write_ai_review_json` / `--mode` 的去留。
 6. **默认切换**：只有金标达标才把 `ASR_ENGINE` 切到 `qwen3`；`ASR_ENGINE=whisper` 保留回滚。
+
+## 0.5 clear 后恢复清单
+
+### A. 现在就能做（不依赖新素材）
+
+- [ ] **EP01 token 时间轴诊断/修复**：Qwen3-FA 在 OP/音乐段塌缩（95 个零时长 token，旁白 75.5s vs CC 99.5s）；已有 EP01 视频 + 清洁 CC + ASR JSON，可离线复现。目标：主故事窗口 token 对齐；失败时回退 segment，并补回归测试。
+- [ ] **评测协议落地**：主故事窗口 `95–1233s`（三集同结构）；CC 清洁已完成；还需过滤字幕卡/非对白、实现 dialogue-only CER；先在 EP01 上验证，再用于三集。
+- [ ] **测试补洞**：`lib/whisper_backends.py` 59%、`asr/align_cues.py` 78%、`fix/whisper_pipeline.py` 81%、根脚本 65.7%；`nouns/auto_classify` / `auto_clean_glossary` 仍 0%。
+- [ ] **死代码决策**：`episode_workflow._write_ai_review_json`（无调用方）、`--mode`（残留 flag）、`auto_classify` / `auto_clean_glossary` 旧入口：保留补冒烟，或删除并移除对应测试。
+- [ ] **可选工具化**：把 CC 清洁 + 主故事窗口 + 参考平移做成一个可复用脚本，补测试；当前 clean 工具只做标签清除。
+
+### B. 等素材
+
+- [ ] **EP02/03 视频**：`D:\videos\Animation\TV\数码宝贝` 下 `.mkv.downloading` 目前 0 B；完整后跑三集。
+- [ ] **用户人工确认 E02/E03 日文 CC 与视频同步**（EP01 已确认“对得上”）。
+- [ ] **三集分类**：按实际音频标 `clean` / `overlap` / `bgm`（每类 1 集）。
+- [ ] **三集评测**：主故事 CER / P2 对齐 match + P50/P90/±100ms；先标“CC 参考、非金标”。
+- [ ] **后续**：A/B（需 Whisper 模型）、chunk 调参、12 集 manifest、默认切换评估。
+
+### C. 当前现场（2026-10-18 22:15）
+
+```text
+素材：EP01 视频 ✅；EP02/03 .mkv.downloading 0 B 🟡；日文 CC 54 集 ✅
+压缩包：C:\Users\54238\Desktop\数码宝贝.zip.downloading ≈20.54GB 🟡
+参考：temp/references/digimon/ 已清洁；EP001/002/003.main.srt 已切主故事窗口
+测试：1306 passed / 79.0% / 0 failed
+提交：141b1f1（CC 清洁 + 素材/EP01 冒烟记录）
+```
 
 ## 1. 状态总览
 
