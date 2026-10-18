@@ -124,7 +124,7 @@ python build_glossary.py --findings findings.json --mappings-output noun_mapping
 
 ## 实际效果
 
-用 193 集日语动画（1963 版《铁腕阿童木》）测试了完整流程：
+曾用 193 集日语动画（1963 版《铁腕阿童木》）跑过完整流程（历史记录；该素材字幕为机翻，**不作测试标准**）：
 
 | 指标 | 数值 |
 |------|------|

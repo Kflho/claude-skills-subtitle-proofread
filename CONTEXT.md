@@ -124,11 +124,11 @@ P0 链路（Whisper 编排/VAD、翻译、专名、OP/ED、编排）已补齐；
 
 ASR 架构已按「稳定核心 + 插件适配器」落地：`lib/asr/base.py`（契约）、`registry.py`（自动发现）、`router.py`（路由），新模型只写 `lib/asr/adapters/<name>.py`，不改 core。P1 进度见 `docs/tech-route-progress.md`。
 
-P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 → 信号/置信度）、`fix/align_repair.py`（修复计划/时间码/整集偏移/相邻 cue 联动）、`scripts/asr/align_cues.py`（端到端 CLI，默认 dry-run）、`run_all --asr`（flag 控制）。莎莉 EP001 实机验证完成：`qwen_asr` 180s 分块会塌缩 → worker 自切 60s + 补零（ADR-008）。
+P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 → 信号/置信度）、`fix/align_repair.py`（修复计划/时间码/整集偏移/相邻 cue 联动）、`scripts/asr/align_cues.py`（端到端 CLI，默认 dry-run）、`run_all --asr`（flag 控制）。莎莉 EP001 历史实机验证：`qwen_asr` 180s 分块会塌缩 → worker 自切 60s + 补零（ADR-008；机械/吞吐验证，不作金标）。
 
-素材现状：莎莉 110 集、阿童木 193 集视频都在本地；**两者都没有可信日语参考字幕**（莎莉源字幕是俄语；阿童木 sidecar SRT 是机翻中文、2s 粗轴，不能当金标）。因此 CER/边界验收仍需人工听校；参考无关 A/B 可直接用视频跑。
+素材现状：**验收/测试素材改由用户提供**（完整字幕 + 动画视频文件夹，待接收）。莎莉 110 集、阿童木 193 集视频虽在本地，但**字幕质量差**（莎莉源字幕是俄语；阿童木 sidecar SRT 是机翻中文、2s 粗轴），按用户要求**不再用于测试/验收**；其历史数据只保留机制回放用途（ADR-007/008）。
 
-测试：935 passed / 0 failed / 62.0% 覆盖；矩阵与剩余 P1 缺口见 `docs/test-plan.md`。
+测试：967 passed / 0 failed / 64.0% 覆盖；矩阵与剩余 P1 缺口见 `docs/test-plan.md`。
 
 ## 配置
 

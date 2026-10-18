@@ -3,10 +3,19 @@
 import pytest
 
 from nouns.noun_checker import (
-    ChineseNormalizer, JapaneseExtractor, JapaneseNormalizer,
-    _dedup_overlapping, match_candidates, parse_noun_table, text_similarity,
-    get_normalizer,
+    ChineseExtractor, ChineseNormalizer, JapaneseExtractor,
+    JapaneseNormalizer, _dedup_overlapping, _is_valid_text,
+    check_oped_consistency, check_srt, get_extractor, get_normalizer,
+    match_candidates, parse_noun_table, print_summary, text_similarity,
 )
+
+
+def _srt(*texts):
+    blocks = []
+    for i, text in enumerate(texts, 1):
+        blocks.append(f'{i}\n00:00:{i * 2:02d},000 --> '
+                      f'00:00:{i * 2 + 1:02d},000\n{text}\n')
+    return '\n'.join(blocks)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -135,3 +144,185 @@ def test_extract_calling_pattern():
     candidates = JapaneseExtractor.extract('おい、サリー！')
     texts = [c['text'] for c in candidates]
     assert 'サリー' in texts
+
+
+def test_get_extractor_factory():
+    assert get_extractor('ja') is JapaneseExtractor
+    assert get_extractor('zh') is ChineseExtractor
+    assert get_extractor('??') is JapaneseExtractor
+
+
+def test_extract_kanji_suffix_skips_hiragana_prefix():
+    found = JapaneseExtractor.extract('御茶水博士が来た')
+    assert '御茶水博士' in [c['text'] for c in found]
+
+    skipped = JapaneseExtractor.extract('は御茶水博士')
+    assert '御茶水博士' not in [c['text'] for c in skipped]
+
+
+def test_extract_intro_and_known_katakana():
+    intro = JapaneseExtractor.extract('アトムっていうんだ')
+    assert ('アトム', 'introduction') in [(c['text'], c['type'])
+                                          for c in intro]
+
+    known = JapaneseExtractor.extract('サリーが来た', {'サリー'})
+    assert ('サリー', 'known_katakana') in [(c['text'], c['type'])
+                                            for c in known]
+
+
+def test_extract_filters_common_katakana():
+    candidates = JapaneseExtractor.extract('テレビちゃんが来た')
+    assert 'テレビちゃん' not in [c['text'] for c in candidates]
+
+
+# ═══════════════════════════════════════════════════════════════
+# Chinese extractor
+# ═══════════════════════════════════════════════════════════════
+
+def test_chinese_extract_suffix_calling_intro_quoted():
+    suffix = ChineseExtractor.extract('阿童木先生来了')
+    assert ('阿童木先生', 'name_suffix') in [(c['text'], c['type'])
+                                             for c in suffix]
+
+    calling = ChineseExtractor.extract('喂，阿童木！')
+    assert ('阿童木', 'calling') in [(c['text'], c['type'])
+                                     for c in calling]
+
+    intro = ChineseExtractor.extract('我叫阿童木')
+    assert ('阿童木', 'introduction') in [(c['text'], c['type'])
+                                          for c in intro]
+
+    quoted = ChineseExtractor.extract('「阿童木」来了')
+    assert ('阿童木', 'quoted') in [(c['text'], c['type'])
+                                    for c in quoted]
+
+
+def test_chinese_extract_known_and_common_words():
+    known = ChineseExtractor.extract('莎莉', {'莎莉'})
+    assert ('莎莉', 'known_hanzi') in [(c['text'], c['type'])
+                                       for c in known]
+
+    common = ChineseExtractor.extract('我们先生来了')
+    assert '我们先生' not in [c['text'] for c in common]
+
+
+# ═══════════════════════════════════════════════════════════════
+# Validity / summary
+# ═══════════════════════════════════════════════════════════════
+
+@pytest.mark.parametrize('text, lang, valid', [
+    ('こんにちは', 'ja', True),
+    ('hello', 'ja', False),
+    ('あ', 'ja', False),
+    ('你好世界', 'zh', True),
+    ('hello world', 'zh', False),
+])
+def test_is_valid_text(text, lang, valid):
+    assert _is_valid_text(text, lang) is valid
+
+
+def test_print_summary_marks_attention_and_truncates(capsys):
+    results = [{'status': 'mismatch', 'cue_start': '00:00:01,000',
+                'candidate': 'サリイ', 'suggestion': 'サリー',
+                'context': '...サリイが来た...'}]
+    results += [{'status': 'unknown', 'cue_start': f'00:00:{i:02d},000',
+                 'candidate': f'名{i}', 'suggestion': None,
+                 'context': 'ctx'} for i in range(2, 23)]
+    report = {'srt_file': 'EP001.srt', 'lang': 'ja',
+              'known_nouns_count': 3, 'cues_scanned': 10,
+              'findings': len(results),
+              'stats': {'exact': 0, 'variant': 0, 'mismatch': 1,
+                        'unknown': 21},
+              'results': results}
+
+    print_summary(report)
+
+    out = capsys.readouterr().out
+    assert '[FIX] 00:00:01,000 | サリイ → サリー' in out
+    assert '... and 2 more' in out
+
+
+# ═══════════════════════════════════════════════════════════════
+# check_srt / check_oped_consistency
+# ═══════════════════════════════════════════════════════════════
+
+def _write_table(tmp_path, rows):
+    path = tmp_path / 'proper-nouns.md'
+    path.write_text('| 日语 | 假名 | 说明 |\n|---|---|---|\n'
+                    + '\n'.join(rows) + '\n', encoding='utf-8')
+    return path
+
+
+def test_check_srt_exact_and_variant(tmp_path):
+    srt = tmp_path / 'EP001.srt'
+    srt.write_text(_srt('おい、サリー！', 'おい、サーリー！'),
+                   encoding='utf-8')
+    table = _write_table(tmp_path, ['| サリー | さりー | 主角 |'])
+
+    report = check_srt(str(srt), str(table), lang='ja')
+
+    assert report['cues_scanned'] == 2
+    assert report['stats'] == {'exact': 1, 'variant': 1}
+    assert report['results'][0]['cue_start'] == report['results'][0]['cue_start']
+
+
+def test_check_srt_without_table(tmp_path):
+    srt = tmp_path / 'EP001.srt'
+    srt.write_text(_srt('おい、サリー！'), encoding='utf-8')
+    report = check_srt(str(srt), str(tmp_path / 'nope.md'), lang='ja')
+    assert report == {'error': 'No known nouns found in table'}
+
+
+def _write_timed_srt(path, entries):
+    blocks = []
+    for i, (start, end, text) in enumerate(entries, 1):
+        blocks.append(f'{i}\n{start} --> {end}\n{text}\n')
+    path.write_text('\n'.join(blocks), encoding='utf-8')
+
+
+def test_check_oped_consistency_needs_two_episodes(tmp_path):
+    _write_timed_srt(tmp_path / 'EP001.srt', [
+        ('00:00:01,000', '00:00:02,000', 'サリーの歌'),
+    ])
+    result = check_oped_consistency(str(tmp_path), op_boundary=10,
+                                    ed_boundary=10)
+    assert result['summary']['error'].startswith('Need at least 2')
+    assert result['fixes'] == []
+
+
+def test_check_oped_consistency_flags_variants(tmp_path):
+    for episode, op_text in (('EP001', 'サーリーの歌'),
+                             ('EP002', 'サリーの歌'),
+                             ('EP003', 'サリーの歌')):
+        _write_timed_srt(tmp_path / f'{episode}.srt', [
+            ('00:00:01,000', '00:00:02,000', op_text),
+            ('00:01:35,000', '00:01:36,000', 'エンディング'),
+            ('00:01:40,000', '00:01:41,000', '本編'),
+        ])
+
+    result = check_oped_consistency(str(tmp_path), op_boundary=10,
+                                    ed_boundary=10)
+
+    assert result['summary']['episodes'] == 3
+    assert result['summary']['op_groups'] == 1
+    assert result['summary']['op_variants_found'] == 1
+    assert result['summary']['total_fixes'] == 1
+    fix = result['fixes'][0]
+    assert fix['file'] == 'EP001.srt'
+    assert fix['original'] == 'サーリーの歌'
+    assert fix['replacement'] == 'サリーの歌'
+    assert 'OP 歌词统一' in fix['note']
+
+
+def test_check_oped_consistency_skips_noise_canonical(tmp_path):
+    for episode, op_text in (('EP001', 'ABC'), ('EP002', 'ABC'),
+                             ('EP003', 'ABD')):
+        _write_timed_srt(tmp_path / f'{episode}.srt', [
+            ('00:00:01,000', '00:00:02,000', op_text),
+            ('00:01:40,000', '00:01:41,000', '本編'),
+        ])
+
+    result = check_oped_consistency(str(tmp_path), op_boundary=10,
+                                    ed_boundary=10)
+
+    assert result['summary']['total_fixes'] == 0

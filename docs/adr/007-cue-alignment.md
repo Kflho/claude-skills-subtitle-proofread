@@ -73,4 +73,4 @@
   `_resolve_joint_time_fixes` 做集合级冲突消解；回归测试见 `tests/test_align_repair.py`
   （密集相邻 cue 同时移动、冲突提议双方 review、静止邻居仍拦截、既有重叠容忍）。
 - P3 FireRedVAD 的 speech 时间线替换 `speech_coverage` 的 ASR 近似。
-- 用真实日语视频（莎莉 EP001 已到位；阿童木 193 集待视频）跑 §9 的 A/B，填 progress §4。
+- 用用户提供的金标素材（完整字幕 + 视频）跑 §9 的 A/B，填 progress §4。莎莉/阿童木字幕质量差，不作验收素材。

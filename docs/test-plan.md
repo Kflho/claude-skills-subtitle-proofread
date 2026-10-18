@@ -7,11 +7,11 @@
 
 ```text
 python -m pytest -q
-935 passed in ~8.5s          # 无网络、无模型、无真实项目依赖
-coverage: 62.0% (13,607 statements)
+967 passed in ~6.5s          # 无网络、无模型、无真实项目依赖
+coverage: 64.0% (13,607 statements)
 ```
 
-本轮 **+359 tests**（576 → 935），覆盖率 **36.3% → 62.0%**，0 failed。
+本轮 **+391 tests**（576 → 967），覆盖率 **36.3% → 64.0%**，0 failed。
 
 新增/扩展测试文件：
 
@@ -34,6 +34,7 @@ coverage: 62.0% (13,607 statements)
 | `test_episode_workflow.py` | 资源驱动步骤选择、findings 注入、dry-run、`step_audio` 分派 Whisper/ASR、`step_apply` 只报不写 |
 | `test_whisper_fixer.py` | VAD 缓存 L1 闸门、Tier1 三分类、Tier2 升级、重试模型、ja→zh 译文替换 |
 | `test_reuse.py` | judge R1–R5、复核 JSON 解析、锚点单调链、pair_up 缓存/失败、apply dry-run/写盘 |
+| `test_noun_checker.py` / `test_apply_map.py`（扩展） | 专名检查/统一的提取模式、表格解析、批量替换、清单与映射导出 |
 
 ### 覆盖率按目录（本轮 vs 上轮）
 
@@ -41,7 +42,7 @@ coverage: 62.0% (13,607 statements)
 |---|---:|---:|---:|---|
 | `scripts/lib` | 3,313 | **75.3%** | 73.7% | 对齐/ASR 契约、gates、llm、video_scan 较稳；whisper_backends 59% |
 | `scripts/fix` | 3,220 | **72.6%** | 28.4% | whisper_pipeline 81%、whisper_fixer 93%、fragment_processor 90%、align_repair 92.5%、oped 70–77% |
-| `scripts/nouns` | 2,424 | **55.8%** | 9.5% | aggregate 86%、build_glossary 92%、extractor 85%、find_suspect_nouns 74%；noun_checker 39%、apply_map 28% |
+| `scripts/nouns` | 2,424 | **67.2%** | 9.5% | aggregate 86%、build_glossary 92%、extractor 85%、find_suspect_nouns 74%、noun_checker 39→79%、apply_map 28→96% |
 | `scripts` 根 | 2,005 | **42.3%** | 7.5% | translate_srt 85%、polish_zh 99%、run_all 34% |
 | `scripts/asr` | 574 | 42.5% | 42.5% | worker 37%（模型分支）、CLI 27%/78% |
 | `scripts/reuse` | 389 | **62.2%** | 10.3% | align 70%、apply 65%、common 46% |
@@ -86,7 +87,7 @@ coverage: 62.0% (13,607 statements)
 | Whisper 后端 | `lib/whisper_backends.py` | `test_whisper_backends` | **59%** | faster/openai 已测；`validate_backend`、缺失参数的 branch 未测 |
 | Fixer/片段 | `fix/whisper_fixer.py`, `fragment_processor.py` | `test_whisper_fixer`, `test_fragment_processor` | **90–93%** | 剩余：paired `__DELETE__` 分支、报告更新异常路径 |
 | OP/ED | `fix/oped_fixer.py`, `oped_fill.py`, `ass/ass_repair.py` | `test_oped_fixer`, `test_oped_fill`, `test_ass_repair` | **70–77%** | 器乐/歌词/正片分类与填空已测；Whisper 采样与 API 边界仍需 fake |
-| Phase 3 专名 | `nouns/aggregate`, `build_glossary`, `extractor`, `find_suspect_nouns` | 4 个测试文件 | **73–92%** | noun_checker / apply_map 的主流程仍缺 |
+| Phase 3 专名 | `nouns/*` | 5 个测试文件 | **74–96%** | run_all step_* / scan / apply 的主流程仍缺 |
 | 翻译 | `translate_srt.py`, `fix/translate_srt.py`, `polish_zh.py` | 3 个新测试文件 | **85–99%** | 只剩 `main` 的少量分支与真实 API 形状 |
 | 批量应用 | `apply/apply_fixes.py` | `test_apply_fixes` | 35% | `main`、ASS 分支、trad→simp |
 | 参考复用 | `reuse/*` | `test_reuse`, `test_reuse_common` | **62%** | align CLI 主流程未测 |
@@ -112,7 +113,7 @@ coverage: 62.0% (13,607 statements)
 - [x] `fix/whisper_fixer.py`（93%）与 `fix/fragment_processor.py`（90%）：VAD 缓存闸门、Tier1 三分类、Tier2/重试、AI 片段生成与应用。
 - [x] `nouns/find_suspect_nouns.py`（74%）的 `_cluster_by_source` / `search_corrections` / `_apply_correction_fixes` / `_format_candidates`。
 - [x] `reuse/align.py`（70%）、`reuse/apply.py`（65%）：R1–R5 采纳规则、复核缓存与失败、锚点链、dry-run/写盘。
-- [ ] `nouns/noun_checker.py`（39%）与 `nouns/apply_map.py`（28%）的主流程。
+- [x] `nouns/noun_checker.py`（79%）与 `nouns/apply_map.py`（96%）的主流程：提取模式、表格解析、运行替换、清单与映射导出。
 - [ ] `run_all.step_scan/step_nouns/step_apply_all/step_deliver/step_clean` 的副作用分支（只测了 main 的调用顺序）。
 
 ### P2
@@ -163,13 +164,13 @@ python -m pytest -q tests/test_alignment_base.py tests/test_alignment_timeline.p
 
 ## 6. 覆盖率门槛（渐进）
 
-当前 **62.0%**。不追求一次到 80%，按缺口补：
+当前 **64.0%**。不追求一次到 80%，按缺口补：
 
 | 阶段 | 目标 | 重点 |
 |---|---:|---|
 | 上轮 | 36% | 基线 |
-| **现在** | **62.0%** | P0 链路 + 相邻联动 + 修复/片段/复用补齐 |
-| 下一轮 | ≥70% | noun_checker / apply_map、scan / apply 主流程、run_all 各 step |
+| **现在** | **64.0%** | P0 链路 + 相邻联动 + 修复/片段/复用/专名补齐 |
+| 下一轮 | ≥70% | scan / apply 主流程、run_all 各 step、worker chunk |
 | 再下一轮 | ≥75% | worker chunk、scan VAD、CLI 主流程 |
 
 > 覆盖率不是目的：**关键路径（扫描→修复→专名→翻译→应用→交付）每个分支至少有一条测试**，比总百分比更重要。
@@ -181,3 +182,5 @@ python -m pytest -q tests/test_alignment_base.py tests/test_alignment_timeline.p
 | `translate_srt.load_glossary` | 表头被当成一条「日语→中文」映射；`build_glossary` 的「日语\|次数\|变体」表被当译名表，数字会被预替换进正文 | `test_load_glossary_skips_header_but_keeps_mapping`、`test_load_glossary_ignores_count_tables` |
 | `nouns/aggregate.py`、`extractor.py`、`translate_srt.py` | `os.path.relpath` 在 Windows 跨盘（temp 在 C:、项目在 D:）抛 `ValueError`，日志行能打死整条流水线 | `test_main_init_seed_and_merge_sidecar` 等（改用 `lib.project_utils.display_path`） |
 | `fix/oped_fill._apply_templates` | `write_subtitles(cues, fpath)` 参数顺序反了，歌词模板永远写不回文件 | `test_apply_templates_fills_only_blank_op_ed_cues` |
+| `reuse/align.pair_up` | 双重 `zip` 让 work 返回值多包一层，`r` 恒为批次列表 | 所有候选一律缓存 verified（LLM 复核失效） | `test_pair_up_aborts_when_all_checks_fail`、`test_pair_up_reuses_cache_without_llm` |
+| `nouns/noun_checker` 中文呼称 | 正则不识别全角逗号（`喂，阿童木！`） | 呼称候选漏检 | `test_chinese_extract_suffix_calling_intro_quoted` |
