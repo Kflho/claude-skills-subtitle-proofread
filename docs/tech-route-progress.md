@@ -1,7 +1,7 @@
 # 2026 技术路线实施进度
 
 > **用途**：跨会话续跑。新会话先读本文件，再读 [`tech-route-2026.md`](tech-route-2026.md)、[`ADR-006`](adr/006-stable-asr-core.md)、[`ADR-007`](adr/007-cue-alignment.md)、[`ADR-008`](adr/008-qwen3-long-audio-chunking.md)、[`test-plan.md`](test-plan.md)。
-> **最后更新**：2026-10-18（第八轮：测量有效性 + signed 偏差/覆盖分解 + 时间轴空洞诊断；1378 tests / 79.7%）
+> **最后更新**：2026-10-18（第八轮：测量有效性 + signed 偏差/覆盖分解 + 时间轴空洞诊断；1378 tests / 79.7%；提交 8c7615b）
 > **当前阶段**：EP01–03 视频/日文 CC 齐备；只读基准 + 防过拟合协议落地；**用户确认视频/CC 无真实偏移**。第八轮把“P90 为什么下不去”拆开：test 集 90% 的 matched cue 起点系统性早 −0.37/−0.40 s（CC 显示约定），且 P90 只覆盖 42–45% 的 CC 字符；FA 塌缩吞掉成段对白（累计空洞 122–229 s）。`fix_by_asr` 整集偏移改为**默认关**，分段重对齐实测更差、留 P3。
 > **总目标**：把音频链路从 `WebRTC VAD → kotoba Whisper → 时间重叠匹配` 迁移到 `Qwen3-ASR → Qwen3-ForcedAligner → 全局文本对齐`；默认行为在 P2 验收前保持不变。
 
@@ -113,7 +113,7 @@ python scripts\eval\diagnose_timeline.py --asr-json temp\asr\digimon_ep001_main.
 
 ## 0.7 第八轮交接（2026-10-18，clear 入口）
 
-**提交**：本轮测量/开关/诊断提交（见 git log 顶部；前序 7 轮见 §0.6）。
+**提交**：`8c7615b`（测量有效性 + 偏移开关 + 空洞诊断；前序 7 轮见 §0.6）。
 **测试**：1378 passed / 79.7% / 0 failed（仓库根跑 `pytest -q tests`，约 9 s）。
 **默认**：`ASR_ENGINE=whisper` 不变；**`fix_by_asr` 整集偏移默认关**，`--asr-global-offset`
 或 `ASR_GLOBAL_OFFSET=1` 才应用（估计值仍写入 `temp/scans/<EP>.alignment.json`）。
