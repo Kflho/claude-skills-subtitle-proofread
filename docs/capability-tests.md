@@ -9,7 +9,7 @@
 | 模型 | 声称能力 | 已做测试 | 结论 | 允许接入 |
 |---|---|---|---|---|
 | Qwen3-ASR-1.7B + FA | 日语 ASR + 字符级对齐 | 3 集 CC 基准、端到端、signed/空洞 | **有强证据**，日语媒体第一梯队 | ✅ 主 ASR/对齐 |
-| FireRedVAD + AED | VAD + speech/singing/music | README 样例、EP001 全窗口、空洞归因 | 能跑、能分事件；**空洞归因只支持“过滤”，不支持“门控”** | 🟡 只作 AudioHints 证据 |
+| FireRedVAD + AED | VAD + speech/singing/music | README 样例、EP001–003 整集、空洞归因、OP/ED 窗口 | 能分事件；singing 在 OP/ED 是正文 ~6 倍（三集一致）；**空洞只 12/53 为 speech 主导，只支持过滤** | 🟡 证据可用，主流程未接 |
 | VibeVoice-ASR-BitNet | 60min Who/When/What + 热词 | 60s 日语动画片段（text/json 两种 prompt） | **没有 who/when；专名更差；用户决定删除说话人** | ⛔ 已删资产，不接 |
 | Mel-Band RoFormer | 人声分离 | 无（只有权重，运行时未接） | 未测 | ⛔ 暂不接 |
 | LLM 翻译（DeepSeek） | 日→中翻译 | 1 句短句 API 验证 | 能调用；**无成集质量证据** | 🟡 只做 20 cue pilot |
@@ -23,29 +23,48 @@
   VAD speech 666.7s/290 段；AED speech 558.8s/309 段、singing 101.8s/55 段、music 893.8s/78 段。
 - `AudioHints` provider/CLI 已接线；EP001 生成 442 事件（`temp/scans/EP001.audio_hints.json`）。
 
-### 空洞归因实验（EP001，现有 FA 时间轴）
+### 空洞归因实验（EP001–003，现有 FA 时间轴）
 
-用 `lost_spans` 找 30 个空洞（合计 375.2s；含 collapsed_run + overlong），
-把每个空洞与 AED 的 speech/music/singing 求重叠：
+用 `lost_spans` 找空洞，与整集 AED 的 speech/music/singing 求重叠（主窗口对齐后）：
 
-| 空洞类型 | 数量 | 时长 | 解读 |
-|---|---:|---:|---|
-| speech 覆盖 ≥50% | 6 | 77.1s | 更像真的“对白被吞” |
-| speech 覆盖 20–50% | 15 | 192.5s | 语音+音乐混合，需 AI/人工判 |
-| speech 覆盖 <20% | 9 | 105.6s | 更像 BGM/唱歌，不是丢对白 |
-| music 覆盖 ≥80% | 20 | 268.7s | 音乐段空洞，可能是正常现象 |
-| singing 覆盖 ≥30% | 4 | 59.6s | 唱歌段，可能是 OP/ED/插曲 |
+| EP | 空洞数 | 总时长 | speech≥50%（真对白候选） | 其中 speech 秒 |
+|---|---:|---:|---:|---:|
+| EP001 | 30 | 375.2s | 6 | 125.9s |
+| EP002 | 9 | 139.0s | 2 | 48.4s |
+| EP003 | 14 | 186.0s | 4 | 47.0s |
+| **合计** | **53** | **700.2s** | **12（23%）** | **221.3s** |
+
+EP001 细分：speech 20–50% 15 个/192.5s；speech <20% 9 个/105.6s；
+music ≥80% 20 个/268.7s；singing ≥30% 4 个/59.6s。
 
 **结论**：FireRedVAD 能把“空洞”分成“可能丢对白 / 可能是音乐”两类，**适合做证据过滤**；
-但不能证明“VAD 说没语音就删/不改”。当前 30 个空洞里只有 6 个是 speech 主导，
-说明“空洞=FA 塌缩”这个假设过强，直接拿空洞数当质量指标会高估问题。
+三集里只有 12/53（23%）是 speech 主导，说明“空洞=FA 塌缩”这个假设过强，
+直接拿空洞数当质量指标会高估问题。
 
 ### 未测（不能宣称）
 
-- **OP/ED 候选**：现有 hints 只覆盖主故事窗口 `[95,1240]`，OP/ED 可能在窗口外；
-  必须用**整集音频**重跑 AED，再和 CC 的 OP/ED 歌词/人工标注对比，才能说“能检测 OP/ED”。
 - 阈值敏感性：`speech_threshold=0.4` 等默认值未扫；不同 BGM 强度下可能漂移。
 - 与 CC 边界的相关性：AED speech onset 是否比 ASR 更接近 cue 边界，未测。
+- 候选规则的 precision/recall：还没在 3 集上跑“自动选 OP/ED 窗口”的规则，只验证了信号。
+
+### 2.5 整集 OP/ED 实验（EP001–003，2026-10-19）
+
+用整集音频（约 1386s/集）重跑 AED，按 CC 主窗口切 OP/正文/ED：
+
+| EP | OP singing | 正文 singing | ED singing | 正文 music |
+|---|---:|---:|---:|---:|
+| EP001 | 56.1% | 9.0% | 50.4% | 78.0% |
+| EP002 | 56.0% | 8.0% | 51.4% | 69.0% |
+| EP003 | 56.0% | 8.5% | 51.3% | 59.6% |
+
+（窗口：OP `[0,95]`、正文 `[95,1240]`、ED `[1240,end]`；三集 singing 在 OP/ED 均为正文的 6 倍左右。）
+
+- 三集 OP singing 段几乎逐秒一致（18.2–80.9s），是同一段 OP 素材，说明检测可复现；
+- ED singing 段约 1263–1348s，三集也基本一致；
+- **singing 是可用的 OP/ED 信号；music 在正文仍占 59.6–78%，单独不可用**；
+- 下一步：用“头尾 singing 富集 + music/CC 边界”写候选规则，在 3 集上与 CC 歌词比对
+  precision/recall，通过后再接主流程。
+
 
 ## 3. VibeVoice-ASR-BitNet：能力测试（负面，资产已删除）
 

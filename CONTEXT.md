@@ -175,9 +175,10 @@ ASR 架构已按「稳定核心 + 插件适配器」落地：`lib/asr/base.py`�
 `lib/audio/fireredvad.py`（主环境 subprocess 调 `.venv-qwen` worker，不 import torch）、
 `scripts/audio/detect_events.py`（16k mono wav → `<EP>.audio_hints.json`）。
 FireRedVAD/AED 已下载并实测，EP001 生成 442 个事件（speech 48.8% / singing 8.9% / music 78.1%）；
-**主流程尚未消费 hints**。能力测试（`docs/capability-tests.md`）：EP001 的 30 个空洞里
-只有 6 个（77.1s）是 speech 主导，9 个（105.6s）更像音乐 → hints 只能做证据过滤，不能做门控；
-OP/ED 需整集音频另测。说话人/VibeVoice 已删除（用户决定），不再保留计划。
+**主流程尚未消费 hints**。能力测试（`docs/capability-tests.md`）：三集 53 个空洞里
+只有 12 个（23%）是 speech 主导，其余多为音乐/混合 → hints 只能做证据过滤，不能做门控；
+整集 OP/ED 实验：singing 在 OP 56% / ED 50–51% vs 正文 8–9%，是可用的候选信号；
+三集 OP 段几乎逐秒一致。候选规则尚未接主流程。说话人/VibeVoice 已删除（用户决定），不再保留计划。
 
 P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 → 信号/置信度；`quality.py` 评估零时长/overlong/空洞 `lost_spans`，token 灾难性塌缩才回退 segment）、`fix/align_repair.py`（修复计划/时间码/整集偏移/相邻 cue 联动；结尾 display linger 保留）、`scripts/asr/align_cues.py`（端到端 CLI，默认 dry-run；整集偏移改为 opt-in）、`run_all --asr`（flag 控制；`--asr-global-offset` 单独 opt-in）。**用户确认日语 CC 边界即测试标准**（不再另建人工金标），raw 数字直接判定，评测入口是 scripts/eval/release_gate.py（目标 + 基线回归，退出码 0/1）；三集基准：`temp/reports/digimon_qwen3_raw.{json,md}`、`digimon_whisper_raw.{json,md}`（第八轮新增 signed 偏差/覆盖分解/空洞：`temp/reports/digimon_qwen3_r8.*`、`digimon_whisper_r8.*`）。**第八轮结论**：test 集 90% matched cue 起点系统性早 0.37–0.40 s（重转写复现，是当前对齐的起点缺陷；EP001 仅 −55 ms），P90 只覆盖 42–45% 的 CC 字符，FA 塌缩吞掉成段对白（累计空洞 122–229 s）；分段重对齐/overlong/cue 级 rate trim 均实测无收益，起点偏差与空洞要 P3 VAD 才能修。
 
