@@ -1,51 +1,52 @@
 # 2026 技术路线实施进度
 
 > **用途**：跨会话续跑。新会话先读本文件，再读 [`tech-route-2026.md`](tech-route-2026.md)、[`ADR-006`](adr/006-stable-asr-core.md)、[`ADR-007`](adr/007-cue-alignment.md)、[`ADR-008`](adr/008-qwen3-long-audio-chunking.md)、[`test-plan.md`](test-plan.md)。
-> **最后更新**：2026-10-18（第五轮：测试收尾 2 + 0.6B 复测；1306 tests / 79.0%；数码宝贝 EP01 视频 + 54 集日文 CC；EP02/03 下载中）
-> **当前阶段**：P2 对齐 + `run_all --asr` + 实机验证完成；测试主链补洞完成（1306 tests / 79.0%）；默认仍走 Whisper。下一步 = **等 EP02/03 视频 → 三集主故事窗口评测**；等待期间做 EP01 token 时间轴诊断、评测协议、剩余补测。莎莉/阿童木不再作金标。
+> **最后更新**：2026-10-18（第六轮：三集就绪 + 参考基准 + 去启发式；1362 tests / 79.6%；EP01–03 主故事窗口已跑）
+> **当前阶段**：EP01–03 视频/日文 CC 齐备；`episode_benchmark.py` 只读基准 + `eval/protocol.md` 防过拟合协议落地；`align_cues` 默认整集偏移；结尾「display linger」不再被自动截短。默认仍走 Whisper，P2-14 指标未达标。
 > **总目标**：把音频链路从 `WebRTC VAD → kotoba Whisper → 时间重叠匹配` 迁移到 `Qwen3-ASR → Qwen3-ForcedAligner → 全局文本对齐`；默认行为在 P2 验收前保持不变。
 
 ## 0. 当前一句话（clear 后从这里开始）
 
-已经完成：P1 稳定 ASR 核心、P2 对齐层、`run_all --asr` 接入、莎莉 EP001 实机验证（发现并修复 `qwen_asr` 180s 分块导致的时间戳塌缩：worker 自切 60s + 补零，RTF 0.83→0.207–0.295）、整集偏移估计、**相邻 cue 联动求解（无偏移回放自动应用 89 → 262）**；**测试收尾：1306 passed / 79.0%（上轮 1162 / 74.0%）**，补齐 run_all/scanner/apply/worker/ass/reuse/whisper_utils/episode_workflow/eval 主链，并修掉 6 个真 bug + 1 处日志误导（扫描产物坏 JSON、ASS replace_name、SRT 繁→简、单句 segments 丢标点、worker 非对象 JSON、separate_vocals 裸文件名）。
+已经完成：P1 稳定 ASR 核心、P2 对齐层、`run_all --asr` 接入、实机验证、相邻 cue 联动；**第六轮**把日语参考字幕变成可复现的 held-out 基准（EP01=dev，EP02/03=test），并据此修掉两个真实问题：`align_cues` 没做整集偏移（test P50 400→57.5 ms）、自动修复会截短字幕显示时间（三集 113 条 → 0 条）。同时补了时间轴质量评估/segment 兜底、只读评测器、负结果记录。**测试 1362 passed / 79.6% / 0 failed。**
 
 **下一步按顺序：**
 
-1. **P2-14 验收（当前等 EP02/03 视频）**：素材目录 `D:\videos\Animation\TV\数码宝贝`；EP01 视频完整，**用户已人工核对 EP01 日文 CC 与视频同步**；日文 CC 共 54 集已清洁。EP02/03 的 `.mkv.downloading` 目前 0 B（22:15）。齐后按主故事窗口 95–1233s 跑三集 CER / P2 对齐。**中文字幕不能当日文 CER 金标；莎莉/阿童木不再用于验收。**
-2. **参考无关 A/B（改用用户素材）**：阿童木 A/B 已停（原任务取消）；素材到位后用同一批视频跑 Qwen3 1.7B 60s 分块 vs Whisper large-v3 q5（RTF、字数、零时长、时间轴覆盖、跨引擎一致度）。
-3. **chunk 调参**：45/60/90s 在金标上的边界误差 vs 耗时，确定默认。
-4. **0.6B 复测（不依赖金标）**：本轮已跑整集；结果与解释见 §4，待定是否保留草稿模式。
-5. **剩余补测（不阻塞验收）**：根脚本部分分支（65.7%）、`nouns` 旧入口（67.2%）、`whisper_backends`（59%）、`align_cues`（78%）；确认 `auto_classify` / `auto_clean_glossary` 与 `_write_ai_review_json` / `--mode` 的去留。
-6. **默认切换**：只有金标达标才把 `ASR_ENGINE` 切到 `qwen3`；`ASR_ENGINE=whisper` 保留回滚。
+1. **P2-14 验收**：三集已跑（§4.6）。当前 test split：CER micro 0.2633、起点 P50 57.5 ms、全匹配 P90 1151 ms、可靠匹配 P90 385 ms、±100 ms 68.3%。**P90 仍 >300 ms，未达标**；剩余误差来自短语气词/重复台词的歧义匹配和 FA 零时长，不能靠调阈值。
+2. **机制修复（不是调参）**：P3 FireRedVAD 或分段重对齐，处理 FA 在音乐/重叠段的零时长；短 cue 的歧义匹配按 ADR-007 的置信度规则进 review，不计入自动修复。
+3. **P0 A/B**：同一批三集跑 Qwen3 1.7B 60s vs Whisper large-v3 q5，记录 CER、RTF、零时长、时间轴覆盖；dev/test 分开。
+4. **chunk 调参**：只用无参考内部指标（零时长率、RTF）在 dev 上选 45/60/90；test 只验证一次。
+5. **P4 翻译/润色**：prompt 用原文 + glossary + 场景，不把参考字幕当答案；沿用 ADR-009 的证据规则。
+6. **默认切换**：P2-14 达标前不切 `ASR_ENGINE`。
 
 ## 0.5 clear 后恢复清单
 
-### A. 现在就能做（不依赖新素材）
+### A. 现在就能做
 
-- [ ] **EP01 token 时间轴诊断/修复**：Qwen3-FA 在 OP/音乐段塌缩（95 个零时长 token，旁白 75.5s vs CC 99.5s）；已有 EP01 视频 + 清洁 CC + ASR JSON，可离线复现。目标：主故事窗口 token 对齐；失败时回退 segment，并补回归测试。
-- [ ] **评测协议落地**：主故事窗口 `95–1233s`（三集同结构）；CC 清洁已完成；还需过滤字幕卡/非对白、实现 dialogue-only CER；先在 EP01 上验证，再用于三集。
-- [ ] **测试补洞**：`lib/whisper_backends.py` 59%、`asr/align_cues.py` 78%、`fix/whisper_pipeline.py` 81%、根脚本 65.7%；`nouns/auto_classify` / `auto_clean_glossary` 仍 0%。
-- [ ] **死代码决策**：`episode_workflow._write_ai_review_json`（无调用方）、`--mode`（残留 flag）、`auto_classify` / `auto_clean_glossary` 旧入口：保留补冒烟，或删除并移除对应测试。
-- [ ] **可选工具化**：把 CC 清洁 + 主故事窗口 + 参考平移做成一个可复用脚本，补测试；当前 clean 工具只做标签清除。
+- [x] **EP01 token 时间轴诊断/修复**：`diagnose_timeline.py` 可离线复现（EP01 main：90/962 零时长、39 个 run、最长 18；segments 19/237）。已加质量评估 + segment 兜底 + 零时长 span 不自动修；但「无语音证据不补时间」，彻底修复留给 P3 VAD/分段重对齐。
+- [x] **评测协议落地**：`eval/protocol.md` + `episode_benchmark.py`（只读、dev/test 分组、主故事窗口、CER/边界/计划安全性）；dialogue-only CER 仍待做（CC 字幕卡/歌词会抬高 CER）。
+- [ ] **测试补洞**：`lib/whisper_backends.py`、根脚本、`nouns` 旧入口；本轮新增 56 条（1306→1362）。
+- [ ] **死代码决策**：`episode_workflow._write_ai_review_json`、`--mode`、`auto_classify` / `auto_clean_glossary` 旧入口。
+- [ ] **可选工具化**：CC 清洁 + 主故事窗口 + 参考平移仍是一次性脚本；`diagnose_timeline` 有窗口/偏移参数但不是完整工具。
 
-> **新会话入口**：先读本节 A/B/C，再读 `eval/materials.md` §6/§7。
+> **新会话入口**：先读本节 A/B/C，再读 `eval/protocol.md`、`eval/materials.md` §6/§7、`docs/adr/009-reference-as-benchmark.md`。
 
-### B. 等素材
+### B. 素材已就绪（2026-10-18 22:29）
 
-- [ ] **EP02/03 视频**：`D:\videos\Animation\TV\数码宝贝` 下 `.mkv.downloading` 目前 0 B；完整后跑三集。
-- [ ] **用户人工确认 E02/E03 日文 CC 与视频同步**（EP01 已确认“对得上”）。
-- [ ] **三集分类**：按实际音频标 `clean` / `overlap` / `bgm`（每类 1 集）。
-- [ ] **三集评测**：主故事 CER / P2 对齐 match + P50/P90/±100ms；先标“CC 参考、非金标”。
-- [ ] **后续**：A/B（需 Whisper 模型）、chunk 调参、12 集 manifest、默认切换评估。
+- [x] **EP02/03 视频**：`D:\videos\Animation\TV\数码宝贝` 下 02/03 `.mkv` 完整（1.37 GB 各）。
+- [ ] **用户人工确认 EP02/03 日文 CC 与视频同步**（EP01 已确认；EP02/03 实测有 -0.37/-0.40 s 全局偏移，可能是音频切点/CC 版本差异，需人工确认）。
+- [ ] **三集分类**：按实际音频标 `clean` / `overlap` / `bgm`（当前 `unclassified`，不猜）。
+- [x] **三集评测**：主故事窗口 [95,1240]、缓存 ASR JSON、`episode_benchmark.py` 基线/最终报告已生成。
+- [ ] **后续**：P0 A/B、chunk 调参、12 集 manifest、默认切换评估。
 
-### C. 当前现场（2026-10-18 22:15）
+### C. 当前现场（2026-10-18 第六轮）
 
 ```text
-素材：EP01 视频 ✅；EP02/03 .mkv.downloading 0 B 🟡；日文 CC 54 集 ✅
-压缩包：C:\Users\54238\Desktop\数码宝贝.zip.downloading ≈20.54GB 🟡
-参考：temp/references/digimon/ 已清洁；EP001/002/003.main.srt 已切主故事窗口
-测试：1306 passed / 79.0% / 0 failed
-提交：89a22cc（clear 交接；上一提交 141b1f1 = CC 清洁 + EP01 冒烟）
+素材：EP01/02/03 视频 ✅；日文 CC 54 集 ✅；中文 ASS 01–05 ✅
+参考：EP00X.main.srt（主故事窗口）；EP001 已人工确认同步，EP02/03 待确认
+ASR：temp/asr/digimon_ep00X_main.qwen3.json（1.7B + FA，60s chunk）
+基准：temp/reports/digimon_benchmark_final.{json,md}（dev/test 分组）
+协议：eval/protocol.md；ADR-009（参考=考卷）
+测试：1362 passed / 79.6% / 0 failed
 ```
 
 ## 1. 状态总览
@@ -55,7 +56,7 @@
 | P0 | 评测金标清单 + 基线指标 | 🟡 代码就绪；金标待用户素材 | `eval/manifest.json` 填真实集；旧管线 CER/边界可复现 |
 | P1 | 稳定核心 + Qwen3/Whisper 适配 + 评测/CLI | 🟡 smoke 通过；A/B 等用户素材（阿童木任务已取消） | 3 集跑通；A/B 有记录；默认不变 |
 | P2 | Qwen3-FA + cue mapper + align_repair | 🟡 核心/CLI/run_all/实机验证完成；默认未切 | 边界 P50 ≤100ms / P90 ≤300ms（待金标） |
-| 测试 | 1306 tests / 79.0% 覆盖 / 0 failed | 🟡 主链补齐；剩余根脚本/nouns 旧入口/whisper_backends/align_cues | 关键路径每个分支至少一条测试 |
+| 测试 | 1362 tests / 79.6% 覆盖 / 0 failed | 🟡 主链补齐；剩余根脚本/nouns 旧入口/whisper_backends/align_cues | 关键路径每个分支至少一条测试 |
 | P3 | FireRedVAD/AED，VAD 降级为提示 | ⬜ 未开始 | speech/music/singing 时间线对比 |
 | P4 | glossary-first + 翻译 prompt，百度下线 | ⬜ 未开始 | 专名 F1 / 翻译人工评分 |
 | P5 | VibeVoice / 云兜底 | ⬜ 未开始 | 单集实验 + 成本/隐私评估 |
@@ -315,7 +316,49 @@ P2 align：match 55/286，garbled 115，missing_asr 74，no_speech 40
 
 **结论**：首轮数字只作冒烟。三集评测改用 **主故事窗口 95–1233s**（三集同结构），
 参考先过滤字幕卡/非对白，并单独统计 ASR 漏掉的短语气词；token 时间轴需单独修（或分段重对齐）。
-当前 EP02/03 视频仍在 `.downloading`，等完整后开跑。
+当前 EP02/03 视频已到位，三集基准见 §4.6。
+
+### 三集参考基准（2026-10-18 第六轮；EP01=dev，EP02/03=test）
+
+**协议**：`eval/protocol.md`、ADR-009。参考字幕只打分，不回流参数；test 冻结后只跑一次。
+**素材**：EP00X 视频（1386 s）；主故事窗口 `[95,1240]`；清洁 CC `temp/references/digimon/EP00X.main.srt`。
+**ASR**：Qwen3-ASR-1.7B + FA-0.6B，60 s 自切，缓存 `temp/asr/digimon_ep00X_main.qwen3.json`。
+
+| split | 集 | CER | ref chars | cues | match | P50 起 | P90 起 | ±100 ms | 可靠 n | 可靠 P90 | offset | auto | 截短 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| dev | EP001 | 0.3643 | 2056 | 276 | 49 | 129 ms | 1897 ms | 46.9% | 35 | 424 ms | — | 13 | 0 |
+| test | EP002 | 0.2581 | 4107 | 370 | 79 | 69 ms | 559 ms | 65.8% | 68 | 361 ms | -0.37 s | 19 | 0 |
+| test | EP003 | 0.2698 | 3336 | 317 | 79 | 46 ms | 1743 ms | 70.9% | 71 | 410 ms | -0.40 s | 9 | 0 |
+| test 合计 | 2 | 0.2633 micro | 7443 | 687 | 158 | 57.5 ms | 1151 ms | 68.3% | 139 | 385 ms | — | 28 | 0 |
+
+「可靠」= match 且 cue 字数 ≥3、confidence ≠ low；1–2 字语气词天然歧义，单列不进主 P90。
+报告：`temp/reports/digimon_benchmark_final.{json,md}`（本机缓存）；冻结摘要
+[`eval/reports/digimon_benchmark_2026-10-18.md`](../eval/reports/digimon_benchmark_2026-10-18.md)。
+
+**真实收益（有参考对比）**：
+
+1. **整集偏移进 `align_cues`**：此前 CLI 不做偏移，test split 原始 P50 400 ms、±100 ms 5.1%；
+   默认开 `estimate_global_offset` 后 P50 57.5 ms、±100 ms 68.3%。偏移由 cue↔ASR 匹配估计，
+   不读参考文本，真实无 CC 场景可用。
+2. **结尾 display linger 不再截短**：参考 CC 显示时间普遍晚于 ASR 语音结束（起点匹配好的
+   条件下，end error 中位数 EP01 0.53 s / EP02 0.33 s / EP03 0.19 s）。旧逻辑会改 end；
+   现在 `end_is_display_linger` 保留结尾，只修起点。三集自动修复 143→41 条，其中
+   **会缩短结尾的 113→0 条**；起点 P50/P90 不变。测试见 `test_cue_diagnostics` / `test_align_repair`。
+3. **零时长 span 不自动修**：collapsed token 只给 review，不再把 cue 移到单点（`confidence_for`/
+   `action_for`）；EP01 匹配里的 2 条 collapsed span 已从 auto 降级。
+4. **时间轴质量可诊断/可回退**：`diagnose_timeline.py` 输出零时长 run、overlong、质量分；
+   `TimelinePolicy` 只在 token 灾难性塌缩时回退 segment（EP01–03 都保留 token，段级更差）。
+
+**负结果（不采纳）**：
+
+- segment-start overlong trim（本地速率裁剪开头）：EP01 dev 严格变好（match 49→51，
+  P90 1897→1738），但 EP02/03 test 无提升且有 3 条匹配变差；保持 **opt-in**，不做默认。
+- cursor 回看（让 cue 回读前一 cue 抢走的字符）：match 49→58 / 79→100，但 P90 和 ±100 ms
+  全面变差（EP01 1897→2803，EP02 559→1002）；不采纳。
+- 参考 CC 的字幕卡/歌词使 CER 偏高（0.26–0.36），且 CC 写法与 ASR 不同；CER 只作相对比较。
+
+**仍缺什么**：可靠匹配 P90 385 ms > 300 ms 目标；主因是短语气词/重复台词歧义匹配和
+FA 在音乐/重叠段的零时长。需要 P3 VAD 或分段重对齐，不能继续在 test 上调阈值/常数。
 
 ### 本轮会话记录（2026-10-18 第四轮：测试收尾）
 

@@ -7,7 +7,7 @@ from fix.align_repair import (
     realign_cue_window, shift_cues, summarize_plan,
 )
 from lib.alignment.base import (
-    ACTION_DELETE_CANDIDATE, ACTION_FIX_TIME,
+    ACTION_DELETE_CANDIDATE, ACTION_FIX_TIME, ACTION_KEEP,
     ACTION_REPLACE_TEXT, ACTION_REVIEW_AI, AlignmentConfig, CueAlignment,
     STATUS_GARBLED, STATUS_MATCH, STATUS_NO_SPEECH,
 )
@@ -65,6 +65,34 @@ def test_preexisting_overlap_does_not_block_time_fix():
     plan = plan_repairs(cues, alignments)
     assert plan[0].action == ACTION_FIX_TIME
     assert plan[0].auto is True
+
+
+def test_display_linger_keeps_the_end_and_fixes_only_the_start():
+    cues = [cue(10.0, 12.0, 'お前何してんだよ')]
+    # Start matches; the end runs 0.6 s past the ASR speech (reading time).
+    linger = aligned(0, 10.0, 12.0, end=11.4)
+    assert linger.action == ACTION_KEEP
+    assert plan_repairs(cues, [linger]) == []
+
+    # Start drifts 0.3 s but the end is still display linger: move the start,
+    # keep the original end instead of truncating the subtitle.
+    drift = aligned(0, 10.0, 12.0, start=10.3, end=11.4)
+    assert drift.action == ACTION_FIX_TIME
+    plan = plan_repairs(cues, [drift])
+    assert plan[0].auto is True
+    assert plan[0].new_start == pytest.approx(10.3)
+    assert plan[0].new_end == pytest.approx(12.0)
+    assert any('display linger' in r for r in plan[0].reasons)
+
+
+def test_negative_end_error_is_not_display_linger():
+    # Speech continues past the cue end: that is a real truncation.
+    cues = [cue(10.0, 12.0, 'お前何してんだよ')]
+    al = aligned(0, 10.0, 12.0, end=12.4)
+    assert not al.end_is_display_linger(AlignmentConfig())
+    assert al.action == ACTION_FIX_TIME
+    plan = plan_repairs(cues, [al])
+    assert plan[0].new_end == pytest.approx(12.4)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -159,8 +187,10 @@ def test_moving_cue_blocked_by_unmatched_kept_neighbour():
 
 
 def test_min_duration_is_enforced_before_overlap_checks():
-    cues = [cue(10.0, 12.0, 'いち')]
-    alignments = [aligned(0, 10.0, 12.0, start=11.0, end=11.1)]
+    # The ASR speech ends *after* the cue (negative end error), so this is
+    # not display linger; the short span is clamped to min_cue_duration.
+    cues = [cue(10.0, 11.05, 'いち')]
+    alignments = [aligned(0, 10.0, 11.05, start=11.0, end=11.1)]
 
     plan = plan_repairs(cues, alignments)
 

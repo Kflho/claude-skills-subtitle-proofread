@@ -1,44 +1,45 @@
 # 测试与覆盖率计划
 
-> 最后更新：2026-10-18（第五轮：whisper_utils / episode_workflow / reuse / eval 收尾）
+> 最后更新：2026-10-18（第六轮：时间轴质量 / 三集基准 / display linger）
 > 目标不变：**能力靠测试证明，不靠真实项目碰运气。** 真实项目只负责发现问题；每个问题在修之前先落一个最小 fixture test。
 
 ## 0. 现状
 
 ```text
 python -m pytest -q
-1306 passed in ~10s          # 无网络、无模型、无真实项目依赖
-coverage: 79.0% (13,715 statements)
+1362 passed in ~8s           # 无网络、无模型、无真实项目依赖
+coverage: 79.6% (14,325 statements)
 ```
 
-本轮 **+144 tests**（1162 → 1306），覆盖率 **74.0% → 79.0%**，0 failed。
+本轮 **+56 tests**（1306 → 1362），覆盖率 **79.0% → 79.6%**，0 failed。
 
 新增/扩展测试文件：
 
 | 文件 | 覆盖对象 |
 |---|---|
-| `test_whisper_utils.py`（扩展） | ASS/SRT 写回、`vad_filter_audio` 的成对/不成对静音、抽音频、音轨探测、人声分离、文本判定与集号策略（45% → 100%） |
-| `test_episode_workflow.py`（扩展） | `step_translate/compare/audio/apply/diff`、`_write_ai_review_json`、`_run_pipeline` 资源组合、`main` 各分支（36% → 100%） |
-| `test_asr_eval.py`（扩展） | `_resolve_audio`、`evaluate_episode`、`_summary`、`_markdown`、`main`/limit/list-engines（47% → 99%） |
-| `test_reuse_common.py` / `test_reuse.py`（扩展） | variants/参考加载/目标对齐、`extend` 续行合并、R6 冲突、apply CLI（common 49→100%、apply 65→98%） |
-| `test_clean_cc_reference.py`（新） | 日文 CC 清洁：说话人/旁白标签、振假名、♪/音效行、整文件 CLI、report |
+| `test_alignment_quality.py`（新） | 零时长 run、overlong、质量分、fallback 判定、segment-start trim、policy 相对阈值 |
+| `test_episode_benchmark.py`（新） | 主故事窗口裁剪/平移、CER/边界/可靠匹配、dev/test 聚合、只读不变式、整集偏移 |
+| `test_diagnose_timeline.py`（新） | 零时长 run/overlong 提取、无参考诊断、参考打分与 `--shift`、修复变体 |
+| `test_alignment_timeline.py`（扩展） | 质量判定随轴、degraded 告警、灾难性回退 segment、opt-in trim、evidence 字段 |
+| `test_cue_mapper.py` / `test_cue_diagnostics.py` / `test_align_repair.py`（扩展） | 零时长 span 不自动修、display linger 保留结尾、start-only fix、负 end error |
+| `test_align_cues_cli.py`（扩展） | 默认整集偏移、`--no-global-offset`、报告字段 |
 
 ### 覆盖率按目录（本轮 vs 上轮）
 
 | 目录 | 语句 | 覆盖 | 上轮 | 说明 |
 |---|---:|---:|---:|---|
-| `scripts/lib` | 3,313 | **84.9%** | 75.9% | whisper_utils 45→100%；对齐/ASR 契约稳 |
-| `scripts/fix` | 3,219 | **77.9%** | 72.6% | episode_workflow 36→100%；whisper_pipeline 81% |
+| `scripts/lib` | 3,537 | **85.8%** | 84.9% | 新增 `alignment/quality.py`；对齐/ASR 契约稳 |
+| `scripts/fix` | 3,222 | **77.9%** | 77.9% | display linger 分支已测；whisper_pipeline 81% |
 | `scripts/nouns` | 2,424 | **67.2%** | 67.2% | `auto_classify` / `auto_clean_glossary` 仍 0%（旧入口） |
 | `scripts` 根 | 2,011 | **65.7%** | 65.7% | run_all 96%、translate_srt 85%、polish_zh 99% |
-| `scripts/asr` | 581 | **95.0%** | 95.0% | worker 99%、CLI 99% |
-| `scripts/reuse` | 389 | **97.9%** | 73.8% | align 96%、apply 98%、common 100% |
+| `scripts/asr` | 604 | **95.0%** | 95.0% | worker 99%、CLI 99% |
+| `scripts/reuse` | 389 | **97.9%** | 97.9% | align 96%、apply 98%、common 100% |
 | `scripts/scan` | 372 | **94.6%** | 94.6% | scan_all/VAD/CLI 补齐 |
 | `scripts/apply` | 380 | **100.0%** | 100.0% | main/ASS/繁→简/degloss 全分支 |
-| `scripts/eval` | 428 | **94.2%** | 61.9% | asr_eval 99%；CC 清洁 98%；bench 84% |
+| `scripts/eval` | 788 | **90.5%** | 94.2% | 新增 benchmark 90%+、diagnose 89% |
 | `scripts/ass` | 313 | **86.3%** | 86.3% | CLI main 已测 |
 | `scripts/utils` | 285 | **80.4%** | 80.4% | — |
-| **合计** | **13,715** | **79.0%** | 74.0% | — |
+| **合计** | **14,325** | **79.6%** | 79.0% | — |
 
 ### 做得好的部分
 
@@ -172,14 +173,15 @@ python -m pytest -q tests/test_alignment_base.py tests/test_alignment_timeline.p
 
 ## 6. 覆盖率门槛（渐进）
 
-当前 **79.0%**。按缺口补，不追求一次到 85%：
+当前 **79.6%**。按缺口补，不追求一次到 85%：
 
 | 阶段 | 目标 | 重点 |
 |---|---:|---|
 | 基线 | 36% | 起点 |
 | 上上轮 | 64.0% | P0 链路 + 相邻联动 + 修复/片段/复用/专名补齐 |
 | 上轮 | 74.0% | run_all 步骤、scanner、apply、worker、ass/reuse CLI |
-| **现在** | **79.0%** | whisper_utils、episode_workflow、reuse、asr_eval、CC 清洁 |
+| 再上轮 | 79.0% | whisper_utils、episode_workflow、reuse、asr_eval、CC 清洁 |
+| **现在** | **79.6%** | 时间轴质量、三集基准、display linger、diagnose/benchmark |
 | 下一轮 | ≥82% | 根脚本 65.7%、nouns 67.2%、whisper_backends 59%、align_cues 78% |
 
 > 覆盖率不是目的：**关键路径（扫描→修复→专名→翻译→应用→交付）每个分支至少有一条测试**，比总百分比更重要。

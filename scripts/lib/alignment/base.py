@@ -215,6 +215,27 @@ class CueAlignment:
                 if e is not None]
         return max(errs) if errs else 0.0
 
+    def end_is_display_linger(self, cfg: 'AlignmentConfig') -> bool:
+        """True when the cue end is later than speech by a small margin.
+
+        Human subtitles stay on screen after the line ends (reading time);
+        CC measured against ASR speech therefore shows a systematic positive
+        end error (median 0.2–0.5 s on EP01–03, and it is the majority even
+        when the start matches within 150 ms).  That is a display convention,
+        not a timing error: rewriting the end to the ASR end would truncate
+        the subtitle.  Only differences beyond ``max_time_shift``, a negative
+        end error (speech runs past the cue), or a sub-``clean_boundary``
+        difference (normal cleanup) are treated as real.
+
+        This is a *policy* grounded in the reference distribution, not a
+        tuned threshold: the tolerance is the existing auto-fix bound.
+        """
+        return (self.status == STATUS_MATCH
+                and self.start_error is not None
+                and self.end_error is not None
+                and abs(self.start_error) <= cfg.max_time_shift
+                and cfg.clean_boundary < self.end_error <= cfg.max_time_shift)
+
     @property
     def is_clean(self) -> bool:
         return self.status == STATUS_MATCH and self.confidence == 'high'
@@ -283,6 +304,10 @@ class AlignmentReport:
     model: str = ''
     audio_duration: float = 0.0
     warnings: list[str] = field(default_factory=list)
+    # health of the timestamp source the mapper actually used
+    timeline_source: str = ''
+    timeline_fallback: str = ''
+    timeline_quality: dict[str, Any] = field(default_factory=dict)
     schema_version: int = ALIGNMENT_VERSION
 
     def counts(self) -> dict[str, int]:
@@ -314,6 +339,11 @@ class AlignmentReport:
             'engine': self.engine,
             'model': self.model,
             'audio_duration': round(self.audio_duration, 3),
+            'timeline': {
+                'source': self.timeline_source,
+                'fallback': self.timeline_fallback,
+                'quality': dict(self.timeline_quality),
+            },
             'summary': self.summary(),
             'warnings': list(self.warnings),
             'cues': [a.to_dict() for a in self.alignments],
@@ -321,6 +351,7 @@ class AlignmentReport:
 
     @classmethod
     def from_dict(cls, data: dict) -> 'AlignmentReport':
+        timeline = data.get('timeline') or {}
         return cls(
             alignments=[CueAlignment.from_dict(c)
                         for c in data.get('cues', [])],
@@ -328,5 +359,8 @@ class AlignmentReport:
             model=str(data.get('model', '')),
             audio_duration=float(data.get('audio_duration', 0.0)),
             warnings=list(data.get('warnings', [])),
+            timeline_source=str(timeline.get('source', '')),
+            timeline_fallback=str(timeline.get('fallback', '')),
+            timeline_quality=dict(timeline.get('quality') or {}),
             schema_version=int(data.get('schema_version', ALIGNMENT_VERSION)),
         )

@@ -133,6 +133,12 @@ def confidence_for(al: CueAlignment, cfg: AlignmentConfig) -> str:
     lang = float(signals.get('lang_score', 1.0))
     boundary = al.max_boundary_error
 
+    # A zero-duration ASR span is a collapsed aligner timestamp, not speech
+    # evidence.  Never let it reach "high" (and therefore never auto-fix).
+    if (al.start is not None and al.end is not None
+            and al.end - al.start <= 1e-3):
+        return 'low'
+
     if al.status == STATUS_MATCH:
         # 1–2 character cues match half the script by accident (あ, の, っ);
         # never let them become "high confidence, leave untouched".
@@ -176,7 +182,18 @@ def action_for(al: CueAlignment, cfg: AlignmentConfig) -> str:
     duration = float(signals.get('cue_duration', al.cue_duration))
     lines = int(signals.get('cue_lines', 1))
 
+    if (al.start is not None and al.end is not None
+            and al.end - al.start <= 1e-3):
+        # Collapsed timestamp: we know the text but not where the speech is.
+        # A time "fix" would move the cue onto a single point, so review.
+        if al.status == STATUS_MATCH:
+            return ACTION_REVIEW_AI
+
     if al.status == STATUS_MATCH:
+        if al.end_is_display_linger(cfg):
+            if abs(al.start_error) <= cfg.clean_boundary:
+                return ACTION_KEEP      # start matches; end is reading time
+            return ACTION_FIX_TIME      # move the start, keep the display end
         if boundary <= cfg.clean_boundary:
             return ACTION_KEEP
         if boundary > cfg.max_time_shift:

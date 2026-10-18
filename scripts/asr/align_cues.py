@@ -35,13 +35,15 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 from fix.align_repair import (  # noqa: E402
-    apply_repairs, plan_repairs, summarize_plan,
+    apply_repairs, estimate_global_offset, plan_repairs, shift_cues,
+    summarize_plan,
 )
 from lib.alignment.base import (  # noqa: E402
     AlignmentConfig, ALIGNMENT_VERSION,
 )
 from lib.alignment.cue_mapper import map_report  # noqa: E402
 from lib.alignment.diagnostics import boundary_stats  # noqa: E402
+from lib.alignment.quality import TimelinePolicy  # noqa: E402
 from lib.asr.base import ASRConfig, ASRResult  # noqa: E402
 from lib.config import (  # noqa: E402
     ALIGNER_MODEL, ASR_DEVICE, ASR_DTYPE, ASR_MODEL, QWEN_PYTHON,
@@ -93,7 +95,20 @@ def _resolve_audio(args) -> str | None:
     return None
 
 
-def _print_summary(summary: dict, plan_stats: dict) -> None:
+def _print_summary(summary: dict, plan_stats: dict,
+                   timeline: dict | None = None) -> None:
+    if timeline:
+        quality = timeline.get('quality') or {}
+        degraded = 'degraded' if quality.get('degraded') else 'ok'
+        line = (f"timeline source={timeline.get('source') or '-'} "
+                f"quality={degraded}")
+        if quality:
+            line += (f" zero={quality.get('zero_ratio', 0):.1%}"
+                     f" run={quality.get('longest_zero_run', 0)}"
+                     f" overlong={quality.get('overlong_ratio', 0):.1%}")
+        if timeline.get('fallback'):
+            line += f" (fallback from {timeline['fallback']})"
+        print(line)
     status = summary.get('status', {})
     actions = summary.get('actions', {})
     boundary = summary.get('boundary', {}).get('start', {})
@@ -141,6 +156,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--search-seconds', type=float, default=6.0)
     parser.add_argument('--max-shift', type=float, default=2.0,
                         help='largest auto time shift in seconds')
+    parser.add_argument('--timeline-source', default='auto',
+                        choices=['auto', 'tokens', 'segments'],
+                        help='force a timestamp source (default: auto)')
+    parser.add_argument('--repair-overlong', action='store_true',
+                        help='clamp absurd overlong token spans using the '
+                             'local speech rate (opt-in; can shift long '
+                             'sung/vowel tokens)')
+    parser.add_argument('--global-offset', dest='global_offset',
+                        action='store_true', default=True,
+                        help='estimate one whole-file drift and shift every '
+                             'cue first (default; mirrors fix_by_asr)')
+    parser.add_argument('--no-global-offset', dest='global_offset',
+                        action='store_false',
+                        help='keep raw cue times (diagnostics)')
     parser.add_argument('--work-dir', default='temp/align')
     args = parser.parse_args(argv)
 
@@ -174,14 +203,33 @@ def main(argv: list[str] | None = None) -> int:
     cfg = AlignmentConfig(search_seconds=args.search_seconds,
                           max_time_shift=args.max_shift,
                           allow_text_replace=args.fix_text)
+    policy = TimelinePolicy(
+        repair_overlong=args.repair_overlong,
+        force_source='' if args.timeline_source == 'auto'
+        else args.timeline_source,
+    )
     report = map_report(cues, result, config=cfg,
-                        language=args.language)
+                        language=args.language, policy=policy)
+    global_offset = None
+    if args.global_offset:
+        global_offset = estimate_global_offset(report.alignments)
+        if global_offset:
+            cues = shift_cues(cues, global_offset)
+            report = map_report(cues, result, config=cfg,
+                                language=args.language, policy=policy)
+            print(f'[align] global offset {global_offset:+.3f}s applied '
+                  f'to all cues', file=sys.stderr)
     plan = plan_repairs(cues, report.alignments, config=cfg)
     plan_stats = summarize_plan(plan)
 
     summary = report.summary()
     summary['boundary'] = boundary_stats(report.alignments)
-    _print_summary(summary, plan_stats)
+    timeline = {
+        'source': report.timeline_source,
+        'fallback': report.timeline_fallback,
+        'quality': report.timeline_quality,
+    }
+    _print_summary(summary, plan_stats, timeline)
     for warning in report.warnings:
         print(f'[align] warning: {warning}', file=sys.stderr)
 
@@ -207,6 +255,9 @@ def main(argv: list[str] | None = None) -> int:
         'srt': str(Path(args.srt).resolve()),
         'engine': report.engine,
         'model': report.model,
+        'global_offset': (round(global_offset, 3)
+                          if global_offset is not None else None),
+        'timeline': timeline,
         'summary': summary,
         'plan': plan_stats,
         'apply': apply_stats,

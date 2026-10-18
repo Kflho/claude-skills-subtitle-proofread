@@ -7,12 +7,15 @@ level) or segments (Whisper: 5–30 s blocks).  Spreading each unit's
 characters evenly across its own start/end yields one comparable axis for
 every engine, which is what let the mapper stay engine-agnostic.
 
-The timeline is a pure derivation — no audio, no models, no I/O.
+The timeline is a pure derivation — no audio, no models, no I/O.  It also
+carries a :class:`~lib.alignment.quality.TimelineQuality` verdict so callers
+can tell a normal token axis from a collapsed one, and optionally falls back
+to the segment axis when tokens are catastrophically broken.
 
 Usage:
     from lib.alignment.timeline import build_char_timeline
     tl = build_char_timeline(asr_result)
-    tl.chars, tl.starts, tl.ends
+    tl.chars, tl.starts, tl.ends, tl.quality, tl.warnings
 """
 
 from __future__ import annotations
@@ -20,6 +23,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from lib.alignment.base import normalize_text
+from lib.alignment.quality import (
+    TimelinePolicy, TimelineQuality, assess_units, repair_overlong_units,
+    should_fallback, unit_triples,
+)
 
 
 @dataclass
@@ -34,6 +41,9 @@ class CharTimeline:
         unit_texts: original (un-normalised) text of every ASR unit.
         source: ``tokens`` | ``segments`` | ``cues`` | ``none``.
         duration: end of the last character (0 for an empty timeline).
+        quality: health of the chosen source (None for synthetic timelines).
+        fallback: source that was rejected in favour of this one, if any.
+        warnings: human-readable quality/fallback notes for reports.
     """
 
     chars: list[str] = field(default_factory=list)
@@ -43,6 +53,9 @@ class CharTimeline:
     unit_texts: list[str] = field(default_factory=list)
     source: str = 'none'
     duration: float = 0.0
+    quality: TimelineQuality | None = None
+    fallback: str = ''
+    warnings: list[str] = field(default_factory=list)
 
     def __len__(self) -> int:
         return len(self.chars)
@@ -130,31 +143,105 @@ class CharTimeline:
         return tl
 
     def to_dict(self) -> dict:
-        return {
+        out = {
             'source': self.source,
             'duration': round(self.duration, 3),
             'chars': self.chars,
             'starts': [round(x, 3) for x in self.starts],
             'ends': [round(x, 3) for x in self.ends],
         }
+        if self.quality is not None:
+            out['quality'] = self.quality.to_dict()
+        if self.fallback:
+            out['fallback'] = self.fallback
+        if self.warnings:
+            out['warnings'] = list(self.warnings)
+        return out
 
 
-def build_char_timeline(result) -> CharTimeline:
+def build_char_timeline(result, *,
+                        policy: TimelinePolicy | None = None) -> CharTimeline:
     """Build a timeline from an ``ASRResult``-like object.
 
     Preference order: tokens (finest) → segments → none.  An engine with
     neither (text only) cannot be aligned in time; the empty timeline makes
     the mapper report ``no_asr`` instead of inventing timestamps.
-    """
-    tokens = getattr(result, 'tokens', None) or []
-    if tokens:
-        units = [(t.text, t.start, t.end) for t in tokens]
-        return CharTimeline.from_units(units, source='tokens')
 
+    ``policy`` adds two behaviours on top of the old "tokens always win":
+
+    * the chosen source is assessed (zero runs / overlong units) and the
+      verdict travels with the timeline;
+    * when tokens are *catastrophically* collapsed and the segment timeline
+      is clearly healthier, segments are used instead (``tl.fallback``).
+
+    ``repair_overlong`` is opt-in because clamping spans can shift
+    legitimately long sung/vowel tokens as well as broken ones.
+    """
+    policy = policy or TimelinePolicy()
+    tokens = getattr(result, 'tokens', None) or []
     segments = getattr(result, 'segments', None) or []
-    if segments:
-        units = [(s.text, s.start, s.end) for s in segments]
-        return CharTimeline.from_units(units, source='segments')
+    token_units = unit_triples(tokens)
+    segment_units = unit_triples(segments)
+
+    forced = policy.force_source
+    use_tokens = bool(token_units) and policy.prefer_tokens
+    if forced == 'tokens':
+        use_tokens = bool(token_units)
+    elif forced == 'segments':
+        use_tokens = False
+
+    if use_tokens:
+        units = token_units
+        repaired = 0
+        if policy.repair_overlong:
+            # Mechanism: the forced aligner absorbs leading silence into the
+            # first token of an utterance.  Restrict the trim to segment
+            # starts; mid-segment long tokens may be legitimate.
+            allowed = {round(float(s.start), 3) for s in segments
+                       if getattr(s, 'tokens', None)}
+            units, repaired = repair_overlong_units(
+                units, policy=policy, allowed_starts=allowed or None)
+        quality = assess_units(units, source='tokens', policy=policy)
+
+        if segment_units:
+            segment_quality = assess_units(segment_units, source='segments',
+                                           policy=policy)
+            if should_fallback(quality, segment_quality, policy):
+                tl = CharTimeline.from_units(segment_units, source='segments')
+                tl.quality = segment_quality
+                tl.fallback = 'tokens'
+                tl.warnings.append(
+                    'token timeline collapsed; fell back to segments '
+                    f'({quality.describe()})')
+                return tl
+
+        tl = CharTimeline.from_units(units, source='tokens')
+        tl.quality = quality
+        if repaired:
+            tl.warnings.append(
+                f'trimmed {repaired} overlong token span(s) '
+                f'using {quality.median_char_rate:.3f}s/char')
+        if quality.degraded:
+            tl.warnings.append(
+                f'token timeline degraded: {quality.describe()}')
+        return tl
+
+    if segment_units:
+        quality = assess_units(segment_units, source='segments',
+                               policy=policy)
+        tl = CharTimeline.from_units(segment_units, source='segments')
+        tl.quality = quality
+        if quality.degraded:
+            tl.warnings.append(
+                f'segment timeline degraded: {quality.describe()}')
+        return tl
+
+    if token_units:
+        # forced segment-only mode, but tokens are the only timestamp data
+        quality = assess_units(token_units, source='tokens', policy=policy)
+        tl = CharTimeline.from_units(token_units, source='tokens')
+        tl.quality = quality
+        return tl
 
     return CharTimeline(source='none')
 

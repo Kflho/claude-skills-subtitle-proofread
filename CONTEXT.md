@@ -48,8 +48,9 @@ scripts/
 │       ├── router.py           #     引擎选择/fallback；不 import 模型
 │       └── adapters/           #     qwen3 / qwen3_aligner / whisper
 │   └── alignment/              # P2 cue 对齐（纯 stdlib，不 import 模型）
-│       ├── base.py             #     契约/归一化/状态词表
-│       ├── timeline.py         #     ASRResult → 字符时间轴
+│       ├── base.py             #     契约/归一化/状态词表（含 display linger 规则）
+│       ├── timeline.py         #     ASRResult → 字符时间轴（token/segment 兜底）
+│       ├── quality.py          #     时间轴健康度：零时长 run/overlong/fallback
 │       ├── cue_mapper.py       #     时间窗 + 字符匹配 + 精确串就近
 │       ├── diagnostics.py      #     信号/置信度/边界统计
 │       └── aligner.py          #     registry 对齐服务（ALIGNER_ENGINE）
@@ -70,7 +71,13 @@ scripts/
 ├── asr/                        # 2026 ASR/P2 独立入口（不接默认管线）
 │   ├── qwen3_worker.py         #   长驻 worker（隔离 venv）
 │   ├── qwen3_transcribe.py     #   单文件转录 CLI
-│   └── align_cues.py           #   P2 对齐 CLI（默认 dry-run）
+│   └── align_cues.py           #   P2 对齐 CLI（默认 dry-run；默认整集偏移）
+│
+├── eval/                       # 评测（只读；参考字幕=考卷，见 eval/protocol.md）
+│   ├── asr_eval.py             #   P0 全文件 CER/边界
+│   ├── episode_benchmark.py    #   三集 held-out 基准（dev/test、CER/边界/修复安全性）
+│   ├── diagnose_timeline.py    #   无参考的 token/segment 健康度
+│   └── clean_cc_reference.py   #   CC 清洁
 │
 ├── nouns/                      # Phase 3: 专有名词
 │   ├── noun_checker.py         #   名词表对比
@@ -108,8 +115,8 @@ scripts/
 ## 测试
 
 ```bash
-cd <skill>/tests && pytest -q    # 1306 tests, ~10s, 无外部依赖
-pytest -q --cov --cov-report=term-missing   # 覆盖率 79.0%，矩阵见 docs/test-plan.md
+cd <skill>/tests && pytest -q    # 1362 tests, ~9s, 无外部依赖
+pytest -q --cov --cov-report=term-missing   # 覆盖率 79.6%，矩阵见 docs/test-plan.md
 ```
 
 分层: Tier 1 (纯函数) → Tier 2 (tempfile) → Tier 3 (mock 外部二进制)。
@@ -118,17 +125,17 @@ P0 链路（Whisper 编排/VAD、翻译、专名、OP/ED、编排）已补齐；
 
 ## 技术路线
 
-2026 技术栈修订提案：`docs/tech-route-2026.md`；决策记录：`docs/adr/005-asr-alignment-stack.md`、`docs/adr/006-stable-asr-core.md`、`docs/adr/007-cue-alignment.md`、`docs/adr/008-qwen3-long-audio-chunking.md`。
+2026 技术栈修订提案：`docs/tech-route-2026.md`；决策记录：`docs/adr/005-asr-alignment-stack.md`、`docs/adr/006-stable-asr-core.md`、`docs/adr/007-cue-alignment.md`、`docs/adr/008-qwen3-long-audio-chunking.md`、`docs/adr/009-reference-as-benchmark.md`。
 
 核心变化：`Qwen3-ASR-1.7B + Qwen3-ForcedAligner-0.6B` 替代 `Whisper kotoba + 时间重叠匹配`；`FireRedVAD` 只作提示/AED；Whisper 保留 fallback。**默认管线仍走旧链路**，2026 链路以独立 CLI 交付。
 
 ASR 架构已按「稳定核心 + 插件适配器」落地：`lib/asr/base.py`（契约）、`registry.py`（自动发现）、`router.py`（路由），新模型只写 `lib/asr/adapters/<name>.py`，不改 core。P1 进度见 `docs/tech-route-progress.md`。
 
-P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 → 信号/置信度）、`fix/align_repair.py`（修复计划/时间码/整集偏移/相邻 cue 联动）、`scripts/asr/align_cues.py`（端到端 CLI，默认 dry-run）、`run_all --asr`（flag 控制）。莎莉 EP001 历史实机验证：`qwen_asr` 180s 分块会塌缩 → worker 自切 60s + 补零（ADR-008；机械/吞吐验证，不作金标）。
+P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 → 信号/置信度；`quality.py` 评估零时长/overlong，token 灾难性塌缩才回退 segment）、`fix/align_repair.py`（修复计划/时间码/整集偏移/相邻 cue 联动；结尾 display linger 保留）、`scripts/asr/align_cues.py`（端到端 CLI，默认 dry-run，默认先做整集偏移）、`run_all --asr`（flag 控制）。参考字幕按 `eval/protocol.md` 只作 held-out 基准；三集基准看 `temp/reports/digimon_benchmark_final.{json,md}`。莎莉 EP001 历史实机验证：`qwen_asr` 180s 分块会塌缩 → worker 自切 60s + 补零（ADR-008；机械/吞吐验证，不作金标）。
 
-素材现状：**验收作品定为数码宝贝（Digimon Adventure）**，目录 `D:\videos\Animation\TV\数码宝贝`。EP01 视频完整（1386s，日语 FLAC），**用户已人工核对日文 CC 与视频同步**；EP02/03 视频仍 `.mkv.downloading`（0 B）。日文参考已到位：`日语字幕\` 下 S01E01–S01E54 共 54 集 `ja[cc].srt`，已用 `scripts/eval/clean_cc_reference.py` 清洁（去说话人/振假名/♪；主故事窗口 95–1233s）。01–05 另有中文字幕，只能做参考无关/翻译复用。**当前等 EP02/03 视频**；期间可做 EP01 token 时间轴诊断、评测协议与剩余补测。素材台账 `eval/materials.md`，草稿 `eval/manifest.digimon.json`。莎莉/阿童木历史素材只保留机制/吞吐回放。
+素材现状：**验收作品定为数码宝贝（Digimon Adventure）**，目录 `D:\videos\Animation\TV\数码宝贝`。**EP01/02/03 视频完整（各约 1386s）**；EP01 已由用户人工核对日文 CC 与视频同步，EP02/03 待确认（实测有 -0.37/-0.40s 全局偏移）。日文参考：`日语字幕\` 下 S01E01–S01E54 共 54 集 `ja[cc].srt`，已清洁；主故事窗口 `[95,1240]`。01–05 另有中文字幕，只能做参考无关/翻译复用。素材台账 `eval/materials.md`，清单 `eval/manifest.digimon.json`（EP01=dev，EP02/03=test）。莎莉/阿童木历史素材只保留机制/吞吐回放。
 
-测试：1306 passed / 0 failed / 79.0% 覆盖；矩阵与剩余缺口见 `docs/test-plan.md`。
+测试：1362 passed / 0 failed / 79.6% 覆盖；矩阵与剩余缺口见 `docs/test-plan.md`。
 
 ## 配置
 

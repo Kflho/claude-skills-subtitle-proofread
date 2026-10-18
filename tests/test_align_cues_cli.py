@@ -130,3 +130,38 @@ def test_ass_write_is_refused_instead_of_silently_ignored(cli_fixture,
     code = main(['--srt', str(ass), '--asr-json', str(asr), '--write'])
     assert code == 4
     assert ass.read_text(encoding='utf-8') == before
+
+
+def _write_srt(path, cues):
+    from lib.subtitle_io import format_tc
+    lines = []
+    for index, (start, end, text) in enumerate(cues, 1):
+        lines.append(f'{index}\n{format_tc(start)} --> {format_tc(end)}\n'
+                     f'{text}\n')
+    path.write_text('\n'.join(lines), encoding='utf-8')
+
+
+def test_global_offset_is_detected_and_applied_by_default(tmp_path):
+    cues = [(10.0 + i * 3, 11.0 + i * 3, f'あ{i}') for i in range(22)]
+    srt = tmp_path / 'ep.srt'
+    _write_srt(srt, cues)
+    asr = tmp_path / 'asr.json'
+    asr.write_text(json.dumps(make_asr([
+        (text, start + 0.5, end + 0.5) for start, end, text in cues
+    ]), ensure_ascii=False), encoding='utf-8')
+    output = tmp_path / 'report.json'
+
+    code = main(['--srt', str(srt), '--asr-json', str(asr),
+                 '--output', str(output)])
+    assert code == 0
+    payload = json.loads(output.read_text(encoding='utf-8'))
+    assert payload['global_offset'] == pytest.approx(0.5, abs=0.01)
+    assert payload['summary']['boundary']['start']['p50_ms'] < 50
+
+    raw_out = tmp_path / 'raw.json'
+    code = main(['--srt', str(srt), '--asr-json', str(asr),
+                 '--output', str(raw_out), '--no-global-offset'])
+    assert code == 0
+    raw = json.loads(raw_out.read_text(encoding='utf-8'))
+    assert raw['global_offset'] is None
+    assert raw['summary']['boundary']['start']['p50_ms'] >= 400

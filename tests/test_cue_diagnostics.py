@@ -9,8 +9,8 @@ from lib.alignment.base import (
     STATUS_GARBLED, STATUS_MATCH, STATUS_NO_ASR, STATUS_NO_SPEECH,
 )
 from lib.alignment.diagnostics import (
-    annotate, boundary_stats, confidence_for, lang_profile, repeat_score,
-    speech_coverage, summarize,
+    action_for, annotate, boundary_stats, confidence_for, lang_profile,
+    repeat_score, speech_coverage, summarize,
 )
 from lib.alignment.timeline import timeline_from_cues
 
@@ -103,6 +103,31 @@ def test_short_cue_never_high():
     cfg = AlignmentConfig()
     al = make_alignment(cue_chars=1, matched_chars=1)
     assert confidence_for(al, cfg) == 'medium'
+
+
+def test_collapsed_zero_duration_span_is_never_high_or_auto_fixed():
+    cfg = AlignmentConfig()
+    al = make_alignment(start=10.0, end=10.0)
+    assert confidence_for(al, cfg) == 'low'
+    assert action_for(al, cfg) == ACTION_REVIEW_AI
+
+
+def test_display_linger_is_kept_not_fixed():
+    cfg = AlignmentConfig()
+    # Cue ends at 12.0, ASR speech ends at 11.4: subtitle reading time.
+    al = make_alignment(start=10.0, end=11.4)
+    assert al.end_error == pytest.approx(0.6)
+    assert al.end_is_display_linger(cfg)
+    assert action_for(al, cfg) == ACTION_KEEP
+
+    # Start drift + display linger: fix the start only.
+    drifting = make_alignment(start=10.3, end=11.4)
+    assert action_for(drifting, cfg) == ACTION_FIX_TIME
+
+    # Speech continues past the cue: not linger.
+    truncated = make_alignment(start=10.0, end=12.4)
+    assert not truncated.end_is_display_linger(cfg)
+    assert action_for(truncated, cfg) == ACTION_FIX_TIME
 
 
 def test_status_level_confidence():

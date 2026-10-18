@@ -10,7 +10,7 @@
 
 ## Decision
 
-1. **统一的字符时间轴**（`lib/alignment/timeline.py`）：把每个 ASR 单元（token 或 segment）的文本归一化后，在本单元 start/end 内均分到字符，得到单调的 `chars/starts/ends`。token 优先，segment 兜底；没有时间戳就返回空轴，由 mapper 报 `no_asr`，绝不编造时间。
+1. **统一的字符时间轴**（`lib/alignment/timeline.py`）：把每个 ASR 单元（token 或 segment）的文本归一化后，在本单元 start/end 内均分到字符，得到单调的 `chars/starts/ends`。token 优先，segment 兜底；没有时间戳就返回空轴，由 mapper 报 `no_asr`，绝不编造时间。时间轴同时带 `quality`（零时长 run/overlong/质量分）：只有 token **灾难性**塌缩且 segment 明显更好时才回退 segment；普通 degraded 只告警，不静默换源（Qwen3 的 segment 由同一批 token 生成，换源通常更差）。
 
 2. **时间窗而不是字符窗**（`cue_mapper._select_window`）：每个 cue 只取 `[cue_start-search, cue_end+search]`（默认 ±6s）内的字符。不再「凑够 N 个字符」——稀疏音频里那会跨越几分钟，把远处重复台词吸进来。窗口内用单调 cursor 防止 cue 互相抢字符；**允许合法重叠**的 cue 从自己的锚点重新开始，避免第二条被饿死。
 
@@ -34,6 +34,10 @@
 
 9. **不改默认管线**：P2 以独立 CLI 交付（`scripts/asr/align_cues.py`），默认 dry-run。`run_all`/`fix_orchestrator` 的接入等真实金标验收后再做（方案 §8.1 P2 验收）。
 
+10. **结尾是显示时间，不是语音边界**（2026-10-18，三集基准后补）：日文 CC 的 cue end 普遍晚于 ASR 语音结束（起点匹配好的条件下中位数 0.19–0.53 s），这是字幕阅读时间。`CueAlignment.end_is_display_linger()` 在 `0 < end_error ≤ max_time_shift` 且起点可修时保留原结尾，只移动起点；负 end error（语音超出 cue）仍按真实截断处理。三集回放：原本 113 条自动修复会缩短结尾，改后 0 条，起点 P50/P90 不变。依据见 ADR-009 与 `eval/protocol.md`。
+
+11. **整集偏移进默认 CLI**：`align_cues.py` 默认先 `estimate_global_offset`（≥20 条高相似 match + MAD ≤150 ms），有偏移就整体平移后重映射；`--no-global-offset` 保留原始诊断。三集 test：P50 400→57.5 ms、±100 ms 5.1%→68.3%。
+
 ## Consequences
 
 - ✅ 无 O(n²) 全矩阵：405 cue / 24 分钟 → 约 0.23s/集（193 集约 45s），纯 stdlib。
@@ -53,6 +57,9 @@
   163ms 边界修正），精度没有实质退化。
 - ⚠️ 对齐依赖 cue 文本可读；纯图形/矢量（ASS `\p1`）cue 无文本，天然是 `empty_text`/`no_speech`。
 - ⚠️ ASS 写回目前只更新文本、不更新时间码，`align_cues.py --write` 对 `.ass` 直接拒绝（退出码 4），避免「成功但什么都没改」。
+- ✅ **三集 held-out 基准已建立**（2026-10-18）：EP01=dev，EP02/03=test；只读评测器 `scripts/eval/episode_benchmark.py`，协议 `eval/protocol.md`。test 现状：CER micro 0.2633、起点 P50 57.5 ms、±100 ms 68.3%、可靠匹配 P90 385 ms。
+- ⚠️ **P90 未达标**：可靠匹配 385 ms > 300 ms；剩余误差来自短语气词/重复台词歧义和 FA 零时长，需要 P3 VAD/分段重对齐，不能靠调阈值。
+- ⚠️ **两个负结果**：segment-start overlong trim 只在 EP01 dev 提升、EP02/03 test 中性，保持 opt-in；cursor 回看增加 match 但 P90 变差，不采纳。
 
 ## Alternatives rejected
 

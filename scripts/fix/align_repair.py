@@ -184,6 +184,11 @@ def _prepare_time_fix(entry: PlannedRepair, al: CueAlignment,
         return
 
     new_start, new_end = float(al.start), float(al.end)
+    if al.end_is_display_linger(cfg):
+        # The cue's end is reading time, not speech: keep it instead of
+        # truncating the subtitle to the ASR speech end.
+        new_end = entry.cue_end
+        entry.reasons.append('end kept: subtitle display linger')
     if new_end - new_start < cfg.min_cue_duration:
         new_end = new_start + cfg.min_cue_duration
 

@@ -2,15 +2,16 @@
 
 > 目标：同一批 12 集，分别跑旧管线（Whisper）与新管线（Qwen3-ASR + FA），比较 CER、边界误差、人工审查条数、耗时。
 
-## 0. 当前登记素材（2026-10-18）
+## 0. 当前登记素材（2026-10-18，三集就绪）
 
 - 作品：**数码宝贝（Digimon Adventure）**
 - 目录：`D:\videos\Animation\TV\数码宝贝`
-- 现状：EP01 视频已完整（用户人工核对日文 CC 与视频同步）；EP02/03 `.mkv.downloading` 中；**日文 CC 已有 S01E01–S01E54（54 集）**；01–05 另有中文字幕（`.sc` / `.tc` ASS）。
+- 现状：**EP01/02/03 视频已完整**；日文 CC 已有 S01E01–S01E54（54 集）；01–05 另有中文字幕（`.sc` / `.tc` ASS）。
 - 日文 CC 是配信闭合字幕，含说话人标签/振假名/♪，**直接算 CER 前需清洁**（`scripts/eval/clean_cc_reference.py`）；明细与规则见 [`materials.md`](materials.md)。
-- 评测清单草稿见 [`manifest.digimon.json`](manifest.digimon.json)。
+- 评测清单见 [`manifest.digimon.json`](manifest.digimon.json)：EP01=dev，EP02/03=test。
+- **参考字幕是考卷，不是教材**：只用于打分，不能用来反推阈值/prompt。协议见 [`protocol.md`](protocol.md)。
 
-> 当前等 EP02/03 视频下载；日文字幕已够。中文字幕不能当日文 CER 金标。
+> 中文字幕不能当日文 CER 金标；日文 CC 清洁后仍含字幕卡/歌词，CER 只作相对比较。
 
 ## 1. 准备素材
 
@@ -57,6 +58,26 @@ python scripts/eval/asr_eval.py --manifest eval/manifest.json `
   --json-out reports/asr_eval_qwen3.json `
   --output reports/asr_eval_qwen3.md
 ```
+
+### 3.1 三集 held-out 基准（推荐）
+
+主故事窗口、CER、token 时间轴质量、cue 对齐一次出齐；只读，不生成阈值：
+
+```powershell
+# 基线（默认 policy）
+python scripts/eval/episode_benchmark.py --manifest eval/manifest.digimon.json `
+  --json-out temp/reports/digimon_benchmark_baseline.json `
+  --output temp/reports/digimon_benchmark_baseline.md
+
+# A/B：opt-in 的 segment-start overlong trim
+python scripts/eval/episode_benchmark.py --manifest eval/manifest.digimon.json `
+  --repair-overlong `
+  --json-out temp/reports/digimon_benchmark_repair.json `
+  --output temp/reports/digimon_benchmark_repair.md
+```
+
+对比时只看同一 split、同一 ASR 缓存；dev 看方向，test 冻结后跑一次。
+
 
 ## 4. 看什么
 

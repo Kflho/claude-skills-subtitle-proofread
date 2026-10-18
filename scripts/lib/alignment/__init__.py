@@ -22,6 +22,10 @@ from lib.alignment.base import (
     strip_tags,
 )
 from lib.alignment.timeline import CharTimeline, build_char_timeline
+from lib.alignment.quality import (
+    TimelinePolicy, TimelineQuality, assess_units, is_broken,
+    repair_overlong_units, should_fallback,
+)
 from lib.alignment.cue_mapper import map_cues, map_report
 from lib.alignment.diagnostics import (
     boundary_stats, confidence_for, summarize,
@@ -35,7 +39,9 @@ __all__ = [
     'AlignmentConfig', 'AlignmentError', 'AlignmentReport', 'CharTimeline',
     'CueAlignment', 'STATUS_EMPTY_TEXT', 'STATUS_EXTRA_TEXT',
     'STATUS_GARBLED', 'STATUS_MATCH', 'STATUS_MISSING_ASR', 'STATUS_NO_ASR',
-    'STATUS_NO_SPEECH', 'boundary_stats', 'build_aligner',
-    'build_char_timeline', 'confidence_for', 'map_cues', 'map_report',
-    'normalize_text', 'similarity_ratio', 'strip_tags', 'summarize',
+    'STATUS_NO_SPEECH', 'TimelinePolicy', 'TimelineQuality', 'assess_units',
+    'boundary_stats', 'build_aligner', 'build_char_timeline',
+    'confidence_for', 'is_broken', 'map_cues', 'map_report',
+    'normalize_text', 'repair_overlong_units', 'should_fallback',
+    'similarity_ratio', 'strip_tags', 'summarize',
 ]

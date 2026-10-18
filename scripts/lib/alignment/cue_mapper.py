@@ -40,6 +40,7 @@ from lib.alignment.base import (
 from lib.alignment.diagnostics import (
     annotate, internal_pause, lang_profile, repeat_score, speech_coverage,
 )
+from lib.alignment.quality import TimelinePolicy
 from lib.alignment.timeline import CharTimeline, build_char_timeline
 
 
@@ -151,7 +152,8 @@ def _exact_occurrences(haystack: str, needle: str) -> list[int]:
 # ═══════════════════════════════════════════════════════════════
 
 def map_cues(cues, source, *, config: AlignmentConfig | None = None,
-             language: str = 'ja') -> list[CueAlignment]:
+             language: str = 'ja',
+             policy: TimelinePolicy | None = None) -> list[CueAlignment]:
     """Align every cue against an ASR result or a ready-made timeline.
 
     Cues are processed in *time* order (real ASS files are not always
@@ -162,7 +164,7 @@ def map_cues(cues, source, *, config: AlignmentConfig | None = None,
     if isinstance(source, CharTimeline):
         timeline = source
     else:
-        timeline = build_char_timeline(source)
+        timeline = build_char_timeline(source, policy=policy)
 
     order = sorted(
         range(len(cues)),
@@ -211,6 +213,9 @@ def _map_one(index: int, cue: dict, timeline: CharTimeline, cursor: int,
         'cue_lines': raw_text.count('\n') + 1 if raw_text else 0,
         **{k: round(v, 4) for k, v in lang_profile(cue_norm).items()},
         'repeat_score': round(repeat_score(cue_norm, cfg.repeat_window), 4),
+        'timeline_source': timeline.source,
+        'timeline_degraded': bool(timeline.quality and
+                                  timeline.quality.degraded),
     })
 
     if not cue_norm:
@@ -299,11 +304,15 @@ def _map_one(index: int, cue: dict, timeline: CharTimeline, cursor: int,
         'boundary_error_start': round(al.start - cue_start, 3),
         'boundary_error_end': round(cue_end - al.end, 3),
         'max_boundary_error': round(al.max_boundary_error, 3),
+        'aligned_duration_s': round(al.aligned_duration, 3),
         'overflow': round(max(0.0, al.end - cue_end)
                           + max(0.0, cue_start - al.start), 3),
         'unmatched_speech_s': round(unmatched_speech, 3),
         'internal_pause_s': round(pause, 3),
     })
+    if al.aligned_duration <= 1e-3:
+        al.reasons.append('aligned span has zero duration '
+                          '(collapsed ASR timestamp)')
 
     if similarity >= cfg.match_similarity:
         al.status = STATUS_MATCH
@@ -330,21 +339,31 @@ def _map_one(index: int, cue: dict, timeline: CharTimeline, cursor: int,
 
 
 def map_report(cues, result, *, config: AlignmentConfig | None = None,
-               language: str = 'ja') -> AlignmentReport:
+               language: str = 'ja',
+               policy: TimelinePolicy | None = None) -> AlignmentReport:
     """Convenience wrapper: alignments + engine metadata + warnings."""
     cfg = config or AlignmentConfig()
-    timeline = build_char_timeline(result)
+    timeline = build_char_timeline(result, policy=policy)
     alignments = map_cues(cues, timeline, config=cfg, language=language)
     report = AlignmentReport(
         alignments=alignments,
         engine=str(getattr(result, 'engine', '') or ''),
         model=str(getattr(result, 'model', '') or ''),
         audio_duration=float(getattr(result, 'audio_duration', 0.0) or 0.0),
+        timeline_source=timeline.source,
+        timeline_fallback=timeline.fallback,
+        timeline_quality=(timeline.quality.to_dict()
+                          if timeline.quality is not None else {}),
     )
-    if timeline.source == 'segments':
+    report.warnings.extend(timeline.warnings)
+    if timeline.source == 'segments' and not timeline.fallback:
         report.warnings.append(
             'ASR has no tokens; alignment used segment-level interpolation '
             '(boundary precision is limited)')
     elif timeline.source == 'none':
         report.warnings.append('ASR result has no timestamp data')
+    if timeline.fallback:
+        report.warnings.append(
+            f'fell back from {timeline.fallback} to {timeline.source} '
+            'timeline')
     return report

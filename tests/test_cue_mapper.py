@@ -215,3 +215,33 @@ def test_map_report_without_timestamps_warns():
     report = map_report([cue(1.0, 2.0, 'なし')], result)
     assert report.alignments[0].status == STATUS_NO_ASR
     assert report.warnings
+
+
+def test_map_report_surfaces_degraded_token_quality():
+    result = make_result([('あ', 1.0, 1.0)] * 4)
+    report = map_report([cue(1.0, 2.0, 'あ')], result)
+    assert report.timeline_source == 'tokens'
+    assert report.timeline_quality['degraded'] is True
+    assert any('degraded' in w for w in report.warnings)
+    payload = report.to_dict()
+    assert payload['timeline']['source'] == 'tokens'
+    assert payload['timeline']['quality']['zero_units'] == 4
+
+
+def test_map_report_records_segment_fallback():
+    result = make_result(tokens=[('あ', 1.0, 1.0)] * 10,
+                         segments=[('あ' * 10, 1.0, 3.0)])
+    report = map_report([cue(1.0, 3.0, 'あ' * 10)], result)
+    assert report.timeline_source == 'segments'
+    assert report.timeline_fallback == 'tokens'
+    assert any('fell back' in w for w in report.warnings)
+    assert report.to_dict()['timeline']['fallback'] == 'tokens'
+
+
+def test_alignment_records_timeline_evidence():
+    result = make_result([('あ', 1.0, 1.0)] * 4)
+    al = map_cues([cue(1.0, 2.0, 'あ')], result)[0]
+    assert al.signals['timeline_source'] == 'tokens'
+    assert al.signals['timeline_degraded'] is True
+    assert al.signals['aligned_duration_s'] == 0.0
+    assert any('zero duration' in reason for reason in al.reasons)
