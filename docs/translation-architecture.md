@@ -123,6 +123,14 @@ QA（每条）：
    `translated/zh/<EP>.srt` + `<EP>.qa.json`；失败不致命；dry-run。
 4. `run_all --translate`：修复/统一之后、交付之前执行，不覆盖源字幕。
 
+端到端冒烟（真跑 `run_all`，2 条 SRT）：
+
+```text
+run_all --target-dir <project> --input-dir . --lang ja --skip-whisper --translate
+→ <project>/translated/zh/EP001.srt + EP001.qa.json
+→ おはよう→早上好；アグモン→亚古兽（glossary）；QA 0 违规
+```
+
 实测（DeepSeek，全部主窗口，repair 默认开启）：
 
 | EP | cues | baseline 违规 | repair 后 | 备注 |

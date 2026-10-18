@@ -367,6 +367,9 @@ judge-refiner）、IWSLT 2026 Subtitling（长度/压缩约束）、gpt-subtrans
 - EP003 317 条：7 违规（4 日语残留 + 1 回显 + 3 行长）→ 首轮剩 1 条角色名错译，
   给 repair prompt 补 `タケル→阿武` 的 ja→zh 对照后 **0**；
 - 时间轴漂移三集均为 0；
+- **端到端冒烟**：`run_all --target-dir <project> --input-dir . --lang ja
+  --skip-whisper --translate` 真跑 2 条 → `translated/zh/EP001.srt` + QA 0，
+  `おはよう→早上好`、`アグモン→亚古兽`（glossary 生效）；
 - chrF guardrail（对现有中文 ASS）：EP001 21.79/24.25，EP002 13.45/21.47，
   EP003 13.68/20.36（句均/语料）——中文对照是另一版翻译，不拿来调 prompt；
 - **未来上下文消融（EP001 前 30 条）**：baseline 43.33（23 对）→ future 36.25，
