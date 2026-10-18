@@ -282,6 +282,25 @@ def test_step_audio_asr_route_threads_global_offset(monkeypatch):
                                      'global_offset': True}]
 
 
+def test_step_audio_asr_route_surfaces_early_exit_reason(monkeypatch,
+                                                         capsys):
+    class FakeFixer:
+        def __init__(self, episode, project_dir, **kwargs):
+            pass
+
+        def fix_by_asr(self, **kwargs):
+            return FixReport(
+                source='asr',
+                details=['ASS in-place time fixes are not supported'])
+
+    monkeypatch.setattr(fx, 'Fixer', FakeFixer)
+    report = ew.step_audio('/proj', 'EP001', None, asr_engine='qwen3')
+
+    assert report.applied == 0
+    out = capsys.readouterr().out
+    assert 'ASS in-place time fixes are not supported' in out
+
+
 def test_step_audio_asr_dry_run_does_not_call_model(monkeypatch):
     created = _install_fake_fixer(monkeypatch)
 

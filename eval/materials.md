@@ -136,10 +136,10 @@ python -c "from lib.whisper_utils import extract_audio_wav; extract_audio_wav(r'
   --output temp\asr\digimon_epXXX_main.qwen3.json `
   --srt temp\asr\digimon_epXXX_main.qwen3.srt
 
-# 3) held-out 基准（只读；dev/test 分组）
-python scripts\eval\episode_benchmark.py --manifest eval\manifest.digimon.json `
-  --global-offset --output temp\reports\digimon_benchmark_final.md `
-  --json-out temp\reports\digimon_benchmark_final.json
+# 3) held-out 基准 + release gate（只读；CC 边界标准；dev/test 分组）
+python scripts\eval\release_gate.py `
+  --manifests eval\manifest.digimon.json eval\manifest.digimon.whisper.json `
+  --baseline eval\gate.baseline.json --out-dir temp\reports
 
 # 4) 时间轴诊断（无参考也可跑；有参考时加 --srt + --shift -95）
 python scripts\eval\diagnose_timeline.py `
@@ -147,14 +147,46 @@ python scripts\eval\diagnose_timeline.py `
   --srt temp\references\digimon\EPXXX.main.srt --shift -95
 ```
 
-当前状态（2026-10-18 第七轮）：
+当前状态（2026-10-18 第九轮）：
 
 ```text
-EP01/02/03 视频 ✅；日文 CC 54 集 ✅；用户人工复核：视频/CC 无真实偏移
+EP01/02/03 视频 ✅；日文 CC 54 集 ✅；用户确认 CC 边界即测试标准
 主故事窗口 [95,1240]；ASR 缓存 temp/asr/digimon_ep00X_main.qwen3.json 与 .whisper.json
-基准：temp/reports/digimon_qwen3_raw.{json,md}、digimon_whisper_raw.{json,md}
-协议：eval/protocol.md；ADR-009（参考=考卷）
-测试：1362 passed / 79.6%
+基准/gate：eval/gate.baseline.json；temp/reports/gate_*.{json,md}
+协议：eval/protocol.md（CC 标准 + release gate）；ADR-009（参考=考卷）
+测试：1390 passed / 79.8%
 ```
+
+## 8. 端到端冒烟（第九轮，主 1）
+
+目的：证明 Qwen3 链路能在**真实字幕目录 + 真实视频命名**下跑完，而不是只在基准窗口里。
+
+```text
+项目：temp/smoke_e2e2/project（AI审查后/EP001.srt = 完整日文 CC，296 cue）
+视频：D:\videos\Animation\TV\数码宝贝（不改名、不拷贝）
+命令：run_all.py --lang ja --asr qwen3 --asr-python .venv-qwen\Scripts\python.exe
+模型：models\Qwen3-ASR-1.7B + models\Qwen3-ForcedAligner-0.6B（ASR_FALLBACK=none）
+结果：exit 0；24 chunks / 1188 tokens；约 2 分钟
+      13 auto time fixes；272 review（101 text 提案 + 125 review_ai + 45 delete 候选 + 1 split）
+      296 cues 数量不变；.bak 备份；alignment.json 406 KB；报告/清单齐全
+```
+
+暴露并修掉的问题：
+
+- **视频名不补零**：`01、漂流？冒険の島！.mkv` 用 `'001' in fname` 找不到，ASR 路由静默返回 0 条。
+  现在 `find_video` / `SubtitleSession` 走 `extract_ep_number`，`01` → `EP001`；
+  201 / 1080p 等反例有测试。
+- **提前退出静默**：ASS 输入时 `fix_by_asr` 直接返回「不支持」，但控制台只显示 0 fixed。
+  现在 0 修 0 review 时会打印前 3 条 `details`。
+
+ASS 冒烟（同目录，`EP001.ass` 手写 2 条）：
+
+```text
+exit 0；ASS 文件 hash 不变；ASR 路由不启动 worker
+控制台现在会打印：ASS in-place time fixes are not supported
+```
+
+已知未修（不阻塞）：ASR 路由仍打印 `WHISPER_CLI not set` 警告；272 条 review 对人工仍偏重；
+`temp/scans/EP001.asr.wav`（44 MB）跑完不清理。
 
 

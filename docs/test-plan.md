@@ -7,11 +7,11 @@
 
 ```text
 python -m pytest -q
-1387 passed in ~9s           # 无网络、无模型、无真实项目依赖
-coverage: 79.8% (14,639 statements)
+1391 passed in ~9s           # 无网络、无模型、无真实项目依赖
+coverage: 79.8% (14,662 statements)
 ```
 
-本轮 **+9 tests**（1378 → 1387），覆盖率 **79.7% → 79.8%**，0 failed。
+本轮 **+13 tests**（1378 → 1391），覆盖率 **79.7% → 79.8%**，0 failed。
 
 新增/扩展测试文件：
 
@@ -22,13 +22,14 @@ coverage: 79.8% (14,639 statements)
 | `test_alignment_quality.py`（扩展） | `lost_spans`：塌缩 run 前的时间空洞、overlong token、阈值可配 |
 | `test_fix_by_asr.py`（扩展） | 整集偏移默认关闭、显式 `global_offset=True`、`ASR_GLOBAL_OFFSET` 环境默认 |
 | `test_asr_registry.py`（扩展） | aligner 适配器尊重 `ASRConfig.model` 本地路径（离线模型不再回落到 Hub） |
+| `test_project_utils.py` / `test_subtitle_session.py`（扩展） | 未补零视频名解析（`01、Title.mkv` → EP001）、201/1080p 反例、SubtitleSession 视频解析 |
 
 ### 覆盖率按目录（本轮 vs 上轮）
 
 | 目录 | 语句 | 覆盖 | 上轮 | 说明 |
 |---|---:|---:|---:|---|
-| `scripts/lib`（含子目录） | 3,558 | **85.9%** | 85.8% | 新增 `lost_spans`；对齐/ASR 契约稳 |
-| `scripts/fix` | 3,228 | **77.9%** | 77.9% | display linger 分支已测；whisper_pipeline 81% |
+| `scripts/lib`（含子目录） | 3,569 | **85.8%** | 85.9% | 新增 `lost_spans`、视频名解析；对齐/ASR 契约稳 |
+| `scripts/fix` | 3,240 | **78.0%** | 77.9% | SubtitleSession 视频解析 + 早退提示；whisper_pipeline 81% |
 | `scripts/nouns` | 2,424 | **67.2%** | 67.2% | `auto_classify` / `auto_clean_glossary` 仍 0%（旧入口） |
 | `scripts` 根 | 2,013 | **65.8%** | 65.7% | run_all 96%、translate_srt 85%、polish_zh 99% |
 | `scripts/asr` | 603 | **95.0%** | 95.0% | worker 99%、CLI 99% |
@@ -38,7 +39,7 @@ coverage: 79.8% (14,639 statements)
 | `scripts/eval` | 1,074 | **90.0%** | 90.3% | 新增 release gate；benchmark 新指标 |
 | `scripts/ass` | 313 | **86.3%** | 86.3% | CLI main 已测 |
 | `scripts/utils` | 285 | **80.4%** | 80.4% | — |
-| **合计** | **14,639** | **79.8%** | 79.7% | — |
+| **合计** | **14,662** | **79.8%** | 79.8% | — |
 
 ### 做得好的部分
 

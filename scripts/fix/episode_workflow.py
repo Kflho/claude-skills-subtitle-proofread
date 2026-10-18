@@ -173,6 +173,11 @@ def step_audio(project_dir, episode, scan_result, dry_run=False, video_dir=None,
                                   global_offset=asr_global_offset)
         print(f'[audio] ASR done: {report.applied} fixed, '
               f'{report.ai_review} review')
+        if not report.applied and not report.ai_review:
+            # Early exits (ASS input, no video, no cues) would otherwise look
+            # like a silent success.  Surface the reason.
+            for detail in (report.details or [])[:3]:
+                print(f'[audio] {detail}')
         return report
 
     all_issues = scan_result.get('issues', []) if scan_result else []

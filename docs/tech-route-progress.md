@@ -1,18 +1,19 @@
 # 2026 技术路线实施进度
 
 > **用途**：跨会话续跑。新会话先读本文件，再读 [`tech-route-2026.md`](tech-route-2026.md)、[`ADR-006`](adr/006-stable-asr-core.md)、[`ADR-007`](adr/007-cue-alignment.md)、[`ADR-008`](adr/008-qwen3-long-audio-chunking.md)、[`test-plan.md`](test-plan.md)。
-> **最后更新**：2026-10-18（第九轮：CC 边界测试标准 + release gate；1387 tests / 79.8%）
+> **最后更新**：2026-10-18（第九轮：CC 边界测试标准 + release gate；1391 tests / 79.8%）
 > **当前阶段**：EP01–03 视频/日文 CC 齐备；只读基准 + 防过拟合协议落地；**用户确认视频/CC 无真实偏移，并明确日语 CC 边界即测试标准**（不再另建人工金标）。第八轮把“P90 为什么下不去”拆开：test 集 90% 的 matched cue 起点系统性早 −0.37/−0.40 s（同段音频重转写复现，是当前对齐的起点缺陷，不是缓存/参考问题；EP001 仅 −55 ms），且 P90 只覆盖 42–45% 的 CC 字符；FA 塌缩吞掉成段对白（累计空洞 122–229 s）。`fix_by_asr` 整集偏移改为**默认关**，分段重对齐实测更差、留 P3。
 > **总目标**：把音频链路从 `WebRTC VAD → kotoba Whisper → 时间重叠匹配` 迁移到 `Qwen3-ASR → Qwen3-ForcedAligner → 全局文本对齐`；默认行为在 P2 验收前保持不变。
 
 ## 0. 当前一句话（clear 后从这里开始）
 
-已经完成：P1 稳定 ASR 核心、P2 对齐层、`run_all --asr` 接入、实机验证、held-out 三集基准；第八轮补齐 signed 偏差/覆盖分解/P90 归因/空洞诊断；**第九轮**按用户定位重排主次，并把测试标准收成一条 gate 命令（`release_gate.py` + `eval/gate.baseline.json`）。**用户已确认日语 CC 边界即测试标准**，所以 raw 数字就是验收结果：test P50 400 ms / P90 1196 ms（可靠 P90 510 ms），P2-14 未达标。**测试 1387 passed / 79.8% / 0 failed。**
+已经完成：P1 稳定 ASR 核心、P2 对齐层、`run_all --asr` 接入、实机验证、held-out 三集基准；第八轮补齐 signed 偏差/覆盖分解/P90 归因/空洞诊断；**第九轮**按用户定位重排主次，并把测试标准收成一条 gate 命令（`release_gate.py` + `eval/gate.baseline.json`）。**用户已确认日语 CC 边界即测试标准**，所以 raw 数字就是验收结果：test P50 400 ms / P90 1196 ms（可靠 P90 510 ms），P2-14 未达标。**测试 1391 passed / 79.8% / 0 failed。**
 
 **主次（用户定位：先应用新技术 + 建立测试标准，再慢慢改精度）：**
 
-- **主 1｜新技术落地**：让 Qwen3 链路在真实工作流里可用——`run_all --asr qwen3` 端到端跑通一集、
-  失败回退、报告/备份、ASS 策略、默认切换的开关与回滚。**先证明“能换上去用”，不追精度。**
+- **主 1｜新技术落地**：🟡 真实目录 + 真实视频命名端到端已跑通（`run_all --asr qwen3`，
+  exit 0，13 自动修 / 272 review）。剩余：失败回退、ASS 策略、默认切换的开关/回滚。
+  **先证明“能换上去用”，不追精度。**
 - **主 2｜测试标准闭环**：✅ 一条命令已落地
   `python scripts\eval\release_gate.py --manifests ... --baseline eval\gate.baseline.json`；
   按 CC 标准判 test 的 P50≤100 / 可靠 P90≤300，并与冻结基线比回归，退出码 0/1。
@@ -185,7 +186,7 @@ python scripts\eval\diagnose_timeline.py --asr-json temp\asr\digimon_ep002_main.
 
 **用户定位**：先应用新技术、建立测试标准，再慢慢改精度；不要陷进单点技术细节。
 **提交**：`d40ce74`（CC 即边界测试标准）+ 本轮 gate 提交（见 git log 顶部）。
-**测试**：1387 passed / 79.8% / 0 failed。
+**测试**：1391 passed / 79.8% / 0 failed。
 
 已完成：
 
@@ -195,11 +196,15 @@ python scripts\eval\diagnose_timeline.py --asr-json temp\asr\digimon_ep002_main.
    test 目标 P50 ≤100 ms / 可靠 P90 ≤300 ms，并对 `eval/gate.baseline.json` 做回归
    （P50 +20 ms、可靠 P90 +50 ms、CER +0.01、字符覆盖 −0.02），退出码 0/1。
    当前判定：Qwen3 与 Whisper 均 FAIL（P50 400 / 756 ms，可靠 P90 510 / 1325 ms）。
-3. **测试**：+9（gate 判定、基线往返、覆盖率回归），总计 1387 / 79.8%。
+3. **主 1 端到端跑通**：真实目录 + 真实视频命名（`01、漂流？…mkv`）跑完整集，
+   exit 0；24 chunks / 1188 tokens；13 auto time fix + 272 review。顺带修掉视频名
+   不补零导致 ASR 路由静默 0 条的 bug（`find_video` / `SubtitleSession`）。
+   冒烟细节见 `eval/materials.md` §8。
+4. **测试**：+13（gate 9 + 视频名解析 3 + 早退提示 1），总计 1391 / 79.8%。
 
 下一步（按主次）：
 
-1. **主 1**：`run_all --asr qwen3` 用真实字幕目录端到端跑一集（失败回退、报告/备份、ASS 策略）。
+1. **主 1（收尾）**：失败回退与 ASS 策略各跑一次；确认默认切换的开关/回滚说明。
 2. **主 2**：把 gate 接进日常流程——改完必跑；基线只在确认新起点时 `--update-baseline` 冻结。
 3. **次**：起点偏差、FA 空洞/塌缩、覆盖率等，按 gate 数字逐个迭代，一次只动一个变量。
 
@@ -210,7 +215,7 @@ python scripts\eval\diagnose_timeline.py --asr-json temp\asr\digimon_ep002_main.
 | P0 | 边界测试标准 + 基线指标 | ✅ 用户确认日语 CC 边界即测试标准；三集基准 + 测量有效性（signed/覆盖/空洞）已落地 | `episode_benchmark` 新报告字段；CER/边界/偏差可复现 |
 | P1 | 稳定核心 + Qwen3/Whisper 适配 + 评测/CLI | ✅ 3 集跑通；Qwen3 vs Whisper large-v3 A/B 已记录；默认不变 | 契约/registry/router/CLI 稳定；A/B 有 raw + matched-span 数据 |
 | P2 | Qwen3-FA + cue mapper + align_repair | 🟡 核心/CLI/`run_all --asr` 完成；**P2-14 按 CC 标准未达标** | raw test P50 400 ms / 可靠 P90 510 ms；signed P50 −384 ms（起点缺陷） |
-| 测试 | 1387 tests / 79.8% 覆盖 / 0 failed | 🟡 主链补齐；剩余根脚本/nouns 旧入口/whisper_backends/align_cues | 关键路径每个分支至少一条测试 |
+| 测试 | 1391 tests / 79.8% 覆盖 / 0 failed | 🟡 主链补齐；剩余根脚本/nouns 旧入口/whisper_backends/align_cues | 关键路径每个分支至少一条测试 |
 | P3 | FireRedVAD/AED，VAD 降级为提示 | ⬜ 未开始 | speech/music/singing 时间线对比 |
 | P4 | glossary-first + 翻译 prompt，百度下线 | ⬜ 未开始 | 专名 F1 / 翻译人工评分 |
 | P5 | VibeVoice / 云兜底 | ⬜ 未开始 | 单集实验 + 成本/隐私评估 |
