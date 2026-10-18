@@ -1,6 +1,7 @@
-# Qwen3-ASR P1 运行说明
+# Qwen3-ASR + P2 对齐 运行说明
 
-> 这是 2026 技术路线的第一个可运行切片：**只转录 + 评测，不改 SRT**。默认的 `run_all.py` 仍然走 Whisper。
+> 2026 技术路线的可运行切片：P1 **转录 + 评测**，P2 **cue 对齐 + 时间码修复**。
+> 两者都不改默认管线；`run_all.py` 仍走 Whisper。
 
 ## 1. 安装（隔离 venv）
 
@@ -82,7 +83,39 @@ python scripts\eval\asr_eval.py --manifest eval\manifest.json `
 
 manifest 格式和指标说明见 [`eval/README.md`](../../eval/README.md)。
 
-## 5. Worker 协议
+## 5. cue 对齐（P2）
+
+```powershell
+# 1) 先拿 ASR JSON（可复用第 3 步）
+python scripts\asr\align_cues.py --srt ep.srt --asr-json temp\asr\EP001.json
+
+# 2) 直接给视频（内部先转录再对齐）
+python scripts\asr\align_cues.py --srt ep.srt --video ep.mkv --engine qwen3 `
+  --python .venv-qwen\Scripts\python.exe
+
+# 3) 确认无误后再落盘（默认 dry-run）
+python scripts\asr\align_cues.py --srt ep.srt --asr-json temp\asr\EP001.json --write
+```
+
+输出：
+
+- 终端摘要：`match/garbled/missing_asr/extra_text/no_speech` 计数、动作计数、边界 MAE/P50/P90/±100ms；
+- JSON（默认 `temp/align/<stem>.alignment.json`）：每 cue 的 `status/similarity/asr_span/start/end/signals`
+  以及修复计划 `repairs`，可复算、可 A/B。
+
+安全默认：
+
+| 开关 | 默认 | 说明 |
+|---|---|---|
+| `--write` | 关 | 只出报告，不改字幕 |
+| `--fix-text` | 关 | 文本替换需要显式开启（且只在 garbled 且可判定时） |
+| `--max-shift` | 2.0s | 超过的时间修正转 review，不自动写 |
+| 删除 cue | 永不 | `no_speech/extra_text` 只进审查清单 |
+| ASS + `--write` | 拒绝 | ASS 写回目前只改文本、不改时间码，避免静默无操作 |
+
+状态与置信度规则见 [`docs/adr/007-cue-alignment.md`](../../docs/adr/007-cue-alignment.md)。
+
+## 6. Worker 协议
 
 主进程不会 import torch；它通过 `scripts/asr/qwen3_worker.py` 的 JSON lines 通信：
 
@@ -96,7 +129,7 @@ manifest 格式和指标说明见 [`eval/README.md`](../../eval/README.md)。
 
 响应统一为 `{"ok": true, "id": ..., "result": {...}}` 或 `{"ok": false, "error": ...}`。
 
-## 6. 常见问题
+## 7. 常见问题
 
 | 现象 | 处理 |
 |---|---|
@@ -107,14 +140,15 @@ manifest 格式和指标说明见 [`eval/README.md`](../../eval/README.md)。
 | 3 分钟边界抖动 | P1 只输出时间戳；P2 的 cue mapper 会处理边界连续性 |
 | 显存不足 | 用 0.6B ASR（`--asr Qwen/Qwen3-ASR-0.6B`），或先跑 3 分钟片段 |
 
-## 7. 当前边界
+## 8. 当前边界
 
-- **不修改 SRT**：P1 只写 JSON/可选 SRT 参考，不写回项目字幕。
-- **不接 `Fixer`**：`run_all.py` 仍走旧 Whisper；P2 接 `align_repair.py`。
+- **P1 不修改 SRT**：转录只写 JSON / 可选 SRT 参考。
+- **P2 默认 dry-run**：`align_cues.py` 需要 `--write` 才改时间码，`--fix-text` 才换文本。
+- **不接 `Fixer`**：`run_all.py` 仍走旧 Whisper；`fix_by_asr()` 是 P2 尾项。
 - **时间戳依赖 aligner**：`--no-timestamps` 时只返回文本/segment，`tokens=[]`。
-- **Qwen3 不返回置信度**：P2 用对齐一致度/双引擎重建。
+- **Qwen3 不返回置信度**：P2 用对齐一致度 + 多信号投票重建。
 
-## 8. 新增模型（不改 core）
+## 9. 新增模型（不改 core）
 
 1. 复制 `templates/asr_adapter.py` 到 `scripts/lib/asr/adapters/<name>.py`；
 2. 填 `NAME/KIND/INFO/build`，实现 `available()/transcribe()`；

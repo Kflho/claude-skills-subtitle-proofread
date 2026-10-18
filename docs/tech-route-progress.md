@@ -1,13 +1,13 @@
 # 2026 技术路线实施进度
 
-> **用途**：跨会话续跑。新会话先读本文件，再读 [`tech-route-2026.md`](tech-route-2026.md) 与 [`ADR-006`](adr/006-stable-asr-core.md)。
+> **用途**：跨会话续跑。新会话先读本文件，再读 [`tech-route-2026.md`](tech-route-2026.md) 与 [`ADR-006`](adr/006-stable-asr-core.md)、[`ADR-007`](adr/007-cue-alignment.md)。
 > **最后更新**：2026-10-18
-> **当前阶段**：P1 稳定核心 + 0.6B/1.7B smoke 通过；等 3 集素材做 A/B
+> **当前阶段**：P2 对齐核心落地（mapper + repair + CLI），待真实日语素材做 A/B 与默认管线接入
 > **总目标**：把音频链路从 `WebRTC VAD → kotoba Whisper → 时间重叠匹配` 迁移到 `Qwen3-ASR → Qwen3-ForcedAligner → 全局文本对齐`；默认行为在 P2 验收前保持不变。
 
 ## 0. 当前一句话
 
-已经落地 **稳定 ASR 核心**（契约/注册器/路由/评测/CLI）和 **Qwen3/Whisper 两个适配器**；新增模型只需在 `lib/asr/adapters/` 放一个文件，不改 core。下一步是用真实 Qwen3 模型跑 3 集 A/B，然后进 P2 的 cue 对齐/修复。
+P1 的稳定 ASR 核心（契约/注册器/路由/评测/CLI）已落地并 smoke 通过；本轮把 **P2 对齐层** 做成可运行切片：字符时间轴 → 时间窗内字符匹配 → 状态/置信度 → 修复计划/时间码应用，外加独立 CLI `scripts/asr/align_cues.py`（默认 dry-run）。默认管线未改；下一步是用真实日语视频跑 A/B，再接 `run_all --asr`。
 
 ## 1. 状态总览
 
@@ -15,7 +15,7 @@
 |---|---|---|---|
 | P0 | 评测金标清单 + 基线指标 | 🟡 代码就绪，待真实素材 | `eval/manifest.json` 填 12 集；旧管线 CER/边界可复现 |
 | P1 | 稳定核心 + Qwen3/Whisper 适配 + 评测/CLI | 🟡 smoke 通过，待 3 集 A/B | 3 集跑通；与旧管线 A/B 有记录；默认不变 |
-| P2 | Qwen3-FA + cue mapper + align_repair | ⬜ 未开始 | 边界 P50 ≤100ms / P90 ≤300ms |
+| P2 | Qwen3-FA + cue mapper + align_repair | 🟡 核心 + CLI 完成；未接默认管线 | 边界 P50 ≤100ms / P90 ≤300ms（真实金标待测） |
 | P3 | FireRedVAD/AED，VAD 降级为提示 | ⬜ 未开始 | speech/music/singing 时间线对比 |
 | P4 | glossary-first + 翻译 prompt，百度下线 | ⬜ 未开始 | 专名 F1 / 翻译人工评分 |
 | P5 | VibeVoice / 云兜底 | ⬜ 未开始 | 单集实验 + 成本/隐私评估 |
@@ -66,6 +66,21 @@
 - [x] P1-8b：`templates/asr_adapter.py` + `docs/adr/006-stable-asr-core.md`
 - [x] P1-9：真实模型 smoke test（0.6B + 1.7B + aligner，见 §4）
 - [ ] P1-10：3 集 A/B 记录（待素材）
+
+### P2
+
+- [x] P2-1：`lib/alignment/base.py`：`CueAlignment/AlignmentConfig/AlignmentReport`、状态与动作词表、文本归一化（NFKC/去 tag/去标点）、`schema_version`
+- [x] P2-2：`lib/alignment/timeline.py`：`ASRResult` → 字符时间轴（token 优先、segment 兜底、无时间戳返回空轴）
+- [x] P2-3：`lib/alignment/cue_mapper.py`：时间窗锚点 + 单调 cursor + `SequenceMatcher(autojunk=False)` + 最佳簇 + 精确串就近选择
+- [x] P2-4：`lib/alignment/diagnostics.py`：语音覆盖率、重复度、语种占比、内部停顿、置信度投票、边界统计（MAE/P50/P90/±100ms）
+- [x] P2-5：`lib/alignment/aligner.py`：registry 对齐服务；`ALIGNER_ENGINE=none` 可整体关闭；不 import 模型
+- [x] P2-6：`fix/align_repair.py`：修复计划（`fix_time/replace_text/review/split/delete_candidate`）、时间码应用（邻居安全）、单 cue 窗口重对齐（ffmpeg + aligner）
+- [x] P2-7：`scripts/asr/align_cues.py`：端到端 CLI（SRT/ASS + ASR JSON/音频/视频；默认 dry-run；`--write`/`--fix-text`）
+- [x] P2-8：测试 91 项（`test_alignment_*`、`test_cue_*`、`test_align_repair`、`test_align_cues_cli`、`test_alignment_bench`）
+- [x] P2-9：真实 cue 结构回归 + `scripts/eval/alignment_bench.py`（魔法使莎莉 EP001，405 cue；见 §4）
+- [x] P2-10：`docs/adr/007-cue-alignment.md`
+- [ ] P2-11：真实日语素材 A/B（阿童木 193 集；视频目录当前不在盘上，待素材）
+- [ ] P2-12：`run_all --asr qwen3` / `fix_orchestrator.fix_by_asr()` 接入（P2-11 通过后再改默认路径）
 
 ## 4. 验证记录
 
@@ -142,6 +157,46 @@ RTF=0.387（warmup 后，含 ASR+FA）
 
 说明：`warmup`/`load` 把模型加载排除在计时外；4s 短样本的 RTF 不代表 24 分钟整集。评测脚本、manifest、BOM 容错、报表链路均已跑通。
 
+### P2 单元测试（2026-10-18）
+
+```text
+python -m pytest -q tests/test_alignment_base.py tests/test_alignment_timeline.py \
+  tests/test_cue_mapper.py tests/test_cue_diagnostics.py \
+  tests/test_align_repair.py tests/test_alignment_aligner.py \
+  tests/test_align_cues_cli.py tests/test_alignment_bench.py
+91 passed
+```
+
+覆盖：归一化/tag 处理、token 与 segment 时间轴、重复台词、时间漂移、长段合并、重叠 cue、空文本/无时间戳、
+置信度分层、修复计划与邻居冲突、`--write`/`--fix-text`、ASS 写入拒绝、fake aligner registry、
+ffmpeg 窗口重对齐、bench 合成场景。
+
+全量：`408 passed, 3 failed` —— 3 个既存失败与 P2 无关（OP/ED 边界断言 95/120 vs 实际 180；`MockWhisperResult` 缺 `cues_to_clear`）。
+
+### P2 结构回归：魔法使莎莉 EP001（2026-10-18）
+
+> 素材是 ru→zh 纯翻译项目、无音轨，所以**不能**测 ASR 质量；这里用真实 cue 时间分布反推合成 ASR，
+> 测的是 mapper 机制（还原率/边界/单调性）。工具已入库：
+> `scripts/eval/alignment_bench.py --srt <字幕>`。
+
+输入：405 cue，其中 400 条对白（5 条 `\p1` 矢量图形被过滤）；乱序行 12 处、重叠 13 处、时长 0.44–7.75s。
+
+| 场景 | match | 边界 P50（起/止） | 边界 P90（起/止） | ±100ms（起/止） | 还原率 | 单调冲突 |
+|---|---:|---:|---:|---:|---:|---:|
+| A token 级 +50ms 抖动 | 400/400 | 28.8 / 27.0 ms | 79.4 / 46.0 ms | 90.0% / 98.5% | 98.0% | 0 |
+| B 3 个 cue 合并为 1 段（模拟 Whisper） | 379/400 | 295.9 / 264.1 ms | 2032.6 / 2297.1 ms | 37.7% / 42.2% | 94.8% | 0 |
+| C 10% 丢弃 + 10% 破坏 + 幻觉段 | 285/400 | 28.2 / 27.1 ms | 869.2 / 45.6 ms | 88.8% / 97.2% | 80.1%※ | 0 |
+| D 整体 +0.8s 漂移 | 400/400 | 801.4 / 800.4 ms | 846.5 / 844.3 ms | 0 / 0 | 98.5% | 0 |
+
+※ C 的还原率分母是「保留下来的 361 个 cue」。
+
+结论：
+
+1. **token 级时间轴能把边界压到 P50 ≈30ms、P90 <80ms**，远优于 100ms 目标；A 有 4 条转 review（OP 重复字幕，误差 >2s），其余 357 条 keep、39 条自动改时间。
+2. **段级 ASR（无 token）只能到 P50 ≈300ms**——Whisper 兜底可以诊断、不能定轴；Qwen3-FA 是必要前提。
+3. C 的 80% 还原率是重建；丢弃/破坏的 cue 本来就不该被还原。
+4. 性能：405 cue 约 **0.23s/集**（纯 stdlib），193 集约 45s。
+
 ### 文档整理（2026-10-18）
 
 - `references/architecture.md`（开发者架构文档）→ 合并进 `dev/technical-details.md`
@@ -160,20 +215,22 @@ RTF=0.387（warmup 后，含 ASR+FA）
 ## 5. 进行中 / 阻塞
 
 - ✅ 0.6B + 1.7B + aligner 已下载；两种模型 smoke test 均通过（§4）。
-- ⬜ 真实 3 集素材（视频+参考字幕）不在仓库；需要用户提供路径填 `eval/manifest.json`。
-- ⛔ 无（当前没有硬阻塞；HF 直连被墙，已改用 ModelScope）。
+- ✅ P2 对齐核心 + 修复计划 + CLI 完成；91 项测试、真实 cue 结构回归已跑（§4）。
+- ⬜ 真实日语素材 A/B：`阿童木` 有 193 集日文字幕，但视频目录
+  `D:\videos\Animation\TV\[Anonymoose] 鉄腕アトム (DVD, 10bit)` 当前不在盘上。
+- ⬜ `魔法使莎莉` 是 ru→zh、无音轨，只用于 cue 结构回归，不能做 ASR A/B。
+- ⛔ 无硬阻塞；P2-12（默认管线接入）等 P2-11 的真实 A/B 结果再动。
 
 ## 6. 下一步（按顺序）
 
-1. **P1-10 3 集 A/B**：填 `eval/manifest.json`，跑 `--engine whisper` 与 `--engine qwen3`，把 CER/边界/RTF 填进第 4 节。
-2. **P1-11 性能记录**（可选）：同一 30s 音频分别用 0.6B / 1.7B，记录显存峰值、RTF、首 token 延迟；决定默认模型。
-3. **P2 入口**：
-   - `lib/alignment/base.py`：`Aligner` 契约（已在 `lib/asr/base.py` 有协议，可复用/搬移）；
-   - `lib/alignment/qwen3_fa.py`：调用 worker `align`（或直接用 `qwen3_fa` adapter）；
-   - `lib/alignment/cue_mapper.py`：时间粗锚点 + SequenceMatcher/带状 DP；
-   - `fix/align_repair.py`：只依赖 `ASRResult`，不依赖 Qwen3；
-   - `run_all.py --asr qwen3` 接 `fix_by_asr()`（P2，不在 P1 改默认）。
-4. **P3**：`lib/audio/vad.py` + FireRedVAD；VAD 只作提示。
+1. **P2-11 真实 A/B**：拿到日语视频后，任选 3 集，先用
+   `qwen3_transcribe.py --timestamps` 生成 ASR JSON，再用
+   `align_cues.py --srt <参考字幕> --asr-json <json>` 跑 mapper，把
+   P50/P90/±100ms 与人工边界对比填进 §4；manifest 同步填 `eval/manifest.json`。
+2. **P2-12 接默认管线**：`run_all.py --asr qwen3` → `Fixer.fix_by_asr()`；
+   只在 A/B 达到 DoD 后切默认，保留 `ASR_ENGINE=whisper` 回滚开关。
+3. **P3**：`lib/audio/vad.py` + FireRedVAD；`speech_coverage` 从 ASR 近似换成真实 VAD，VAD 只作提示。
+4. **P1-10 / P4**：ASR A/B 记录与 glossary-first 仍按原计划排队。
 
 ## 7. 文件清单（新增/改动）
 
@@ -207,9 +264,19 @@ RTF=0.387（warmup 后，含 ASR+FA）
 | `eval/manifest.example.json` / `README.md` | 金标模板 | ✅ |
 | `templates/asr_adapter.py` | 新 ASR 骨架 | ✅ |
 | `templates/aligner_adapter.py` | 新对齐器骨架 | ✅ |
-| `tests/test_asr_*.py` / `test_qwen3_*.py` | 测试 | ✅ |
+| `tests/test_asr_*.py` / `test_qwen3_*.py` | ASR 测试 | ✅ |
+| `docs/adr/007-cue-alignment.md` | 对齐决策 | ✅ |
+| `scripts/lib/alignment/base.py` | 对齐契约/归一化 | ✅ |
+| `scripts/lib/alignment/timeline.py` | 字符时间轴 | ✅ |
+| `scripts/lib/alignment/cue_mapper.py` | 时间窗 + 字符匹配 | ✅ |
+| `scripts/lib/alignment/diagnostics.py` | 信号/置信度/统计 | ✅ |
+| `scripts/lib/alignment/aligner.py` | registry 对齐服务 | ✅ |
+| `scripts/fix/align_repair.py` | 修复计划/时间应用/重对齐 | ✅ |
+| `scripts/asr/align_cues.py` | P2 端到端 CLI | ✅ |
+| `scripts/eval/alignment_bench.py` | P2 结构回归（合成 ASR） | ✅ |
+| `tests/test_alignment_*.py` / `test_cue_*.py` / `test_align_repair.py` / `test_align_cues_cli.py` / `test_alignment_bench.py` | P2 测试（91 项） | ✅ |
 | `lib/config.py` | 新配置项 | ✅ |
-| `run_all.py` / `fix_orchestrator.py` | P2 接入 | ⬜ |
+| `run_all.py` / `fix_orchestrator.py` | P2 接入（默认管线） | ⬜ |
 
 ## 8. 环境命令
 
@@ -225,6 +292,21 @@ python -m pytest -q tests\test_asr_base.py tests\test_asr_router.py tests\test_a
 python scripts\asr\qwen3_transcribe.py --audio ep.wav `
   --python .venv-qwen\Scripts\python.exe --timestamps --output temp\asr\EP001.json
 
+# P2 对齐（默认 dry-run；--asr-json 可复用上面的结果）
+python scripts\asr\align_cues.py --srt ep.srt --asr-json temp\asr\EP001.json
+python scripts\asr\align_cues.py --srt ep.srt --video ep.mkv --engine qwen3 `
+  --python .venv-qwen\Scripts\python.exe --write
+
+# P2 测试
+python -m pytest -q tests\test_alignment_base.py tests\test_alignment_timeline.py `
+  tests\test_cue_mapper.py tests\test_cue_diagnostics.py `
+  tests\test_align_repair.py tests\test_alignment_aligner.py `
+  tests\test_align_cues_cli.py tests\test_alignment_bench.py
+
+# P2 结构回归（任意真实字幕；合成 ASR，不需要音频）
+python scripts\eval\alignment_bench.py --srt ep.srt
+python scripts\eval\alignment_bench.py --srt ep.ass --scenario segment --json temp\bench.json
+
 # 已通过的 smoke test
 .venv-qwen\Scripts\python.exe scripts\asr\qwen3_transcribe.py `
   --audio temp\smoke\ja_sample.wav --asr models\Qwen3-ASR-0.6B `
@@ -234,10 +316,14 @@ python scripts\asr\qwen3_transcribe.py --audio ep.wav `
 
 ## 9. 决策 / 风险
 
-- **默认不变**：`ASR_ENGINE=whisper`；P2 验收后才切默认。
-- **不伪造置信度**：P1 只出文本/token 时间；P2 用对齐一致度 + 双引擎。
+- **默认不变**：`ASR_ENGINE=whisper`；P2 只以独立 CLI 交付，`run_all` 未接。
+- **不伪造置信度**：P1 只出文本/token 时间；P2 用对齐一致度 + 多信号投票（ADR-007）。
+- **对齐只在时间轴上动刀**：文本替换默认关闭（`allow_text_replace=False`）；删除永不自动。
+- **自动改时间码的硬上限**：单边 ≤2s，且不能撞上原本不重叠的 cue；超限转 review。
+- **乱序 cue 在 mapper 内排序再还原**：真实 ASS 有乱序行，不能要求输入先排序。
 - **进程隔离**：主环境不 import torch/qwen-asr；worker JSON lines。
 - **Windows**：vLLM 不支持；走 Transformers 后端 + SDPA。
 - **模型下载**：HF 直连被墙；用 ModelScope（已验证 200）/ 镜像。
+- **已知精度边界**：段级 ASR（无 token）P50 ≈300ms，只有 Qwen3-FA 的 token 时间轴能到 P50 ≈30ms。
 - **已有测试**：全量 3 个既存失败（OP/ED 边界断言 95/120 vs 实际 180；`MockWhisperResult` 缺 `cues_to_clear`），与本路线无关；另开任务处理。
 - **续跑原则**：先看第 1 节状态、第 4 节验证、第 6 节下一步；不要重写核心，只加 adapter。

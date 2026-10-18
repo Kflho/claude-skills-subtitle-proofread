@@ -598,6 +598,9 @@ class CueAlignment:
 
 ### 6.4 核心算法：ASR-FA + 全局文本对齐
 
+> **实现落点**：`lib/alignment/cue_mapper.py`；设计取舍见 [ADR-007](adr/007-cue-alignment.md)；
+> 真实 cue 结构回归（405 cue，P50 ≈30ms）见 [`tech-route-progress.md`](tech-route-progress.md) §4。
+
 **Step 1 — 音频归一化**
 
 ```bash
@@ -776,11 +779,18 @@ scripts/
 
 ```
 ├── lib/alignment/
-│   ├── base.py                # Aligner Protocol
-│   ├── qwen3_fa.py            # Qwen3-FA 适配器
-│   └── cue_mapper.py          # 时间锚点 + 全局文本对齐
-├── fix/align_repair.py        # 只依赖 ASRResult，不依赖 Qwen3
+│   ├── base.py                # CueAlignment/AlignmentConfig/归一化/状态词表
+│   ├── timeline.py            # ASRResult → 字符时间轴（token 优先、segment 兜底）
+│   ├── cue_mapper.py          # 时间窗锚点 + 最佳匹配簇 + 精确串就近
+│   ├── diagnostics.py         # 语音覆盖/重复度/置信度/边界统计
+│   └── aligner.py             # registry 对齐服务；ALIGNER_ENGINE=none 可关闭
+├── fix/align_repair.py        # 修复计划 + 时间码应用 + 单 cue 窗口重对齐
+└── scripts/asr/align_cues.py  # P2 端到端 CLI（默认 dry-run，--write 才落盘）
 ```
+
+> 原方案里的 `lib/alignment/qwen3_fa.py` 不再单独存在：P1 已把 Qwen3-FA 做成
+> `lib/asr/adapters/qwen3_aligner.py`（`KIND='aligner'`），`aligner.py` 只是
+> registry 之上的薄服务，换对齐模型仍然只加 adapter。详见 [ADR-007](adr/007-cue-alignment.md)。
 
 ### 7.2 修改文件
 
@@ -797,11 +807,19 @@ scripts/
 | `scripts/asr/setup_qwen3.ps1` / `README.md` | 隔离环境/运行说明 | ✅ P1 |
 | `scripts/eval/asr_eval.py` / `eval/README.md` | P0 评测 | ✅ P1 |
 | `templates/asr_adapter.py` | 新模型骨架 | ✅ P1 |
-| `fix/fix_orchestrator.py` | `fix_by_asr()`；按引擎路由 | ⬜ P2 |
-| `fix/whisper_pipeline.py` | `match_whisper_to_cues` / `align_and_fix` 标记 legacy | ⬜ P2 |
+| `lib/alignment/base.py` | 对齐契约 + 文本归一化 + 状态/动作词表 | ✅ P2 |
+| `lib/alignment/timeline.py` | ASRResult → 字符时间轴 | ✅ P2 |
+| `lib/alignment/cue_mapper.py` | 时间窗 + 字符匹配 + 精确串就近 | ✅ P2 |
+| `lib/alignment/diagnostics.py` | 信号/置信度/边界统计 | ✅ P2 |
+| `lib/alignment/aligner.py` | registry 对齐服务（`none` 可关） | ✅ P2 |
+| `fix/align_repair.py` | 修复计划 + 时间应用 + 窗口重对齐 | ✅ P2 |
+| `scripts/asr/align_cues.py` | P2 端到端 CLI（默认 dry-run） | ✅ P2 |
+| `scripts/eval/alignment_bench.py` | P2 结构回归（合成 ASR，无需音频） | ✅ P2 |
+| `fix/fix_orchestrator.py` | `fix_by_asr()`；按引擎路由 | ⬜ P2 尾项 |
+| `fix/whisper_pipeline.py` | `match_whisper_to_cues` / `align_and_fix` 标记 legacy | ⬜ P2 尾项 |
 | `scan/unified_scanner.py` | VAD 切到 `lib/audio/vad.py` | ⬜ P3 |
 | `translate_srt.py` | 百度路径标记 deprecated；默认 LLM | ⬜ P4 |
-| `run_all.py` | `--asr` / `--aligner` / `--vad-engine` / `--hotwords` | ⬜ P2 |
+| `run_all.py` | `--asr` / `--aligner` / `--vad-engine` / `--hotwords` | ⬜ P2 尾项 |
 | `SKILL.md` / `README.md` | 更新技术栈、安装向导、后端说明 | 🟡 文档已拆分；技术栈更新待 P6 |
 
 ### 7.3 配置与 CLI

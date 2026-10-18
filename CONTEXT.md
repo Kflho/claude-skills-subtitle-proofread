@@ -42,23 +42,35 @@ scripts/
 │   ├── chinese_utils.py        #   中文常词/繁简映射
 │   ├── japanese_utils.py       #   日文常词/假名检测
 │   ├── english_utils.py        #   英文常词
-│   └── asr/                    #   ASR 稳定核心 + 插件适配器（2026 路线）
+│   ├── asr/                    #   ASR 稳定核心 + 插件适配器（2026 路线）
 │       ├── base.py             #     契约：ASRResult/ASRConfig/BackendInfo/Protocol
 │       ├── registry.py         #     自动发现 adapters/*
 │       ├── router.py           #     引擎选择/fallback；不 import 模型
 │       └── adapters/           #     qwen3 / qwen3_aligner / whisper
+│   └── alignment/              # P2 cue 对齐（纯 stdlib，不 import 模型）
+│       ├── base.py             #     契约/归一化/状态词表
+│       ├── timeline.py         #     ASRResult → 字符时间轴
+│       ├── cue_mapper.py       #     时间窗 + 字符匹配 + 精确串就近
+│       ├── diagnostics.py      #     信号/置信度/边界统计
+│       └── aligner.py          #     registry 对齐服务（ALIGNER_ENGINE）
 ├── fix/                        # Phase 2: 错误修复引擎
 │   ├── fix_orchestrator.py     #   薄orchestrator — 组合WhisperFixer+FragmentProcessor
 │   ├── subtitle_session.py     #   路径解析/检测/缓存 — 被orchestrator和worker共用
 │   ├── whisper_fixer.py        #   VAD→统一fix regions→Whisper转录→分诊 (数据契约:WhisperResult)
 │   ├── fragment_processor.py   #   AI碎片JSON+apply+VAD对齐 (直接写SRT, pragmatic exception)
 │   ├── oped_fixer.py           #   OP/ED跨集一致性修复
+│   ├── align_repair.py         #   P2 对齐→修复计划/时间码/窗口重对齐
 │   ├── compare_srt.py          #   字幕对比/相似度
 │   ├── translate_srt.py        #   百度翻译+LLM翻译
 │   └── episode_workflow.py     #   单集子进程工作流
 │
 ├── scan/                       # Phase 1: 字符扫描
 │   └── unified_scanner.py      #   乱码检测+VAD语音时间线提取 (gap检测由Phase 2统一处理)
+│
+├── asr/                        # 2026 ASR/P2 独立入口（不接默认管线）
+│   ├── qwen3_worker.py         #   长驻 worker（隔离 venv）
+│   ├── qwen3_transcribe.py     #   单文件转录 CLI
+│   └── align_cues.py           #   P2 对齐 CLI（默认 dry-run）
 │
 ├── nouns/                      # Phase 3: 专有名词
 │   ├── noun_checker.py         #   名词表对比
@@ -96,18 +108,20 @@ scripts/
 ## 测试
 
 ```bash
-cd <skill>/tests && pytest -q    # 234 tests, 0.5s, 无外部依赖
+cd <skill>/tests && pytest -q    # 411 tests, ~4s, 无外部依赖（3 个既存失败见 progress §9）
 ```
 
 分层: Tier 1 (纯函数) → Tier 2 (tempfile) → Tier 3 (mock 外部二进制)。
 
 ## 技术路线
 
-2026 技术栈修订提案：`docs/tech-route-2026.md`；决策记录：`docs/adr/005-asr-alignment-stack.md`、`docs/adr/006-stable-asr-core.md`。
+2026 技术栈修订提案：`docs/tech-route-2026.md`；决策记录：`docs/adr/005-asr-alignment-stack.md`、`docs/adr/006-stable-asr-core.md`、`docs/adr/007-cue-alignment.md`。
 
-核心变化：`Qwen3-ASR-1.7B + Qwen3-ForcedAligner-0.6B` 替代 `Whisper kotoba + 时间重叠匹配`；`FireRedVAD` 只作提示/AED；Whisper 保留 fallback。**尚未实施，当前代码仍走旧链路。**
+核心变化：`Qwen3-ASR-1.7B + Qwen3-ForcedAligner-0.6B` 替代 `Whisper kotoba + 时间重叠匹配`；`FireRedVAD` 只作提示/AED；Whisper 保留 fallback。**默认管线仍走旧链路**，2026 链路以独立 CLI 交付。
 
 ASR 架构已按「稳定核心 + 插件适配器」落地：`lib/asr/base.py`（契约）、`registry.py`（自动发现）、`router.py`（路由），新模型只写 `lib/asr/adapters/<name>.py`，不改 core。P1 进度见 `docs/tech-route-progress.md`。
+
+P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 → 信号/置信度）、`fix/align_repair.py`（修复计划/时间码）、`scripts/asr/align_cues.py`（端到端 CLI，默认 dry-run）。未接 `run_all` 默认管线；真实日语 A/B 待素材。
 
 ## 配置
 
