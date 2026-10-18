@@ -110,6 +110,23 @@ def test_fix_by_asr_without_subtitle(tmp_path):
     assert 'No subtitle' in report.details[0]
 
 
+def test_fix_by_asr_reports_transcription_failure_not_missing_video(project,
+                                                                   monkeypatch):
+    """A model/worker failure must not be reported as "no video"."""
+    video = project / 'EP001.mkv'
+    video.write_bytes(b'')
+
+    fixer = Fixer('EP001', str(project), srt_dir=str(project))
+    fixer._video_path = str(video)
+    monkeypatch.setattr(fixer, '_transcribe_for_alignment',
+                        lambda engine=None: None)
+    report = fixer.fix_by_asr()
+
+    assert report.applied == 0
+    assert 'transcription failed' in report.details[0].lower()
+    assert 'No video' not in report.details[0]
+
+
 def test_fix_by_asr_applies_consistent_global_offset(project):
     from lib.subtitle_io import format_tc
 

@@ -7,11 +7,11 @@
 
 ```text
 python -m pytest -q
-1391 passed in ~9s           # 无网络、无模型、无真实项目依赖
-coverage: 79.8% (14,662 statements)
+1392 passed in ~9s           # 无网络、无模型、无真实项目依赖
+coverage: 79.8% (14,665 statements)
 ```
 
-本轮 **+13 tests**（1378 → 1391），覆盖率 **79.7% → 79.8%**，0 failed。
+本轮 **+14 tests**（1378 → 1392），覆盖率 **79.7% → 79.8%**，0 failed。
 
 新增/扩展测试文件：
 
@@ -39,7 +39,7 @@ coverage: 79.8% (14,662 statements)
 | `scripts/eval` | 1,074 | **90.0%** | 90.3% | 新增 release gate；benchmark 新指标 |
 | `scripts/ass` | 313 | **86.3%** | 86.3% | CLI main 已测 |
 | `scripts/utils` | 285 | **80.4%** | 80.4% | — |
-| **合计** | **14,662** | **79.8%** | 79.8% | — |
+| **合计** | **14,665** | **79.8%** | 79.8% | — |
 
 ### 做得好的部分
 

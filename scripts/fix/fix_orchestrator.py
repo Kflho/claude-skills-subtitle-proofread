@@ -425,10 +425,17 @@ class Fixer:
 
         result = asr_result
         if result is None:
+            video = self._video_path
+            if not video or not os.path.exists(video):
+                return FixReport(source='asr',
+                                 details=['No video/audio for ASR'])
             result = self._transcribe_for_alignment(engine)
         if result is None:
-            return FixReport(source='asr',
-                             details=['No video/audio for ASR'])
+            # The helper already logged the real error (model load, ffmpeg,
+            # worker crash).  Do not misreport it as a missing video.
+            return FixReport(
+                source='asr',
+                details=['ASR transcription failed — see the [asr] log above'])
 
         aligned = map_report(cues, result, config=cfg,
                              language=self.target_lang)

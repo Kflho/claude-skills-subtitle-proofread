@@ -186,7 +186,16 @@ exit 0；ASS 文件 hash 不变；ASR 路由不启动 worker
 控制台现在会打印：ASS in-place time fixes are not supported
 ```
 
+ASR 失败冒烟（`ASR_MODEL` 指向空目录）：
+
+```text
+worker: load failed: Unrecognized model ...
+控制台：[asr] transcription failed: ... + [audio] ASR transcription failed — see the [asr] log above
+exit 0；字幕文件不变（流水线按降级继续，不中断）
+```
+
 已知未修（不阻塞）：ASR 路由仍打印 `WHISPER_CLI not set` 警告；272 条 review 对人工仍偏重；
-`temp/scans/EP001.asr.wav`（44 MB）跑完不清理。
+`temp/scans/EP001.asr.wav`（44 MB）跑完不清理；**ASR 失败时退出码仍是 0**（原因已打印，
+但自动化会漏）；全局默认切换没有独立开关，仍是每次 `--asr qwen3`（回滚=去掉该参数）。
 
 
