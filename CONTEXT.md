@@ -125,6 +125,11 @@ scripts/
 9. **翻译全部 LLM**: 无传统 MT/百度 fallback（已移除、不再维护/测试）。
    glossary-first + 场景/角色上下文；翻译是独立阶段，不是参考字幕的副产物。
 
+10. **技术只通过接缝接入**: 所有候选技术（ASR/FA/VAD/AED/说话人/分离/翻译/云/双引擎等）
+    必须在 `docs/adr/011-technology-integration-map.md` 的接缝里有位置；可选能力默认
+    null 实现，新增 = 加 adapter/stage + 配置 + 证据，不改流程。**没有接缝的技术不接；
+    没有指标（能力 + review/成本）的接入不算完成。**
+
 ## 测试
 
 ```bash
@@ -138,7 +143,13 @@ P0 链路（Whisper 编排/VAD、翻译、专名、OP/ED、编排）已补齐；
 
 ## 技术路线
 
-2026 技术栈修订提案：`docs/tech-route-2026.md`；决策记录：`docs/adr/005-asr-alignment-stack.md`、`docs/adr/006-stable-asr-core.md`、`docs/adr/007-cue-alignment.md`、`docs/adr/008-qwen3-long-audio-chunking.md`、`docs/adr/009-reference-as-benchmark.md`、`docs/adr/010-asr-first-pipeline.md`。
+2026 技术栈修订提案：`docs/tech-route-2026.md`；决策记录：`docs/adr/005-asr-alignment-stack.md`、`docs/adr/006-stable-asr-core.md`、`docs/adr/007-cue-alignment.md`、`docs/adr/008-qwen3-long-audio-chunking.md`、`docs/adr/009-reference-as-benchmark.md`、`docs/adr/010-asr-first-pipeline.md`、`docs/adr/011-technology-integration-map.md`。
+
+**技术接入总图**（ADR-011）：所有候选技术按接缝分层——Ingest/Separator、AudioEvents（VAD/AED/说话人）、
+ASR/FA registry、Ensemble、Alignment/Repair、Evidence/Review、Glossary/Translation、Evaluation。
+当前**未接入**：FireRedVAD/AED、Silero/TEN、说话人分离（pyannote/VibeVoice）、RoFormer、云 ASR、
+跨引擎一致性、LLM 可读性、OP/ED 指纹、切片重对齐、chunk 选择、glossary→ASR context、
+run_all 翻译阶段、Review 阶梯、auto/AI/human 指标。可选能力默认 null，新增不改流程。
 
 核心变化：`Qwen3-ASR-1.7B + Qwen3-ForcedAligner-0.6B` 替代 `Whisper kotoba + 时间重叠匹配`；`FireRedVAD` 只作提示/AED；Whisper 保留 fallback。**流程按 ASR-first 重设计**（ADR-010）：3-Phase 只保留编排骨架，内部不再用 VAD 门控修复区、不再用时间重叠贴 cue；review 走 L0 自动 → L1 AI 批审 → L2 AI 复核 → L3 人工残留；翻译全部走 LLM（百度已移除）。迁移期默认链路仍是旧 Whisper，回滚开关 `ASR_ENGINE=whisper`。
 

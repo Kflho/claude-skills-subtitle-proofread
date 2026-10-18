@@ -1,7 +1,7 @@
 # 2026 技术路线实施进度
 
 > **用途**：跨会话续跑。新会话先读本文件，再读 [`tech-route-2026.md`](tech-route-2026.md)、[`ADR-006`](adr/006-stable-asr-core.md)、[`ADR-007`](adr/007-cue-alignment.md)、[`ADR-008`](adr/008-qwen3-long-audio-chunking.md)、[`test-plan.md`](test-plan.md)。
-> **最后更新**：2026-10-18（第十轮：ASR-first 流程重设计 + LLM-only 翻译；1377 tests / 79.6%）
+> **最后更新**：2026-10-18（第十轮：ASR-first 流程重设计 + 技术接入总图 + LLM-only 翻译；1377 tests / 79.6%）
 > **当前阶段**：EP01–03 视频/日文 CC 齐备；只读基准 + 防过拟合协议落地；**用户确认视频/CC 无真实偏移，并明确日语 CC 边界即测试标准**（不再另建人工金标）。第八轮把“P90 为什么下不去”拆开：test 集 90% 的 matched cue 起点系统性早 −0.37/−0.40 s（同段音频重转写复现，是当前对齐的起点缺陷，不是缓存/参考问题；EP001 仅 −55 ms），且 P90 只覆盖 42–45% 的 CC 字符；FA 塌缩吞掉成段对白（累计空洞 122–229 s）。`fix_by_asr` 整集偏移改为**默认关**，分段重对齐实测更差、留 P3。
 > **总目标**：把音频链路从 `WebRTC VAD → kotoba Whisper → 时间重叠匹配` 迁移到 `Qwen3-ASR → Qwen3-ForcedAligner → 全局文本对齐`；默认行为在 P2 验收前保持不变。
 
@@ -218,6 +218,8 @@ python scripts\eval\diagnose_timeline.py --asr-json temp\asr\digimon_ep002_main.
 
 ## 0.9 新技术接入台账（第九轮盘点，对照任务书）
 
+> 全量技术（含备选/拒绝/云/说话人/分离/翻译模型）见 **ADR-011 §4**；本表只是当时的冲刺视图。
+
 对照 `tech-route-2026.md` §0.1 / §8.1，按「代码 / 资产 / 真机测试」三列看：
 
 | 技术（任务书优先级） | 代码 | 本机资产 | 真机测试 | 状态 |
@@ -251,8 +253,12 @@ LLM 翻译被 key 挡住，Whisper 运行时被依赖挡住（只剩历史缓存
 **已落库**：
 - `docs/adr/010-asr-first-pipeline.md`：ASR-first 数据流、三种模式、Review 阶梯、
   LLM-only 翻译、迁移步骤。旧 3-Phase 只保留编排骨架。
-- `CONTEXT.md` 核心原则 7/8/9：流程按技术设计；Review 阶梯（L0 自动 → L1 AI 批审 →
-  L2 AI 复核 → L3 人工残留）；翻译全部 LLM。
+- `docs/adr/011-technology-integration-map.md`：**全量技术接入总图**。所有候选技术
+  （含备选/拒绝）都映射到接缝：Ingest/Separator、AudioEvents（VAD/AED/说话人）、
+  ASR/FA registry、Ensemble、Alignment/Repair、Evidence/Review、Glossary/Translation、
+  Evaluation。可选能力默认 null 实现，新增 = adapter/stage + 配置 + 证据，不改流程。
+- `CONTEXT.md` 核心原则 7/8/9/10：流程按技术设计；Review 阶梯；翻译全部 LLM；
+  技术只通过接缝接入。
 - 百度路径删除：`fix/translate_srt.py`、`BAIDU_*` 配置、`test_baidu_translate.py`、
   SKILL/技术路线文档中的 Baidu 说明；`whisper_fixer` 的替换翻译改走 `lib.llm.call_chat`，
   无 key 时保留原文交给翻译阶段。

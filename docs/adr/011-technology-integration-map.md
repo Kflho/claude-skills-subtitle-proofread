@@ -1,0 +1,190 @@
+# ADR-011：技术接入总图（所有候选技术的统一接入位）
+
+- 状态：已接受（2026-10-18）
+- 关系：`ADR-010` 定义 ASR-first 的流程与 Review 阶梯；本文定义**所有技术**（已选、备选、
+  未来可选、明确不采用）落在哪个接入位，避免“做完才发现还有没算进去的技术”。
+- 原则：**技术只通过接缝（seam）接入，不旁路硬接。** 每个可选能力都有 null 实现，
+  默认关；新增技术 = 实现一个 adapter/stage，不改流程。
+
+## 1. 为什么需要总图
+
+`tech-route-2026.md` 里不止 Qwen3-ASR/FA：还有 FireRedVAD/AED、Silero/TEN-VAD、
+VibeVoice、WhisperX/MMS FA、pyannote/3D-Speaker、Demucs/RoFormer、Qwen-MT、
+云 ASR（MAI/Scribe/Gemini/gpt-4o）、OP/ED 指纹、切片重对齐、chunk 45/60/90、
+双引擎一致性、glossary-first、LLM 可读性等。前面几轮只把 ASR/FA 接进了旧流程，
+其余技术没有接入位，导致：
+
+1. 每接一个新模型都要改编排/修流程；
+2. 已经做出的修复可能被后来接入的 AED/说话人/双引擎方案推翻；
+3. 评测只看边界，不看 review 比例、成本、说话人收益，无法判断该不该接。
+
+## 2. 统一架构（层 + 接缝 + null 实现）
+
+```text
+Ingest
+  audio_extract ── Separator（null | demucs | RoFormer）──► wav
+AudioEvents（可选，全部 null 默认）
+  VAD/AED（null | FireRedVAD | Silero | TEN）──► AudioHints(speech/music/singing)
+  Diarizer（null | VibeVoice | pyannote | 3D-Speaker）──► AudioHints(speakers)
+Audio Understanding
+  ASR Router（registry: qwen3_1.7b | qwen3_0.6b | whisper | vibevoice | cloud_*）
+    └─ context/hotwords、chunk_sec、diarize、ensemble 都是 ASRConfig.options
+  Aligner Router（registry: qwen3_fa | whisperx | mms_fa）
+  Ensemble（null | second engine only for medium-confidence cues）
+Alignment / Repair
+  CharTimeline → CueMapper → CueDiagnostics(Evidence) → RepairPlan → ReviewLadder
+  SpotReAlign（null | 短窗 FA 重对齐，带音频证据）
+Confidence / Review
+  Evidence（多信号 + 跨引擎 + 可读性 + 音频质量）→ L0 自动 / L1 AI / L2 复核 / L3 人工
+  ReviewWorklist（asr_review_*.json / ai_fragments_*.json / ai_review_fixes.json）
+Text / Deliver
+  Glossary（glossary-first：ASR context + 翻译 prompt）
+  Translation（LLM 主路径 | Qwen-MT 草稿 + LLM 审校）
+  Polish / QA / Report
+Orchestration
+  modes: asr-first | text-only | evaluation
+  cost/privacy policy（本地优先，云只做难例）
+Evaluation
+  CC 边界标准 + auto/AI/human 计数 + RTF/成本 + 跨引擎 A/B
+```
+
+**Null-stage 规则**：上面的可选层默认返回空对象（`AudioHints()` / `None`），
+主链路在“全部可选技术关闭”时仍能完整跑通。加技术不改流程，只加实现 + 配置 + 证据门。
+
+**接入位规则**：
+
+- 新 ASR/对齐模型：只写 `lib/asr/adapters/<name>.py`（`KIND='asr'|'aligner'`），
+  router/CLI/修复管线不改；
+- 新音频事件源（VAD/AED/分离/说话人）：实现 `lib/audio/base.py` 的 provider 契约；
+- 新翻译模型：实现 `TranslationBackend`（LLM/Qwen-MT 都是 backend）；
+- 核心层（mapper/planner/review）只读契约，不 import 模型。
+
+## 3. 需要现在就定义的契约
+
+这些字段不在今天实现，但必须先占位，否则接入时要改数据流：
+
+| 契约 | 关键字段 | 谁消费 |
+|---|---|---|
+| `AudioHints` | `speech[]`、`music[]`、`singing[]`、`speakers[]`、`source`、`confidence` | OP/ED 判定、空洞诊断、翻译场景、review 证据 |
+| `SpeakerSpan` | `start`、`end`、`speaker_id`、`confidence` | 翻译人称/敬称、cue 归属、专名绑定 |
+| `Evidence` | `similarity`、`char_coverage`、`boundary_*`、`repeat`、`lang`、`cross_engine`、`audio_quality`、`aligner_quality`、`sources` | Review 阶梯、gate |
+| `ReviewItem` | `cue`、`action`、`evidence`、`decision`、`replacement`、`new_time`、`source` | L1/L2 工作单、apply |
+| `TranslationRequest` | `cues`、`glossary`、`context_window`、`speakers`、`target_lang`、`max_chars/cps`、`draft_model` | LLM/Qwen-MT 翻译 |
+| `ASRConfig.options` | `chunk_sec`、`context/hotwords`、`diarize`、`ensemble`、`model_role`（default/draft/fallback） | router/worker/评测 |
+
+`Token.speaker` / `Segment.speaker` 字段已存在但无生产者；接 diarization 时只填字段，
+不改对齐/修复代码。
+
+## 4. 全量技术台账（现在差什么）
+
+图例：✅ 已接并测过；🟡 部分接入/未测；⬜ 未接入；⛔ 明确不采用；🚫 环境阻塞。
+
+### 4.1 音频理解
+
+| 技术 | 定位 | 现状 | 接入位 | 阻塞/触发 |
+|---|---|---|---|---|
+| Qwen3-ASR-1.7B | 默认 ASR | ✅ opt-in | ASR adapter | — |
+| Qwen3-ASR-0.6B | 快速/草稿/双引擎 | 🟡 试跑 10min 未完成 EP001，疑似生成循环 | ASR adapter + `model_role=draft` | 先加 token/时间上限、重复检测 |
+| Whisper large-v3/turbo | fallback | 🟡 只有历史缓存；faster-whisper/CLI 不可用 | ASR adapter | 装依赖/CLI |
+| kotoba-v2.0 | 旧默认 | ⛔ 仅兼容 | legacy | — |
+| VibeVoice-ASR-7B | 说话人/热词 | ⬜ | ASR adapter（diarize 输出 speaker） | 7B 量化/分段；先单集验收益 |
+| ReazonSpeech / Parakeet JA | 备选 ASR | ⬜ 未评估 | ASR adapter | 只在速度/显存受限时评估 |
+| 云 ASR（MAI/Scribe/Gemini/gpt-4o） | 难例兜底 | ⬜ | ASR adapter + 路由成本/隐私策略 | key/网络/隐私规则 |
+| Qwen3-FA-0.6B | 默认对齐 | ✅ | Aligner adapter | — |
+| WhisperX / MMS FA | 对齐备选/降级 | ⬜ | Aligner adapter | WhisperX 仅无 Qwen3-FA；MMS 仅无 GPU 且文本转假名（NC 许可） |
+| MFA / stable-ts | — | ⛔ 不采用 | — | 动画专名/OOV、非真 FA |
+| FireRedVAD + AED | VAD/AED 提示 | ⬜ | `lib/audio` provider → `AudioHints` | 无模型/无网；拿到就接 |
+| Silero-VAD / TEN-VAD | VAD fallback | ⬜ | 同上 | FireRed 不可用/对比 |
+| WebRTC VAD | 旧门控 | ⛔ 降级为 legacy | legacy | — |
+| Demucs htdemucs | 人声分离 | 🟡 仅 Whisper 路径，默认关 | Ingest separator | ASR 路径 A/B（默认关） |
+| BS-RoFormer / Mel-Band | 更强分离 | ⬜ | Ingest separator | demucs A/B 证明有效后再评估 |
+| pyannote community-1 / 3D-Speaker / Sortformer | 说话人 | ⬜ | Diarizer provider | HF token/模型；先验翻译收益 |
+| 跨集音频指纹 | OP/ED | ⬜ | AudioEvents/OPED stage | 与 AED 一起 |
+
+### 4.2 对齐 / 修复 / 置信度
+
+| 技术 | 现状 | 接入位 |
+|---|---|---|
+| 字符时间轴 + cue mapper + quality | ✅ | `lib/alignment/*` |
+| 对齐置信度（相似度/边界/重复/语言） | ✅ | `Evidence` |
+| 跨引擎一致性（双引擎只跑中置信 cue） | ⬜ | `ASRConfig.options.ensemble` + Evidence |
+| LLM 可读性/语法置信 | ⬜ | Evidence（可选项，不阻塞） |
+| 音频质量/重叠证据 | ⬜ | Evidence（来自 AudioHints） |
+| Review 阶梯（L0-L3） | ⬜ 设计完成、未实现 | `ReviewItem` + worklist + apply |
+| 切片重对齐（短窗 FA，带证据） | ⬜ 旧 spot fix 仍重跑 Whisper | SpotReAlign stage |
+| chunk 45/60/90 | 🟡 worker 支持 `--chunk-sec=60`，CLI/评测未暴露 | ASRConfig.options |
+| 整集偏移 | ⛔ 默认关（自证） | — |
+
+### 4.3 文本 / 翻译 / 专名
+
+| 技术 | 现状 | 接入位 |
+|---|---|---|
+| glossary-first 词表 | 🟡 生成已有；ASR context 未注入（`ASR_CONTEXT_FILE` 死配置） | Phase 0 → ASR context / 翻译 prompt |
+| LLM 翻译 | 🟡 独立工具；未进 run_all；无 key | TranslationStage（LLM backend） |
+| Qwen-MT 草稿 + LLM 审校 | ⬜ | TranslationBackend（draft_model） |
+| Baidu/传统 MT | ⛔ 已删除 | — |
+| 专名 AI 分类/清洗 | ✅（旧链路） | Phase 0/3 |
+| 说话人感知翻译（人称/敬称） | ⬜ | TranslationRequest.speakers |
+| LLM 润色 | ✅ 独立工具 | Phase 3 |
+| OP/ED 歌词预替换 | ✅ 旧链路 | Phase 2/3（保留） |
+
+### 4.4 评测 / 编排 / 运维
+
+| 技术 | 现状 | 接入位 |
+|---|---|---|
+| CC 边界标准 + 三集基准 | ✅ | `episode_benchmark` |
+| release gate（目标 + 回归） | ✅ | `release_gate.py` |
+| auto/AI/human 三档计数 | ⬜ | gate 指标 |
+| 跨引擎 A/B（逐 cue） | 🟡 只有整集报告 | gate/评测 |
+| 成本/RTF/显存回归 | 🟡 有 RTF，无成本/显存 | gate |
+| 三模式编排（asr-first/text-only/evaluation） | 🟡 只有 flag，未分模式 | run_all |
+| 云兜底策略（隐私/成本/上限） | ⬜ | router policy |
+| 缓存/幂等（context_hash 已有） | ✅ 契约；ensemble/AED 缓存待补 | cache |
+
+## 5. 接入顺序（按依赖，不按新鲜度）
+
+**A. 现在（设计落地，防返工）**
+1. `AudioHints` / `Evidence` / `ReviewItem` / `TranslationRequest` 契约 + null 实现；
+2. Review 阶梯：`asr_review_<EP>.json`、`apply_fixes.set_time`、auto 分级；
+3. gate 加 auto/AI/human 计数。
+
+**B. 本地文本价值（无新模型）**
+4. glossary-first → ASR `context`（`ASR_CONTEXT_FILE` 接上或 run_all 传入）；
+5. run_all 接 LLM 翻译阶段（glossary + 场景 + 长度约束）；Qwen-MT 作草稿可选；
+6. `--asr-model` / `model_role`（1.7B 默认、0.6B 草稿加护栏）、`--chunk-sec` 暴露；
+7. 双引擎一致性只对中置信 cue（Whisper 运行时可用后）。
+
+**C. 音频事件（拿到模型就接）**
+8. FireRedVAD/AED → `AudioHints`：OP/ED 候选、空洞诊断、翻译场景；
+9. 跨集音频指纹；Silero/TEN 作为 VAD fallback；
+10. 短窗 FA 重对齐（SpotReAlign，带音频证据，不整集平移）。
+
+**D. 可选重技术（有明确收益才开）**
+11. VibeVoice（说话人/热词）或 pyannote：先单集验“角色归属是否改善翻译”；
+12. Demucs/RoFormer：默认关，先 A/B 原音频 vs 分离音频的 ASR 结果；
+13. 云 ASR 兜底：只对低置信窗口，隐私/成本门默认关；
+14. WhisperX/MMS FA：只在 Qwen3-FA 不可用/无 GPU 时降级。
+
+## 6. 明确不采用 / 暂不接入
+
+| 技术 | 结论 | 触发复核 |
+|---|---|---|
+| MFA | 不采用（动画专名/OOV） | 无 |
+| stable-ts | 不采用（非真 FA） | 无 |
+| MMS FA | 仅无 GPU 降级；NC 许可需提示 | 有用户要求无 GPU 部署 |
+| VibeVoice 默认 | 不默认；说话人模式可选 | 单集翻译收益验证通过 |
+| 云 ASR 默认 | 不默认；只难例兜底 | 本地失败率/用户授权 |
+| 传统 MT | 已删除 | 无 |
+| 固定 180s OP/ED | 不采用 | AED/指纹可用后替换 |
+
+## 7. 验收（防“接了很多但没用”）
+
+每接一项技术，必须同时给出：
+
+1. 能力指标：CER/边界/覆盖率/专名 F1/翻译评分（按技术相关）；
+2. 负担指标：auto/AI/human 三档条数、耗时、显存、云成本；
+3. 回退：null 实现/开关关掉即回旧行为；
+4. 证据：在 dev 上验证，test 只跑 release candidate（`eval/protocol.md`）；
+5. 记录：本 ADR 台账状态 + `docs/tech-route-progress.md`。
+
+**没有接缝的技术不接；没有指标的接入不算完成。**

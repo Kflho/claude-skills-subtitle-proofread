@@ -10,7 +10,9 @@
 >
 > **2026-10-18 修订**：翻译改为 **LLM-only**（百度路径已删除、不再维护/测试）；
 > 流程以 [`adr/010-asr-first-pipeline.md`](adr/010-asr-first-pipeline.md) 的 **ASR-first**
-> 设计为准。本文保留调研背景，冲突处以 ADR-010 和 `CONTEXT.md` 核心原则为准。
+> 设计为准；所有候选技术的接入位与现状见
+> [`adr/011-technology-integration-map.md`](adr/011-technology-integration-map.md)。
+> 本文保留调研背景，冲突处以 ADR-010/011 和 `CONTEXT.md` 核心原则为准。
 
 ---
 
