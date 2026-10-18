@@ -22,6 +22,33 @@ WHISPER_RETRY_MODEL = os.environ.get('WHISPER_RETRY_MODEL', '')
 WHISPER_BACKEND     = os.environ.get('WHISPER_BACKEND', '').strip()
 
 # ═══════════════════════════════════════════════════════════════
+# Qwen3-ASR / ForcedAligner (2026 技术路线；默认仍未启用)
+# ═══════════════════════════════════════════════════════════════
+#
+# ⚠️ 默认 ASR_ENGINE='whisper'，保持现有行为。P2 修复写盘验收后才会
+# 把默认切到 qwen3。Qwen3 依赖装在独立 venv，通过 worker JSON lines
+# 调用；主环境不 import torch/qwen-asr。
+ASR_ENGINE          = os.environ.get('ASR_ENGINE', 'whisper').strip().lower()
+ASR_MODEL           = os.environ.get('ASR_MODEL', 'Qwen/Qwen3-ASR-1.7B')
+ASR_DEVICE          = os.environ.get('ASR_DEVICE', 'cuda:0')
+ASR_DTYPE           = os.environ.get('ASR_DTYPE', 'bfloat16')
+ASR_MAX_NEW_TOKENS  = int(os.environ.get('ASR_MAX_NEW_TOKENS', '') or 4096)
+ASR_REQUEST_TIMEOUT = float(os.environ.get('ASR_REQUEST_TIMEOUT', '') or 1800)
+ASR_CONTEXT_FILE    = os.environ.get('ASR_CONTEXT_FILE', '')
+ASR_FALLBACK        = os.environ.get('ASR_FALLBACK', 'whisper').strip().lower()
+
+ALIGNER_ENGINE      = os.environ.get('ALIGNER_ENGINE', 'qwen3').strip().lower()
+ALIGNER_MODEL       = os.environ.get('ALIGNER_MODEL', 'Qwen/Qwen3-ForcedAligner-0.6B')
+
+# 独立 venv 的 python.exe；空串时客户端退回 sys.executable
+QWEN_PYTHON         = os.environ.get('QWEN_PYTHON', '')
+
+
+def resolve_qwen_python():
+    """Return QWEN_PYTHON if set, else the current interpreter."""
+    return QWEN_PYTHON or os.sys.executable
+
+# ═══════════════════════════════════════════════════════════════
 # LLM API (LLM_* 优先，POLISH_* 为旧名向后兼容)
 # ═══════════════════════════════════════════════════════════════
 

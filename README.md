@@ -161,7 +161,9 @@ Claude 填补了脚本够不到的 gap — 负责所有需要理解和判断的�
 │   ├── translation.md        ←   翻译工具完整参数
 │   ├── batch-review.md       ←   大规模专名审查
 │   ├── workflows.md          ←   典型工作流场景
-│   └── architecture.md       ←   脚本架构与数据流
+│   ├── phase1-scan.md        ←   Phase 1 扫描命令
+│   ├── phase2-triage.md      ←   Phase 2 修复命令
+│   └── phase3-unify.md       ←   Phase 3 专名/交付命令
 ├── scripts/                  ← Python 工具链
 │   ├── run_all.py            ←   流水线编排器
 │   ├── translate_srt.py      ←   日→中批量翻译（集内并行）
@@ -172,11 +174,14 @@ Claude 填补了脚本够不到的 gap — 负责所有需要理解和判断的�
 │   ├── nouns/                ←   Phase 3：专名 + 词典
 │   ├── apply/                ←   修复应用
 │   └── lib/                  ←   共享库（SRT/ASS、Whisper 后端）
+├── docs/                     ← 开发决策/技术路线/进度（开发者）
 ├── templates/                ← 项目配置模板
 └── tests/                    ← 测试
 ```
 
 > 🤖 **AI 注意**：入口是 `SKILL.md`，不是这个文件。从 SKILL.md 的「首次使用？」段开始执行。
+
+> 🛠️ **开发者**：实现细节在本地 `dev/`（多数被 `.gitignore`）；ADR/技术路线/进度在 `docs/`。`SKILL.md` 和 `references/` 只放运行时说明。
 
 ## 支持的语言
 
@@ -186,6 +191,8 @@ Claude 填补了脚本够不到的 gap — 负责所有需要理解和判断的�
 - **其他** — 翻译支持（任意→zh），无词典辅助
 
 > **适用场景**：Whisper 视频→日文字幕 + AI 日→中翻译 + 专名统一校对，完整覆盖从零到可读字幕的全链路。不适合需要精细时间轴编辑、翻译记忆库或多人协作的场景（请用 Aegisub/Subtitle Edit）。
+
+> 📐 **技术路线 2026 修订提案**：见 [`docs/tech-route-2026.md`](docs/tech-route-2026.md)（决策记录 [`ADR-005`](docs/adr/005-asr-alignment-stack.md)、[`ADR-006`](docs/adr/006-stable-asr-core.md)）。提案建议用 Qwen3-ASR + Qwen3-ForcedAligner 替换 Whisper kotoba + 时间重叠匹配；**当前代码仍走旧链路，尚未实施**。ASR 已按「稳定核心 + 插件适配器」落地：新模型只在 `scripts/lib/asr/adapters/` 加一个文件，不改 router/CLI/评测。
 
 ## 许可与数据来源
 

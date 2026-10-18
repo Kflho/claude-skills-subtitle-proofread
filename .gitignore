@@ -1,3 +1,7 @@
 dev/
 __pycache__/
 *.pyc
+.venv-qwen/
+models/
+temp/
+eval/manifest.json

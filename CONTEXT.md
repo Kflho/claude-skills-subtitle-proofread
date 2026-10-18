@@ -41,8 +41,12 @@ scripts/
 │   ├── language_utils.py       #   语言→工具模块分发
 │   ├── chinese_utils.py        #   中文常词/繁简映射
 │   ├── japanese_utils.py       #   日文常词/假名检测
-│   └── english_utils.py        #   英文常词
-│
+│   ├── english_utils.py        #   英文常词
+│   └── asr/                    #   ASR 稳定核心 + 插件适配器（2026 路线）
+│       ├── base.py             #     契约：ASRResult/ASRConfig/BackendInfo/Protocol
+│       ├── registry.py         #     自动发现 adapters/*
+│       ├── router.py           #     引擎选择/fallback；不 import 模型
+│       └── adapters/           #     qwen3 / qwen3_aligner / whisper
 ├── fix/                        # Phase 2: 错误修复引擎
 │   ├── fix_orchestrator.py     #   薄orchestrator — 组合WhisperFixer+FragmentProcessor
 │   ├── subtitle_session.py     #   路径解析/检测/缓存 — 被orchestrator和worker共用
@@ -87,6 +91,8 @@ scripts/
 
 5. **CoW 写策略**: 修改 SRT 前 git commit 备份。所有工具原地覆写文件。
 
+6. **稳定核心 + 插件适配器**: ASR 契约/registry/router/评测固定；新模型只加 `lib/asr/adapters/<name>.py`，不改 router/CLI/修复管线。见 `docs/adr/006-stable-asr-core.md`。
+
 ## 测试
 
 ```bash
@@ -95,9 +101,18 @@ cd <skill>/tests && pytest -q    # 234 tests, 0.5s, 无外部依赖
 
 分层: Tier 1 (纯函数) → Tier 2 (tempfile) → Tier 3 (mock 外部二进制)。
 
+## 技术路线
+
+2026 技术栈修订提案：`docs/tech-route-2026.md`；决策记录：`docs/adr/005-asr-alignment-stack.md`、`docs/adr/006-stable-asr-core.md`。
+
+核心变化：`Qwen3-ASR-1.7B + Qwen3-ForcedAligner-0.6B` 替代 `Whisper kotoba + 时间重叠匹配`；`FireRedVAD` 只作提示/AED；Whisper 保留 fallback。**尚未实施，当前代码仍走旧链路。**
+
+ASR 架构已按「稳定核心 + 插件适配器」落地：`lib/asr/base.py`（契约）、`registry.py`（自动发现）、`router.py`（路由），新模型只写 `lib/asr/adapters/<name>.py`，不改 core。P1 进度见 `docs/tech-route-progress.md`。
+
 ## 配置
 
 所有配置在 `lib/config.py`。环境变量在 CLAUDE.md 中设置。关键变量:
 - `WHISPER_CLI` / `WHISPER_MODEL` — Whisper 路径
+- `ASR_ENGINE` / `ASR_MODEL` / `QWEN_PYTHON` — 2026 ASR 路线（默认 `whisper`，未启用）
 - `LLM_API_KEY` — LLM API key
 - `BAIDU_APPID` / `BAIDU_SECRET` — 百度翻译（可选）
