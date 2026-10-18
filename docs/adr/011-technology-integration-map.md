@@ -20,6 +20,11 @@
 > `D:/software/video/whisper-cublas-12.4.0-bin-x64/`，Whisper fallback/A-B 可用；
 > Qwen3-ASR-1.7B/0.6B + FA 在 `models/`；HTDemucs 已缓存。FireRedVAD 等免费本地模型
 > 缺资产时只能等模型，不用云服务替代。
+>
+> **2026-10 技术审计**（`docs/model-audit-2026-10.md`）：下载前先判“新 = 领先”。
+> 结论：**P0 只下 FireRedVAD**；Qwen3-1.7B/FA 保留；VibeVoice 可选（13–17GB）；
+> Whisper 系不下载/不测试（用户规则）；Parakeet JA、ReazonSpeech、BuzzASR、
+> WhisperX、pyannote、Sortformer v1 淘汰；Demucs 降级为 fallback。
 
 ## 1. 为什么需要总图
 
@@ -99,22 +104,22 @@ Evaluation
 | 技术 | 定位 | 现状 | 接入位 | 阻塞/触发 |
 |---|---|---|---|---|
 | Qwen3-ASR-1.7B | 默认 ASR | ✅ opt-in | ASR adapter | — |
-| Qwen3-ASR-0.6B | 快速/草稿/双引擎 | 🟡 试跑 10min 未完成 EP001，疑似生成循环 | ASR adapter + `model_role=draft` | 先加 token/时间上限、重复检测 |
-| Whisper large-v3/turbo | fallback | ✅ whisper.cpp CLI + kotoba/large-v3 模型已核实（settings 配置）；新管线未跑 | ASR adapter | 直接可 A/B；无依赖安装 |
+| Qwen3-ASR-0.6B | 快速/草稿/双引擎 | 🟡 无日语独立基准；试跑 10min 未完成 EP001 | ASR adapter + `model_role=draft` | 审计：非领先；不下载/暂不接，先加 guard |
+| Whisper large-v3/turbo | fallback | ✅ 本机 whisper.cpp CUDA 已有；按用户规则**不下载、不再测试** | ASR adapter | 只保留现有资产，不投入 |
 | kotoba-v2.0 | 旧默认 | ⛔ 仅兼容 | legacy | — |
-| VibeVoice-ASR-7B | 说话人/热词 | ⬜ | ASR adapter（diarize 输出 speaker） | 7B 量化/分段；先单集验收益 |
-| ReazonSpeech / Parakeet JA | 备选 ASR | ⬜ 未评估 | ASR adapter | 只在速度/显存受限时评估 |
+| VibeVoice-ASR-7B | 说话人/热词 | ⬜ 2026-01，MIT，HF 68.7 万下载 | ASR adapter（diarize 输出 speaker） | **P1 可选**：BitNet 13GB，先单集验收益；不默认 |
+| ReazonSpeech / Parakeet JA | 备选 ASR | ⛔ 2024 年模型，日语 WER 0.344/0.348，非领先 | — | 审计淘汰 |
 | 国内云 ASR（DashScope/Qwen-ASR、讯飞、腾讯） | 难例兜底 | ⬜ 允许（国内 token），未配置 | ASR adapter + 路由门 | 需要 key/成本/隐私门；不默认 |
 | 国外云 ASR（MAI/Scribe/Gemini/gpt-4o） | 难例兜底 | ⛔ 暂不配置 | — | 用户暂无配置时间 |
 | Qwen3-FA-0.6B | 默认对齐 | ✅ | Aligner adapter | — |
 | WhisperX / MMS FA | 对齐备选/降级 | ⬜ | Aligner adapter | WhisperX 仅无 Qwen3-FA；MMS 仅无 GPU 且文本转假名（NC 许可） |
 | MFA / stable-ts | — | ⛔ 不采用 | — | 动画专名/OOV、非真 FA |
-| FireRedVAD + AED | VAD/AED 提示 | ⬜ | `lib/audio` provider → `AudioHints` | 无模型/无网；拿到就接 |
+| FireRedVAD + AED | VAD/AED 提示 | ⬜ 2026-03，SOTA F1 97.57（自评），0.01GB | `lib/audio` provider → `AudioHints` | **P0 下载**；先在本机音频复测 |
 | Silero-VAD / TEN-VAD | VAD fallback | ⬜ | 同上 | FireRed 不可用/对比 |
 | WebRTC VAD | 旧门控 | ⛔ 降级为 legacy | legacy | — |
-| Demucs htdemucs | 人声分离 | 🟡 仅 Whisper 路径，默认关 | Ingest separator | ASR 路径 A/B（默认关） |
-| BS-RoFormer / Mel-Band | 更强分离 | ⬜ | Ingest separator | demucs A/B 证明有效后再评估 |
-| 3D-Speaker / Sortformer | 说话人 | ⬜ | Diarizer provider | 免费本地；先验翻译收益 |
+| Demucs htdemucs | 人声分离 | 🟡 2021/22 老模型；仅 Whisper 路径 | Ingest separator | 审计：降级为 fallback，不再投入 |
+| BS-RoFormer / Mel-Band | 更强分离 | ⬜ Mel-Band 0.46GB GGUF / 1.37GB PyTorch | Ingest separator | **P2 可选**；先 A/B，不默认 |
+| 3D-Speaker / Sortformer | 说话人 | ⬜ Sortformer v2.1 2025-10（NVIDIA 许可）；3D-Speaker 较旧 | Diarizer provider | 备选；先验翻译收益，不默认 |
 | pyannote community-1 | 说话人 | ⛔ 国外/HF token，暂不配置 | — | 用户暂无配置时间；用 3D-Speaker/本地替代 |
 | 跨集音频指纹 | OP/ED | ⬜ | AudioEvents/OPED stage | 与 AED 一起 |
 
@@ -189,10 +194,17 @@ Evaluation
 | 云 ASR（MAI/Scribe/Gemini/gpt-4o） | ⛔ 付费/token，不纳入 | 无；用户要求才能重新评估 |
 | Qwen-MT / 传统 MT / 百度 | ⛔ 付费或已删除 | 无 |
 | pyannote community-1 | ⛔ 需 HF token（gated） | 有免费本地替代时不考虑 |
+| Whisper 全系（large-v3/turbo、kotoba、faster-whisper、WhisperX） | ⛔ 用户规则：只保留本机 CUDA，不下载/不再测试 | 无 |
+| Parakeet JA / ReazonSpeech v2 | ⛔ 2024 年模型，日语非领先（WER 0.344/0.348） | 无 |
+| BuzzASR Japanese | ⛔ 基于 Whisper large-v3，违反约束 | 无 |
+| Sortformer v1 | ⛔ 2024-12 + CC-BY-NC | v2.1 可作备选（NC 风险） |
+| Demucs 默认 | ⛔ 2021/22 老模型；只作 fallback | 不投入；有分离需求用 Mel-Band A/B |
+| Qwen3-ASR-0.6B 草稿 | ⛔ 无日语领先证据，当前生成异常 | 修好 guard + 有 CER 数据再评估 |
 | MFA | 不采用（动画专名/OOV） | 无 |
 | stable-ts | 不采用（非真 FA） | 无 |
 | MMS FA | 仅无 GPU 降级；NC 许可需提示 | 有用户要求无 GPU 部署 |
-| VibeVoice 默认 | 不默认；说话人模式可选 | 单集翻译收益验证通过 |
+| VibeVoice 默认 | 不默认；说话人模式可选（P1 实验） | 单集翻译收益验证通过 |
+| FireRedASR2-LLM | 观察名单；日语无基准 | 有日语独立评测再说 |
 | 固定 180s OP/ED | 不采用 | AED/指纹可用后替换 |
 
 ## 7. 验收（防“接了很多但没用”）

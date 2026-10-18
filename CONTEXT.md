@@ -154,7 +154,14 @@ ASR/FA registry、Ensemble、Alignment/Repair、Evidence/Review、Glossary/Trans
 跨引擎一致性、LLM 可读性、OP/ED 指纹、切片重对齐、chunk 选择、glossary→ASR context、
 run_all 翻译阶段、Review 阶梯、auto/AI/human 指标。可选能力默认 null，新增不改流程。
 
-核心变化：`Qwen3-ASR-1.7B + Qwen3-ForcedAligner-0.6B` 替代 `Whisper kotoba + 时间重叠匹配`；`FireRedVAD` 只作提示/AED；Whisper 保留 fallback。**流程按 ASR-first 重设计**（ADR-010）：3-Phase 只保留编排骨架，内部不再用 VAD 门控修复区、不再用时间重叠贴 cue；review 走 L0 自动 → L1 AI 批审 → L2 AI 复核 → L3 人工残留；翻译全部走 LLM（百度已移除）。迁移期默认链路仍是旧 Whisper，回滚开关 `ASR_ENGINE=whisper`。
+**2026-10 技术审计**（`docs/model-audit-2026-10.md`）：下载前先验“新 = 领先”。
+Qwen3-ASR-1.7B/FA 仍是日语媒体第一梯队（WER 0.185 / AAS 42.2ms），保留；
+**P0 只下 FireRedVAD/AED**（2026-03，F1 97.57，0.01GB）；VibeVoice 可选实验；
+Parakeet JA、ReazonSpeech v2、BuzzASR、WhisperX、pyannote、Sortformer v1 淘汰；
+Demucs 降级 fallback；Whisper 全系只保留本机 CUDA，不下载/不再测试；
+Qwen3-0.6B 无日语领先证据，暂不接。
+
+核心变化：`Qwen3-ASR-1.7B + Qwen3-ForcedAligner-0.6B` 替代 `Whisper kotoba + 时间重叠匹配`；`FireRedVAD` 只作提示/AED；Whisper 只保留本机 CUDA（不下载/不再测试）。**流程按 ASR-first 重设计**（ADR-010）：3-Phase 只保留编排骨架，内部不再用 VAD 门控修复区、不再用时间重叠贴 cue；review 走 L0 自动 → L1 AI 批审 → L2 AI 复核 → L3 人工残留；翻译用已配置的国内 LLM（DeepSeek，唯一 LLM 阶段；百度已移除）。迁移期默认链路仍是旧 Whisper，回滚开关 `ASR_ENGINE=whisper`。
 
 ASR 架构已按「稳定核心 + 插件适配器」落地：`lib/asr/base.py`（契约）、`registry.py`（自动发现）、`router.py`（路由），新模型只写 `lib/asr/adapters/<name>.py`，不改 core。P1 进度见 `docs/tech-route-progress.md`。
 
