@@ -55,7 +55,7 @@ def find_glossary(project_dir: str) -> str | None:
 def build_command(source: str, output: str, glossary: str | None,
                   target_lang: str, *, dry_run: bool = False,
                   qa_report: str = '', max_chars: int = 0,
-                  max_cps: float = 0.0) -> list[str]:
+                  max_cps: float = 0.0, repair: bool = True) -> list[str]:
     cmd = [sys.executable, str(TRANSLATOR),
            '--input', source, '--output', output,
            '--source-lang', 'ja']
@@ -65,6 +65,8 @@ def build_command(source: str, output: str, glossary: str | None,
         cmd.append('--dry-run')
     if qa_report:
         cmd += ['--qa-report', qa_report]
+    if repair:
+        cmd.append('--repair')
     if max_chars > 0:
         cmd += ['--max-chars', str(max_chars)]
     if max_cps > 0:
@@ -82,6 +84,7 @@ def translate_episode(project_dir: str, episode: str, *,
                       dry_run: bool = False,
                       max_chars: int = 0,
                       max_cps: float = 0.0,
+                      repair: bool = True,
                       runner=None) -> dict:
     """Translate one episode. Returns a result dict; never raises."""
     project_dir = os.path.abspath(project_dir)
@@ -99,7 +102,8 @@ def translate_episode(project_dir: str, episode: str, *,
     try:
         cmd = build_command(source, output, glossary, target_lang,
                             dry_run=dry_run, qa_report=qa_report,
-                            max_chars=max_chars, max_cps=max_cps)
+                            max_chars=max_chars, max_cps=max_cps,
+                            repair=repair)
     except ValueError as exc:
         return {'episode': episode, 'ok': False, 'message': str(exc)}
 
@@ -132,7 +136,7 @@ def step_translate_final(project_dir: str, episodes: list[str] | None = None,
                          *, target_dir: str | None = None,
                          target_lang: str = 'zh', dry_run: bool = False,
                          max_chars: int = 0, max_cps: float = 0.0,
-                         runner=None) -> list[dict]:
+                         repair: bool = True, runner=None) -> list[dict]:
     """Translate all selected episodes; failures are reported, not fatal."""
     project_dir = os.path.abspath(project_dir)
     target_dir = os.path.abspath(target_dir or project_dir)
@@ -148,7 +152,7 @@ def step_translate_final(project_dir: str, episodes: list[str] | None = None,
         results.append(translate_episode(
             project_dir, ep, target_dir=target_dir, target_lang=target_lang,
             dry_run=dry_run, max_chars=max_chars, max_cps=max_cps,
-            runner=runner))
+            repair=repair, runner=runner))
     ok = sum(1 for r in results if r.get('ok'))
     print(f'[translate] {ok}/{len(results)} episodes translated', file=sys.stderr)
     return results

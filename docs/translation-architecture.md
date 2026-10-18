@@ -110,3 +110,37 @@ QA（每条）：
 - 不引入新翻译模型（DeepSeek 已配置）；
 - 不用中文对照当金标去调 prompt（只做 guardrail）；
 - 不改现有默认翻译输出，除非 ablation 通过。
+
+## 7. 实现状态（2026-10-19）
+
+已完成：
+
+1. `lib/translation/qa.py`：覆盖率、日语残留、回显、glossary 命中、行长/CPS；
+   汉字人名（武之内空/泉光子郎）不误判为回显。
+2. `translate_srt.py`：`--max-chars/--max-cps/--qa-report/--repair`；
+   `--repair` 只重译 QA 标出的条，不动其他条。
+3. `fix/translation_stage.py`：源 SRT 发现、glossary 发现、输出
+   `translated/zh/<EP>.srt` + `<EP>.qa.json`；失败不致命；dry-run。
+4. `run_all --translate`：修复/统一之后、交付之前执行，不覆盖源字幕。
+
+初步实测（DeepSeek，EP001 主窗口 276 条）：
+
+| 指标 | baseline | +repair |
+|---|---:|---:|
+| 覆盖率 | 276/276 | 276/276 |
+| 日语残留 | 1 | **0** |
+| 回显 | 0 | 0 |
+| glossary miss | 0 | 0 |
+| 行长违规 | 1 | **0** |
+| CPS 违规 | 0 | 0 |
+| 总违规 | 2 | **0** |
+
+30 条 EP001/EP002 样本在 20 字/12 CPS 下均为 0 违规；说明当前主要问题不是
+“普遍超长”，而是少量漏译/超长条，**只修问题条**比整批重试更合适。
+
+尚未完成：
+
+- 与中文对照字幕的 chrF（guardrail）尚未接入评测脚本；
+- 未来上下文、series memory、场景边界还是设计项，未实现；
+- 未做 EP002/003 全量翻译对比；未做 10 条 MQM 抽检。
+

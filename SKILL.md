@@ -179,6 +179,9 @@ python "<scripts-dir>/run_all.py" \
 > 用参考自估偏移平移输出属于自证）；只有拿到独立证据（换剪辑/帧率）才加
 > `--asr-global-offset`，估计值始终写进 alignment.json。
 > ASS 的 `--asr` 写回暂不支持（只出报告，不静默改文件）。
+> `--translate`：修复完成后把源字幕翻成中文，输出 `translated/zh/<EP>.srt` +
+> `<EP>.qa.json`；QA 只修问题条（`--repair`），默认关，失败不阻断交付。
+> 架构/评测见 `docs/translation-architecture.md`。
 
 ### 模块化调用
 

@@ -62,7 +62,11 @@ scripts/
 │   ├── oped_fixer.py           #   OP/ED跨集一致性修复
 │   ├── align_repair.py         #   P2 对齐→修复计划/时间码/窗口重对齐
 │   ├── compare_srt.py          #   字幕对比/相似度
+│   ├── translation_stage.py    #   终翻译：源 SRT → translated/zh + QA 报告
 │   └── episode_workflow.py     #   单集子进程工作流
+│
+├── lib/translation/            # 翻译 QA（覆盖率/残留/回显/术语/行长/CPS）
+│   └── qa.py
 │
 ├── scan/                       # Phase 1: 字符扫描
 │   └── unified_scanner.py      #   乱码检测+VAD语音时间线提取 (gap检测由Phase 2统一处理)
@@ -136,8 +140,8 @@ scripts/
 ## 测试
 
 ```bash
-cd <skill>/tests && pytest -q    # 1389 tests, ~9s, 无外部依赖
-cd <skill> && pytest -q tests --cov --cov-report=term-missing   # 覆盖率 79.7%，矩阵见 docs/test-plan.md
+cd <skill>/tests && pytest -q    # 1404 tests, ~9s, 无外部依赖
+cd <skill> && pytest -q tests --cov --cov-report=term-missing   # 覆盖率 79.8%，矩阵见 docs/test-plan.md
 ```
 
 分层: Tier 1 (纯函数) → Tier 2 (tempfile) → Tier 3 (mock 外部二进制)。
@@ -152,8 +156,15 @@ P0 链路（Whisper 编排/VAD、翻译、专名、OP/ED、编排）已补齐；
 ASR/FA registry、Ensemble、Alignment/Repair、Evidence/Review、Glossary/Translation、Evaluation。
 当前**未接入**：FireRedVAD/AED（仅 provider/CLI）、Silero/TEN、RoFormer、云 ASR、
 跨引擎一致性、LLM 可读性、OP/ED 指纹、切片重对齐、chunk 选择、glossary→ASR context、
-run_all 翻译阶段、Review 阶梯、auto/AI/human 指标。可选能力默认 null，新增不改流程。
+Review 阶梯、auto/AI/human 指标。可选能力默认 null，新增不改流程。
 **说话人/VibeVoice 已由用户删除（2026-10）**，不再保留接缝或计划。
+
+**翻译链路**（`docs/translation-architecture.md`）：`translate_srt.py`（批处理/术语）
+→ `lib/translation/qa.py`（覆盖率/日语残留/回显/术语/行长/CPS）
+→ `--repair` 只修问题条 → `fix/translation_stage.py` 输出 `translated/zh/<EP>.srt`
++ `<EP>.qa.json`；`run_all --translate` 已接（默认关，失败不致命）。
+EP001 全量 276 条：baseline 2 违规 → repair 后 0；30 条样本 0 违规。
+未来上下文/series memory/chrF guardrail 仍未做。
 
 **2026-10 技术审计**（`docs/model-audit-2026-10.md`）：下载前先验“新 = 领先”。
 Qwen3-ASR-1.7B/FA 仍是日语媒体第一梯队（WER 0.185 / AAS 42.2ms），保留；
@@ -186,7 +197,7 @@ P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 
 
 素材现状：**验收作品定为数码宝贝（Digimon Adventure）**，目录 `D:\videos\Animation\TV\数码宝贝`。**EP01/02/03 视频完整（各约 1386s）**；用户人工复核三集视频/CC 均无真实偏移。日文参考：`日语字幕\` 下 S01E01–S01E54 共 54 集 `ja[cc].srt`，已清洁；主故事窗口 `[95,1240]`。01–05 另有中文字幕，只能做参考无关/翻译复用。素材台账 `eval/materials.md`，清单 `eval/manifest.digimon.json`（Qwen3）与 `eval/manifest.digimon.whisper.json`（A/B）。莎莉/阿童木历史素材只保留机制/吞吐回放。
 
-测试：1389 passed / 0 failed / 79.7% 覆盖；矩阵与剩余缺口见 `docs/test-plan.md`。
+测试：1404 passed / 0 failed / 79.8% 覆盖；矩阵与剩余缺口见 `docs/test-plan.md`。
 
 ## 配置
 

@@ -641,6 +641,73 @@ def write_qa_report(input_path, output_path, glossary, max_chars, max_cps,
     return report
 
 
+def _repair_one(source_text, current_text, reasons, api_key, model, base_url,
+                glossary_str='', source_lang='ja', max_chars=0,
+                max_cps=0):
+    """Repair one flagged cue; returns new text or None."""
+    system = _build_system_prompt(source_lang, max_chars=max_chars,
+                                  max_cps=max_cps)
+    system += """
+
+这是**修正任务**：只修当前译文的问题，不改变原意，不要解释。
+输出严格 JSON 数组，只含 1 条修正后的中文字幕字符串。"""
+    user = f"""原文：{source_text}
+当前译文：{current_text}
+问题：{', '.join(reasons)}
+固定译名参考（必须使用）：{glossary_str or '(无)'}
+
+只输出 JSON 数组："""
+    response = _call_llm([
+        {'role': 'system', 'content': system},
+        {'role': 'user', 'content': user},
+    ], api_key, model, base_url)
+    parsed = _parse_json_response(response) if response else None
+    if not parsed or not isinstance(parsed, list):
+        return None
+    candidate = parsed[0] if parsed else None
+    return str(candidate).strip() if candidate else None
+
+
+def repair_file(input_path, output_path, qa_path, glossary, api_key, model,
+                base_url, *, source_lang='ja', max_chars=20,
+                max_cps=12.0, max_repairs=50):
+    """Repair only QA-flagged cues, then rewrite output + QA report.
+
+    This is the judge-refiner step from docs/translation-architecture.md:
+    do not retranslate the whole batch, only the cues that violate a rule.
+    """
+    src = parse_subtitles(input_path, mark_garbled=False)
+    out = parse_subtitles(output_path, mark_garbled=False)
+    try:
+        with open(qa_path, 'r', encoding='utf-8') as handle:
+            report = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return 0, None
+    items = report.get('items', [])[:max_repairs]
+    fixed = 0
+    for item in items:
+        idx = int(item.get('index', -1))
+        reasons = item.get('reasons') or []
+        if idx < 0 or idx >= len(out) or idx >= len(src) or not reasons:
+            continue
+        new_text = _repair_one(
+            str(src[idx].get('text', '')), str(out[idx].get('text', '')),
+            reasons, api_key, model, base_url,
+            glossary_str=', '.join(sorted(set(glossary.values())))
+            if glossary else '',
+            source_lang=source_lang, max_chars=max_chars, max_cps=max_cps)
+        if new_text:
+            out[idx]['text'] = new_text
+            fixed += 1
+    if fixed:
+        write_subtitles(output_path, out, template_path=input_path)
+        report = qa_report(src, out, glossary=glossary,
+                           max_chars=max_chars, max_cps=max_cps)
+        with open(qa_path, 'w', encoding='utf-8') as handle:
+            json.dump(report, handle, ensure_ascii=False, indent=2)
+    return fixed, report
+
+
 # ═══════════════════════════════════════════════════════════════
 # Single file translation
 # ═══════════════════════════════════════════════════════════════
@@ -932,6 +999,8 @@ def main():
                              '(0 = no prompt constraint; QA still reports 12)')
     parser.add_argument('--qa-report', default='',
                         help='Write per-cue QA JSON (single-file mode)')
+    parser.add_argument('--repair', action='store_true',
+                        help='repair only QA-flagged cues, then rewrite QA')
     parser.add_argument('--source-lang', choices=['ja', 'ru', 'zh', 'other'],
                         default=None,
                         help='Source language (default: auto-detect from cues)')
@@ -982,10 +1051,24 @@ def main():
                        extract_nouns=args.extract_nouns,
                        extract_dir=args.extract_dir,
                        max_chars=args.max_chars, max_cps=args.max_cps)
-        if args.qa_report and not args.dry_run:
-            write_qa_report(args.input, args.output, ja_to_zh,
-                            args.max_chars or 20, args.max_cps or 12,
-                            args.qa_report)
+        qa_path = args.qa_report
+        if args.repair and not qa_path:
+            qa_path = args.output + '.qa.json'
+        if qa_path and not args.dry_run:
+            report = write_qa_report(
+                args.input, args.output, ja_to_zh,
+                args.max_chars or 20, args.max_cps or 12, qa_path)
+            if args.repair:
+                fixed, report = repair_file(
+                    args.input, args.output, qa_path, ja_to_zh,
+                    api_key, model, base_url,
+                    source_lang=args.source_lang or 'ja',
+                    max_chars=args.max_chars or 20,
+                    max_cps=args.max_cps or 12)
+                print(f'  [repair] fixed {fixed} cues; '
+                      f'remaining violations '
+                      f'{report["summary"]["violations"] if report else "?"}',
+                      file=sys.stderr)
     # Directory mode
     elif args.input_dir:
         episodes = _parse_episodes(args.episodes) if args.episodes else None

@@ -7,13 +7,13 @@
 
 ```text
 python -m pytest -q
-1389 passed in ~9s           # 无网络、无模型、无真实项目依赖
-coverage: 79.7% (14,700 statements)
+1404 passed in ~9s           # 无网络、无模型、无真实项目依赖
+coverage: 79.8% (14,955 statements)
 ```
 
-本轮 **+12 tests**（1377 → 1389）：+3 ASR review 工作单/`set_time`/AI review 列表，
-+6 AudioHints 契约 + FireRedVAD provider（worker 用 fake runner，不加载模型）；+3 `--audio-hints` 主流程接线（fix_by_asr / step_audio / run_all）。
-覆盖率 79.6% → 79.7%，0 failed。
+本轮 **+27 tests**（1377 → 1404）：+3 ASR review 工作单/`set_time`/AI review 列表，
++6 AudioHints 契约 + FireRedVAD provider（worker 用 fake runner，不加载模型）；+3 `--audio-hints` 主流程接线；+8 翻译 QA/阶段；+7 翻译 repair/评测准备。
+覆盖率 79.7% → 79.8%，0 failed。
 
 新增/扩展测试文件：
 
@@ -30,6 +30,10 @@ coverage: 79.7% (14,700 statements)
 | `test_apply_fixes.py` / `test_fix_by_asr.py` / `test_run_all_step_functions.py`（扩展） | ASR review 工作单（`<EP>.asr_review.json`）、`set_time` 改动时间码/秒值/非法区间、AI review 步列出工作单；`audio_hints` 证据写入/失败降级 |
 | `test_audio_hints.py`（新） | `AudioEvent`/`AudioHints` 契约往返、summary 比例；FireRedVAD provider 解析 worker JSON、失败/错误 JSON/缺失模型 |
 | `test_episode_workflow.py`（扩展） | `--audio-hints` 从 `step_audio` 透传到 `fix_by_asr`（默认关） |
+| `test_translation_qa.py`（新） | 日语残留、回显（汉字人名不误判）、glossary 命中、行长/CPS、聚合报告 |
+| `test_translation_stage.py`（新） | 源 SRT/glossary 发现、命令契约、成功/失败/缺源、dry-run |
+| `test_translation_repair.py`（新） | 只修 QA 标出的条；无违规时不调用 LLM |
+| `test_translate_srt.py`（扩展） | 硬约束 prompt、`write_qa_report` 落盘 |
 
 ### 覆盖率按目录（本轮 vs 上轮）
 
@@ -46,7 +50,7 @@ coverage: 79.7% (14,700 statements)
 | `scripts/eval` | 1,074 | **90.0%** | 90.3% | 新增 release gate；benchmark 新指标 |
 | `scripts/ass` | 313 | **86.3%** | 86.3% | CLI main 已测 |
 | `scripts/utils` | 285 | **80.4%** | 80.4% | — |
-| **合计** | **14,700** | **79.7%** | 79.7% | — |
+| **合计** | **14,955** | **79.8%** | 79.8% | — |
 
 ### 做得好的部分
 
@@ -180,7 +184,7 @@ python -m pytest -q tests/test_alignment_base.py tests/test_alignment_timeline.p
 
 ## 6. 覆盖率门槛（渐进）
 
-当前 **79.7%**。按缺口补，不追求一次到 85%：
+当前 **79.8%**。按缺口补，不追求一次到 85%：
 
 | 阶段 | 目标 | 重点 |
 |---|---:|---|
@@ -188,7 +192,7 @@ python -m pytest -q tests/test_alignment_base.py tests/test_alignment_timeline.p
 | 上上轮 | 64.0% | P0 链路 + 相邻联动 + 修复/片段/复用/专名补齐 |
 | 上轮 | 74.0% | run_all 步骤、scanner、apply、worker、ass/reuse CLI |
 | 再上轮 | 79.0% | whisper_utils、episode_workflow、reuse、asr_eval、CC 清洁 |
-| **现在** | **79.7%** | 时间轴质量、三集基准、display linger、diagnose/benchmark |
+| **现在** | **79.8%** | 时间轴质量、三集基准、display linger、diagnose/benchmark |
 | 下一轮 | ≥82% | 根脚本 65.8%、nouns 67.2%、whisper_backends 59%、align_cues 78% |
 
 > 覆盖率不是目的：**关键路径（扫描→修复→专名→翻译→应用→交付）每个分支至少有一条测试**，比总百分比更重要。

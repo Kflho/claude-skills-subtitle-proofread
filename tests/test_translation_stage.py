@@ -45,6 +45,7 @@ def test_build_command_contains_contract(tmp_path):
     assert '--mappings g.json' in joined
     assert '--qa-report qa.json' in joined
     assert '--max-chars 14' in joined
+    assert '--repair' in joined
     with pytest.raises(ValueError):
         build_command('in.srt', 'out.srt', None, 'en')
 
