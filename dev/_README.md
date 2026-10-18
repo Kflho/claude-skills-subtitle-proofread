@@ -22,8 +22,10 @@
 ## 边界
 
 - `dev/` 是本地开发文档；`SKILL.md` 不链接它们（skill 运行时不需要）。
-- 目前 `.gitignore` 忽略 `dev/`：`_README.md` / `maintenance.md` 是已跟踪的例外，
-  其余文件要进 git 需显式 `git add -f`。
+- 目前 `.gitignore` 忽略 `dev/`；以下文件已显式跟踪：
+  `_README.md`、`maintenance.md`、`technical-details.md`、`whisper-pipeline.md`、
+  `noun-extraction.md`、`translation-pipeline.md`、`troubleshooting.md`、
+  `iteration-log.md`。其余新文件要进 git 需 `git add -f`。
 - `references/` 是随 skill 分发的 AI 参考文档（命令参考、工作流、初始化），
   不要往 `references/` 塞开发者实现细节。
 - `docs/` 是**受 git 跟踪**的开发者文档（ADR、技术路线、进度），与 `dev/` 的区别：

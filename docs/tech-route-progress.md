@@ -153,8 +153,9 @@ RTF=0.387（warmup 后，含 ASR+FA）
   - Whisper 批量转录时间戳/切段修复/幻觉 → `dev/whisper-pipeline.md`
   - gates 理由 → `dev/technical-details.md` §16
 - `dev/_README.md` 增加索引与写作规则；`docs/` 继续放受 git 跟踪的 ADR/技术路线/进度。
-- `dev/` 目前大多被 `.gitignore` 忽略（仅 `_README`/`maintenance` 跟踪）；
-  需要进 git 的开发文档要显式 `git add -f`，或迁到 `docs/`。
+- `dev/` 大多被 `.gitignore` 忽略；本次已把 `technical-details`、`whisper-pipeline`、
+  `noun-extraction`、`translation-pipeline`、`troubleshooting`、`iteration-log`
+  显式 `git add -f` 跟踪。以后新增开发文档仍需 `-f`，或迁到 `docs/`。
 
 ## 5. 进行中 / 阻塞
 

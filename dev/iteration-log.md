@@ -37,8 +37,8 @@
 ### 避坑
 - `Path.write_text()` 在 Windows 默认把 `\n` 转 CRLF；改 SKILL.md 后要
   显式写回 LF，否则 `git diff --check` 全文件 trailing whitespace。
-- `dev/` 被 `.gitignore` 忽略；合并进 dev 的文档要进 git 需 `git add -f`
-  或迁到 `docs/`。
+- `dev/` 被 `.gitignore` 忽略；核心实现文档已用 `git add -f` 纳入跟踪，
+  以后新增开发文档仍需 `-f`。
 
 ## 2026-07-20 — Whisper 集成 + 架构重构
 
