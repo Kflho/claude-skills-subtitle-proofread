@@ -326,11 +326,21 @@ L3 人工 ≤5%（现状 272 条全堆在报告）。
 - Mel-Band RoFormer：fp16/fp32 权重已下；ComfyUI 格式，运行时/适配器未接。
 - Whisper 系：一个都没下，按用户规则只保留本机 CUDA。
 
+**能力实验（接入前，2026-10-19）**：
+- FireRedVAD 空洞归因（EP001）：30 个空洞/375.2s，只有 **6 个/77.1s** speech 覆盖 ≥50%；
+  9 个/105.6s speech <20%（更像音乐）；20 个/268.7s music ≥80%。
+  → 只能做“空洞过滤/证据”，不能做门控；OP/ED 需整集音频另测。
+- VibeVoice-BitNet 60s 实测：RTF 0.435；**没有 who/when**（text/json prompt 都只有纯文本），
+  专名更差（地球→子宮、八神太一→山見大知）。→ **不能接说话人**；7B fp16 或专用 diarizer 另议。
+- Mel-Band：只有权重，无运行时/无 A/B → 不接。
+- 详细台账：`docs/capability-tests.md`。
+
 **证据**：Neosophie 2026-05 日语 9 模型实测、Qwen3/FireRedVAD 模型卡与 HF 发布时间、
 FireRedASR2S 论文。详细报告：`docs/model-audit-2026-10.md`；调用手册：`docs/model-assets.md`。
 
-**下一步**：1) 主流程消费 `AudioHints`（OP/ED 候选、FA 空洞诊断）；
-2) VibeVoice 单集“角色归属是否改善翻译”实验；3) Review 自动分级 + gate 计数。
+**下一步（先测再接）**：1) FireRedVAD 整集 AED → OP/ED 候选（CC 歌词/人工抽检）；
+2) 空洞归因扩 EP002/003；3) Review 20 条 pilot；4) 翻译 20 cue pilot；
+5) VibeVoice 说话人先决定 7B/专用 diarizer；6) Mel-Band 先补运行时再 A/B。
 
 ## 1. 状态总览
 

@@ -9,7 +9,7 @@
 |---|---|---|---|---|
 | FireRedVAD / AED | `models/FireRedVAD/{VAD,Stream-VAD,AED}` | ~7 MB | `.venv-qwen` + `fireredvad` 0.0.2（CPU） | ✅ 已下载、已实测 |
 | FireRedVAD 代码 | `models/FireRedVAD-code/` | ~1 MB | 参考代码/示例 | ✅ |
-| VibeVoice-ASR-BitNet | `models/VibeVoice-ASR-BitNet/` | ~1.58 GB（GGUF） | `VibeASR.cpp`（CPU，MinGW 已构建） | ✅ 已下、已编译；单集测试未跑 |
+| VibeVoice-ASR-BitNet | `models/VibeVoice-ASR-BitNet/` | ~1.58 GB（GGUF） | `VibeASR.cpp`（CPU，MinGW 已构建） | ✅ 已下/已编译；60s 实测无 who/when |
 | Mel-Band RoFormer | `models/MelBandRoformer/` | fp16 456 MB / fp32 913 MB | 暂无（ComfyUI 格式，需适配） | ✅ 权重已下；运行时未接线 |
 | Qwen3-ASR-1.7B | `models/Qwen3-ASR-1.7B` | ~3.9 GB | `.venv-qwen` + `qwen-asr` worker | ✅ 已有 |
 | Qwen3-ForcedAligner-0.6B | `models/Qwen3-ForcedAligner-0.6B` | ~1.2 GB | 同上 | ✅ 已有 |
@@ -94,13 +94,14 @@ python scripts/audio/detect_events.py --wav temp/firered_ep001.wav `
 （AED 的 speech 与 VAD 的 666.7s 不同，前者更严格；两条都保留作证据）。
 下一步：主流程消费 hints（OP/ED 候选、FA 空洞诊断），**只作提示，不参与门控**。
 
-## 3. VibeVoice-ASR-BitNet（🟡 GGUF 下载中）
+## 3. VibeVoice-ASR-BitNet（✅ 已下/已编译；能力测试负面）
 
 ### 3.1 是什么
 
 `microsoft/VibeVoice-ASR-BitNet` 是 VibeVoice-ASR 的 **CPU 边缘版**（VibeASR.cpp）：
-异构量化 I8_S（VAE）+ I2_S（LM），总大小 **1.58 GB**，i7-13700 上 4 线程 RTF≈0.37，
-输出 Who / When / What（说话人 + 时间戳 + 文本），支持热词和 50+ 语言（含日语）。
+异构量化 I8_S（VAE）+ I2_S（LM），总大小 **1.58 GB**，i7-13700 上 4 线程 RTF≈0.37。
+官方定位支持 Who/When/What、热词和 50+ 语言；但**本机 60s 实测（text/json 两种 prompt）
+只输出纯文本，没有 who/when**，且专名比 Qwen3 差（见 `docs/capability-tests.md`）。
 不是 7B fp16 的 17 GB 版本，**不要下 safetensors**。
 
 ### 3.2 路径（下载完成后）
@@ -137,11 +138,12 @@ models\VibeASR.cpp\build\bin\asr_infer.exe `
   --audio temp\firered_ep001.wav -t 8 --context "デジモン, 太一, アグモン"
 ```
 
-> 单集测试**尚未跑**（需要几分钟 CPU）；跑完把 who/when/what 解析结果记到集成待办。
+> 60s 实测已完成：RTF 0.435，**没有 who/when，只有纯文本**，专名更差；
+> 不能当说话人来源（见 `docs/capability-tests.md`）。
 
 - **MSVC 不支持**；必须 GCC/Clang（MinGW-w64）。
 - 纯 CPU，16 GB 显存无关；RTF <1 可接受。
-- 输出是 rich transcription（who/when/what），接入前要写解析器；不要直接当 SRT。
+- 输出实测是纯文本，**没有 who/when**；不要直接当 SRT 或说话人来源。
 
 ### 3.4 集成位（未接线）
 
@@ -173,8 +175,8 @@ models/MelBandRoformer/MelBandRoformer_fp32.safetensors   # 913 MB（下载中�
 1. **FireRedVAD → AudioHints**：新建 `lib/audio/base.py`（`AudioEvent`, `AudioHints`, provider 协议）
    + `lib/audio/fireredvad_provider.py`（subprocess 调 `.venv-qwen`，避免主环境 torch）；
    先输出 `speech/music/singing` 时间线，接 OP/ED 候选与空洞诊断。
-2. **VibeVoice 单集实验**：构建 VibeASR.cpp；EP001 跑一次；解析 who/when/what；
-   只评估“角色归属是否改善翻译”，不默认。
+2. **VibeVoice 说话人**：BitNet 60s 实测无 who/when，不能顶；若要说话人，先决定
+   7B fp16（17GB）或专用 diarizer（3D-Speaker/Sortformer），再单集验收益。
 3. **Mel-Band A/B**：找运行时/适配器；只做分离 vs 原音频的 ASR 对比，默认关。
 4. 所有新模型只通过 ADR-011 的接缝接入；没有指标不算完成。
 

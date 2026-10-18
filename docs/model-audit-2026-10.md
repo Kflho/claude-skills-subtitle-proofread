@@ -112,6 +112,7 @@
 - **新增**：FireRedVAD/AED → `AudioHints`（OP/ED、空洞诊断、翻译场景）。
 - **降级**：0.6B 草稿、Demucs、Sortformer v1、Parakeet/Reazon 从计划中移除。
 - **可选**：VibeVoice（说话人/热词）、Mel-Band RoFormer（分离），都必须先单集 A/B。
+  VibeVoice-BitNet 60s 实测**无 who/when**、只有纯文本 → 不能接说话人；7B fp16 或专用 diarizer 另议。
 - **观察**：FireRedASR2-LLM（2026-02，中文强；日语无基准）、Voxtral Mini 4B（更新但更差）。
 
 ## 6. 状态与下一步
