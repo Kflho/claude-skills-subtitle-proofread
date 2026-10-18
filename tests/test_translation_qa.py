@@ -3,8 +3,18 @@
 import pytest
 
 from lib.translation.qa import (
-    count_kana, cue_violations, glossary_misses, is_untranslated, qa_report,
+    chrf_score, count_kana, cue_violations, glossary_misses,
+    is_untranslated, qa_report,
 )
+
+
+def test_chrf_score_guardrail():
+    assert chrf_score('早上好', '早上好') == 100.0
+    assert chrf_score('早上好', '再见') == 0.0
+    partial = chrf_score('早上好世界', '早上好')
+    assert 0 < partial < 100
+    assert chrf_score('早 上 好', '早上好') == 100.0
+    assert chrf_score('', '早上好') == 0.0
 
 
 def test_count_kana_and_echo():
@@ -65,6 +75,19 @@ def test_qa_report_aggregates_and_aligns():
     assert s['glossary_miss'] == 1
     assert s['violations'] == 2
     assert 'missing' in report['items'][1]['reasons']
+
+
+def test_timing_mismatch_flags_drifted_cue():
+    src = [{'text': 'おはよう', 'start_s': 1.0, 'end_s': 2.0}]
+    out = [{'text': '早上好', 'start_s': 1.2, 'end_s': 2.2}]
+    report = qa_report(src, out)
+    assert report['summary']['timing'] == 1
+    assert 'timing' in report['items'][0]['reasons']
+
+    out[0]['start_s'] = 1.01
+    out[0]['end_s'] = 2.01
+    report = qa_report(src, out)
+    assert report['summary']['timing'] == 0
 
 
 def test_qa_report_clean_sample_passes():

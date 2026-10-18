@@ -7,13 +7,13 @@
 
 ```text
 python -m pytest -q
-1404 passed in ~9s           # 无网络、无模型、无真实项目依赖
-coverage: 79.8% (14,955 statements)
+1406 passed in ~9s           # 无网络、无模型、无真实项目依赖
+coverage: 79.9% (15,001 statements)
 ```
 
-本轮 **+27 tests**（1377 → 1404）：+3 ASR review 工作单/`set_time`/AI review 列表，
-+6 AudioHints 契约 + FireRedVAD provider（worker 用 fake runner，不加载模型）；+3 `--audio-hints` 主流程接线；+8 翻译 QA/阶段；+7 翻译 repair/评测准备。
-覆盖率 79.7% → 79.8%，0 failed。
+本轮 **+29 tests**（1377 → 1406）：+3 ASR review 工作单/`set_time`/AI review 列表，
++6 AudioHints 契约 + FireRedVAD provider（worker 用 fake runner，不加载模型）；+3 `--audio-hints` 主流程接线；+8 翻译 QA/阶段；+7 翻译 repair；+2 chrF/时间轴 guardrail。
+覆盖率 79.7% → 79.9%，0 failed。
 
 新增/扩展测试文件：
 
@@ -39,7 +39,7 @@ coverage: 79.8% (14,955 statements)
 
 | 目录 | 语句 | 覆盖 | 上轮 | 说明 |
 |---|---:|---:|---:|---|
-| `scripts/lib`（含子目录） | 3,670 | **86.0%** | 85.8% | 新增 AudioHints 契约/provider；对齐/ASR 契约稳 |
+| `scripts/lib`（含子目录） | 3,804 | **86.3%** | 85.8% | 翻译 QA/chrF/时间轴；AudioHints 契约/provider |
 | `scripts/fix` | 3,080 | **77.3%** | 78.0% | 删除百度翻译模块；SubtitleSession 视频解析 + 早退提示；whisper_pipeline 81% |
 | `scripts/nouns` | 2,424 | **67.2%** | 67.2% | `auto_classify` / `auto_clean_glossary` 仍 0%（旧入口） |
 | `scripts` 根 | 2,013 | **65.8%** | 65.7% | run_all 96%、translate_srt 85%、polish_zh 99% |
@@ -50,7 +50,7 @@ coverage: 79.8% (14,955 statements)
 | `scripts/eval` | 1,074 | **90.0%** | 90.3% | 新增 release gate；benchmark 新指标 |
 | `scripts/ass` | 313 | **86.3%** | 86.3% | CLI main 已测 |
 | `scripts/utils` | 285 | **80.4%** | 80.4% | — |
-| **合计** | **14,955** | **79.8%** | 79.8% | — |
+| **合计** | **15,001** | **79.9%** | 79.8% | — |
 
 ### 做得好的部分
 
@@ -184,7 +184,7 @@ python -m pytest -q tests/test_alignment_base.py tests/test_alignment_timeline.p
 
 ## 6. 覆盖率门槛（渐进）
 
-当前 **79.8%**。按缺口补，不追求一次到 85%：
+当前 **79.9%**。按缺口补，不追求一次到 85%：
 
 | 阶段 | 目标 | 重点 |
 |---|---:|---|
@@ -192,7 +192,7 @@ python -m pytest -q tests/test_alignment_base.py tests/test_alignment_timeline.p
 | 上上轮 | 64.0% | P0 链路 + 相邻联动 + 修复/片段/复用/专名补齐 |
 | 上轮 | 74.0% | run_all 步骤、scanner、apply、worker、ass/reuse CLI |
 | 再上轮 | 79.0% | whisper_utils、episode_workflow、reuse、asr_eval、CC 清洁 |
-| **现在** | **79.8%** | 时间轴质量、三集基准、display linger、diagnose/benchmark |
+| **现在** | **79.9%** | 时间轴质量、三集基准、display linger、diagnose/benchmark |
 | 下一轮 | ≥82% | 根脚本 65.8%、nouns 67.2%、whisper_backends 59%、align_cues 78% |
 
 > 覆盖率不是目的：**关键路径（扫描→修复→专名→翻译→应用→交付）每个分支至少有一条测试**，比总百分比更重要。

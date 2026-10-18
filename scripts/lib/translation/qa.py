@@ -9,6 +9,7 @@ echo/untranslated cues, glossary adherence, line length and CPS.
 from __future__ import annotations
 
 import re
+from collections import Counter
 
 KANA_RE = re.compile(r'[\u3040-\u30ff\u31f0-\u31ff]')
 NUMBERING_RE = re.compile(r'^\s*(?:\d+[.、)]|[-*])\s*')
@@ -84,6 +85,62 @@ def glossary_misses(source: str, target: str, glossary: dict | None) -> list[str
     return misses
 
 
+def _char_ngrams(text: str, n: int) -> list[str]:
+    text = clean_text(text)
+    return [text[i:i + n] for i in range(max(0, len(text) - n + 1))]
+
+
+def chrf_score(hyp: str, ref: str, *, max_n: int = 6,
+               beta: float = 2.0) -> float:
+    """Character n-gram F-score (chrF-like), 0–100.
+
+    Guardrail only: the existing Chinese subtitles are not a gold standard,
+    so this is used to detect obvious drift, not to tune prompts.
+    """
+    hyp = clean_text(hyp)
+    ref = clean_text(ref)
+    if not hyp and not ref:
+        return 100.0
+    if not hyp or not ref:
+        return 0.0
+    scores = []
+    b2 = beta * beta
+    for n in range(1, max_n + 1):
+        h = _char_ngrams(hyp, n)
+        r = _char_ngrams(ref, n)
+        if not h or not r:
+            continue
+        hc, rc = Counter(h), Counter(r)
+        overlap = sum((hc & rc).values())
+        p = overlap / len(h)
+        rec = overlap / len(r)
+        if p + rec == 0:
+            scores.append(0.0)
+        else:
+            scores.append((1 + b2) * p * rec / (b2 * p + rec))
+    return round(100.0 * sum(scores) / len(scores), 2) if scores else 0.0
+
+
+def timing_mismatches(source_cues: list[dict], output_cues: list[dict],
+                      *, tolerance: float = 0.05) -> list[int]:
+    """Indexes whose output start/end drifted from the source cue."""
+    bad = []
+    for i, src in enumerate(source_cues):
+        if i >= len(output_cues):
+            break
+        out = output_cues[i]
+        try:
+            ss = float(src.get('start_s', 0.0) or 0.0)
+            se = float(src.get('end_s', ss) or ss)
+            os_ = float(out.get('start_s', 0.0) or 0.0)
+            oe = float(out.get('end_s', os_) or os_)
+        except (TypeError, ValueError):
+            continue
+        if abs(ss - os_) > tolerance or abs(se - oe) > tolerance:
+            bad.append(i)
+    return bad
+
+
 def qa_report(source_cues: list[dict], output_cues: list[dict], *,
               glossary: dict | None = None,
               max_chars: int = 20, max_cps: float = 12.0,
@@ -104,7 +161,9 @@ def qa_report(source_cues: list[dict], output_cues: list[dict], *,
         'glossary_miss': 0,
         'max_chars': 0,
         'max_cps': 0,
+        'timing': 0,
     }
+    timing_bad = set(timing_mismatches(source_cues, output_cues))
     for i, src in enumerate(source_cues):
         if i >= len(output_cues):
             counts['missing'] += 1
@@ -130,6 +189,9 @@ def qa_report(source_cues: list[dict], output_cues: list[dict], *,
         for v in violations:
             reasons.append(v['rule'])
             counts[v['rule']] += 1
+        if i in timing_bad:
+            reasons.append('timing')
+            counts['timing'] += 1
         if reasons:
             items.append({
                 'index': i,
