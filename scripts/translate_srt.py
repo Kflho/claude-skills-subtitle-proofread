@@ -153,6 +153,20 @@ USER_TEMPLATE = """上下文（前几条日文原文，帮助理解语流）：
 
 请翻译以上每条字幕，输出 JSON 数组："""
 
+USER_TEMPLATE_AFTER = """上下文（前几条日文原文，帮助理解语流）：
+{context_before}
+
+后文（日文原文，仅供理解，不翻译）：
+{context_after}
+
+本次要翻译的字幕（日文）：
+{targets}
+
+固定译名参考（必须使用）：
+{glossary}
+
+请翻译以上每条字幕，输出 JSON 数组："""
+
 
 # ═══════════════════════════════════════════════════════════════
 # Glossary loading (ja→zh mapping)
@@ -555,7 +569,7 @@ def _parse_json_response(response):
 
 def _translate_batch(cues, api_key, model, base_url, glossary_str, ja_context=None,
                      source_lang='ja', max_chars: int = 0,
-                     max_cps: float = 0.0):
+                     max_cps: float = 0.0, ja_future=None):
     """Translate one batch of cues. Returns list of translated text or None.
 
     Args:
@@ -571,10 +585,17 @@ def _translate_batch(cues, api_key, model, base_url, glossary_str, ja_context=No
         recent = ja_context[-3:]
         context_before = '\n'.join(f'{i+1}. {c["text"]}' for i, c in enumerate(recent) if c.get('text'))
 
+    context_after = ''
+    if ja_future:
+        upcoming = ja_future[:2]
+        context_after = '\n'.join(f'{i+1}. {c["text"]}' for i, c in enumerate(upcoming) if c.get('text'))
+
     targets = '\n'.join(f'{i+1}. {t}' for i, t in enumerate(texts) if t)
 
-    user_msg = USER_TEMPLATE.format(
+    template = USER_TEMPLATE_AFTER if context_after else USER_TEMPLATE
+    user_msg = template.format(
         context_before=context_before or '(无)',
+        context_after=context_after or '(无)',
         targets=targets,
         glossary=glossary_str or '(无)',
     )
@@ -721,7 +742,8 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
                    oped=None,
                    dry_run=False, source_lang=None,
                    extract_nouns=False, extract_dir=None,
-                   max_chars: int = 0, max_cps: float = 0.0):
+                   max_chars: int = 0, max_cps: float = 0.0,
+                   future_context: bool = False):
     """Translate a single subtitle file (SRT or ASS).
 
     Args:
@@ -778,20 +800,24 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
             continue
         # JA context: up to 3 cues immediately before this batch (original Japanese)
         ja_ctx = cues[max(0, i - 3):i]
-        batches.append((i, batch_cues, ja_ctx))
+        ja_future = cues[i + len(batch_cues):i + len(batch_cues) + 2]
+        batches.append((i, batch_cues, ja_ctx, ja_future))
 
     # Submit all batches in parallel
     def _translate_one(idx_batch):
         """Translate a single batch with retry. Returns (batch_idx, result_list_or_None)."""
-        batch_idx, batch_cues, ja_ctx = idx_batch
+        batch_idx, batch_cues, ja_ctx, ja_future = idx_batch
+        future = ja_future if future_context else None
         result = _translate_batch(batch_cues, api_key, model, base_url, glossary_str,
                                   ja_context=ja_ctx, source_lang=source_lang,
-                                  max_chars=max_chars, max_cps=max_cps)
+                                  max_chars=max_chars, max_cps=max_cps,
+                                  ja_future=future)
         if result is None:
             time.sleep(1)
             result = _translate_batch(batch_cues, api_key, model, base_url, glossary_str,
                                       ja_context=ja_ctx, source_lang=source_lang,
-                                      max_chars=max_chars, max_cps=max_cps)
+                                      max_chars=max_chars, max_cps=max_cps,
+                                      ja_future=future)
         # 整批回显/未翻译也重试一次：prompt 过长或语义混乱时，模型会直接
         # 把带编号的原文照抄回来。这类结果非 None、且与原文"不同"（多了编号），
         # 光看 None 判不出来。
@@ -799,7 +825,8 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
             time.sleep(1)
             retry = _translate_batch(batch_cues, api_key, model, base_url, glossary_str,
                                      ja_context=ja_ctx, source_lang=source_lang,
-                                     max_chars=max_chars, max_cps=max_cps)
+                                     max_chars=max_chars, max_cps=max_cps,
+                                     ja_future=future)
             if retry is not None and bad_ratio(batch_cues, retry) < bad_ratio(batch_cues, result):
                 result = retry
         return batch_idx, batch_cues, result
@@ -1005,6 +1032,8 @@ def main():
                         help='Write per-cue QA JSON (single-file mode)')
     parser.add_argument('--repair', action='store_true',
                         help='repair only QA-flagged cues, then rewrite QA')
+    parser.add_argument('--future-context', action='store_true',
+                        help='include the next 2 cues as read-only context')
     parser.add_argument('--source-lang', choices=['ja', 'ru', 'zh', 'other'],
                         default=None,
                         help='Source language (default: auto-detect from cues)')
@@ -1054,7 +1083,8 @@ def main():
                        source_lang=args.source_lang,
                        extract_nouns=args.extract_nouns,
                        extract_dir=args.extract_dir,
-                       max_chars=args.max_chars, max_cps=args.max_cps)
+                       max_chars=args.max_chars, max_cps=args.max_cps,
+                       future_context=args.future_context)
         qa_path = args.qa_report
         if args.repair and not qa_path:
             qa_path = args.output + '.qa.json'

@@ -353,6 +353,23 @@ def test_translate_batch_builds_prompt(monkeypatch):
     assert '前の台詞' in user['content']
 
 
+def test_translate_batch_future_context(monkeypatch):
+    seen = {}
+
+    def fake_llm(messages, api_key, model, base_url):
+        seen.update(messages=messages)
+        return '["你好"]'
+
+    monkeypatch.setattr(tr, '_call_llm', fake_llm)
+    tr._translate_batch(
+        [{'text': 'こんにちは'}], 'key', 'model', 'http://x', '',
+        ja_future=[{'text': '次の台詞'}], source_lang='ja')
+
+    user = seen['messages'][1]['content']
+    assert '后文' in user
+    assert '次の台詞' in user
+
+
 def test_translate_batch_returns_none_when_api_fails(monkeypatch):
     monkeypatch.setattr(tr, '_call_llm', lambda *a, **k: None)
     assert tr._translate_batch([{'text': 'あ'}], 'k', 'm', 'u', '') is None

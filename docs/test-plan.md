@@ -7,11 +7,11 @@
 
 ```text
 python -m pytest -q
-1407 passed in ~9s           # 无网络、无模型、无真实项目依赖
-coverage: 79.9% (15,003 statements)
+1408 passed in ~9s           # 无网络、无模型、无真实项目依赖
+coverage: 79.9% (15,012 statements)
 ```
 
-本轮 **+30 tests**（1377 → 1407）：+3 ASR review 工作单/`set_time`/AI review 列表，
+本轮 **+31 tests**（1377 → 1408）：+3 ASR review 工作单/`set_time`/AI review 列表，
 +6 AudioHints 契约 + FireRedVAD provider（worker 用 fake runner，不加载模型）；+3 `--audio-hints` 主流程接线；+8 翻译 QA/阶段；+7 翻译 repair；+2 chrF/时间轴 guardrail。
 覆盖率 79.7% → 79.9%，0 failed。
 
@@ -50,7 +50,7 @@ coverage: 79.9% (15,003 statements)
 | `scripts/eval` | 1,074 | **90.0%** | 90.3% | 新增 release gate；benchmark 新指标 |
 | `scripts/ass` | 313 | **86.3%** | 86.3% | CLI main 已测 |
 | `scripts/utils` | 285 | **80.4%** | 80.4% | — |
-| **合计** | **15,003** | **79.9%** | 79.8% | — |
+| **合计** | **15,012** | **79.9%** | 79.8% | — |
 
 ### 做得好的部分
 

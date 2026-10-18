@@ -149,7 +149,9 @@ chrF guardrail（与现有中文 ASS 按时间对齐；对照是另一版翻译�
 
 尚未完成：
 
-- 未来上下文、series memory、场景边界还是设计项，未实现；
+- 未来上下文**已做消融，但结果是负的**：EP001 前 30 条，baseline chrF 43.33（23 对），
+  `--future-context` 36.25；QA 都是 0 违规 → **不启用**，保留 flag 仅作实验；
+- series memory、场景边界还是设计项，未实现；
 - 未做 10 条 MQM 抽检；chrF 受翻译风格差异影响，不能当质量结论；
-- baseline vs +future/series memory 的对照还没做。
+- baseline vs +series memory 的对照还没做。
 
