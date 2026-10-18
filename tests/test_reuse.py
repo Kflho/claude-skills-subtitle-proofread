@@ -1,6 +1,7 @@
 """Tests for reuse/align.py + reuse/apply.py — pairing and adoption rules."""
 
 import json
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -303,3 +304,63 @@ def test_apply_run_requires_matches_file(tmp_path, monkeypatch):
         reuse_apply.run('SP01', _run_args(target, tmp_path / 'out'), [],
                         make_fold())
     assert 'reuse/align.py' in str(exc.value)
+
+
+# ═══════════════════════════════════════════════════════════════
+# reuse/align.py CLI — pair every selected episode, write matches
+# ═══════════════════════════════════════════════════════════════
+
+def _align_argv(tmp_path, episodes='EP001', extra=()):
+    return ['align.py', '-e', episodes,
+            '--source-dir', str(tmp_path / 'src'),
+            '--target-dir', str(tmp_path / 'zh'),
+            '--reference-dir', str(tmp_path / 'ref'),
+            '--out-dir', str(tmp_path / 'out'), *extra]
+
+
+def test_align_main_writes_matches_and_report(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(reuse_align, 'load_variants', lambda path: ([], []))
+    monkeypatch.setattr(reuse_align, 'load_reference',
+                        lambda *a, **k: [{'text': '参考', 'ep': 'REF01'}])
+    monkeypatch.setattr(reuse_align, 'load_target',
+                        lambda *a, **k: [{'zh': '我的译文', 'ja': '源'}])
+    monkeypatch.setattr(
+        reuse_align, 'pair_up',
+        lambda tag, tgt, ref, args, fold: {
+            '0': {'zh': '我的译文', 'ref_text': '参考',
+                  'ref_ep': 'REF01', 'ref_start': '00:00:01.00',
+                  'sim': 0.9},
+        })
+    report = tmp_path / 'report.txt'
+    monkeypatch.setattr(sys, 'argv', _align_argv(
+        tmp_path, extra=['--report', str(report)]))
+
+    reuse_align.main()
+
+    matches = json.loads(
+        (tmp_path / 'out' / 'matches_EP001.json').read_text(encoding='utf-8'))
+    assert matches['n_target'] == 1
+    assert matches['n_reference'] == 1
+    assert matches['matches']['0']['sim'] == 0.9
+    text = report.read_text(encoding='utf-8')
+    assert '参考 cue 1' in capsys.readouterr().out
+    assert 'EP001: 命中 1/1' in text
+    assert '[改]' in text
+    assert '参考: REF01 00:00:01' in text
+
+
+def test_align_main_rejects_unparseable_episodes(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, 'argv', _align_argv(tmp_path, episodes='???'))
+
+    with pytest.raises(SystemExit) as exc:
+        reuse_align.main()
+    assert '集号无法解析' in str(exc.value)
+
+
+def test_align_main_rejects_missing_variants_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, 'argv', _align_argv(
+        tmp_path, extra=['--variants', str(tmp_path / 'nope.json')]))
+
+    with pytest.raises(SystemExit) as exc:
+        reuse_align.main()
+    assert 'variants 文件不存在' in str(exc.value)

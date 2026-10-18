@@ -57,6 +57,22 @@ def _run(cmd_parts, cwd, timeout=DEFAULT_TIMEOUT, desc=''):
         return False
 
 
+def _load_json_lenient(path, label='json'):
+    """Load a pipeline-generated JSON artifact; a corrupt file is skipped.
+
+    ``lib.project_utils.load_json`` stays strict on purpose (callers that need
+    to know about corruption still get the exception). Scan artifacts, though,
+    are written by the pipeline itself and enumerated in bulk — one truncated
+    file from an interrupted run must not abort the whole Phase 1/2/3 pass.
+    """
+    try:
+        return load_json(path)
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
+        print(f'[{label}] WARN: skipping unreadable JSON {path}: {e}',
+              file=sys.stderr)
+        return None
+
+
 # ── Pipeline steps ──
 
 def _print_glossary_ai_review_notice(project_dir, glossary_path, lang):
@@ -396,7 +412,8 @@ def _step_noun_classify(project_dir, lang, checker, target, glossary):
         for fname in sorted(os.listdir(nouns_out_dir)):
             if not fname.endswith('_nouns.json'):
                 continue
-            report = load_json(os.path.join(nouns_out_dir, fname))
+            report = _load_json_lenient(
+                os.path.join(nouns_out_dir, fname), label='nouns')
             if not report:
                 continue
             for r in report.get('results', []):
@@ -808,7 +825,7 @@ def step_ai_review(project_dir, lang, target_dir=None):
         if not fname.startswith('ai_fragments_') or not fname.endswith('.json'):
             continue
         json_path = os.path.join(scan_dir, fname)
-        data = load_json(json_path)
+        data = _load_json_lenient(json_path, label='ai-review')
         if not data:
             continue
         ep = data.get('episode', fname)

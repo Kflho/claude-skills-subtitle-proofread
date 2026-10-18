@@ -482,6 +482,11 @@ def main():
                             elif action == 'replace_name':
                                 old = d['name']
                                 d['name'] = fix['replacement']
+                                # build_dialogue_line() reuses `_raw_parts` and
+                                # only refreshes the text field, so the Name
+                                # change would be dropped. Rebuild from the
+                                # dict instead.
+                                d.pop('_raw_parts', None)
                                 lines[i] = build_dialogue_line(d) + '\n'
                                 ok, msg = True, f"Name: {old} → {fix['replacement']}"
                             else:
@@ -573,6 +578,15 @@ def _run_trad_to_simp(target_dir, dry_run=False):
         lines = read_ass_file(fpath)
         changed = 0
         for i in range(len(lines)):
+            if _is_srt(fpath):
+                # SRT lines are not ASS fields: convert the whole line. The
+                # ASS split(',', 9) path below never matches SRT, so without
+                # this branch SRT files were silently left unconverted.
+                new_line = lines[i].translate(_TRAD_TO_SIMP_MAP)
+                if new_line != lines[i]:
+                    lines[i] = new_line
+                    changed += 1
+                continue
             if lines[i].startswith('Dialogue:') or not lines[i].startswith('Comment:'):
                 old = lines[i]
                 # Only convert dialogue text, not style/metadata

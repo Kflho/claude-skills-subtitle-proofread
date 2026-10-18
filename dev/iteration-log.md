@@ -5,6 +5,37 @@
 >
 > **记录规则**：只记架构/流程/接口级变更（新增/删除/重命名脚本、工作流顺序调整、报告格式变更）。不记修 bug、调参数、加 flag 等正常开发活动。
 
+## 2026-10-18 — 测试收尾（run_all / scanner / apply / worker）+ 5 个健壮性修复
+
+### 架构变更
+- 无核心架构变更；`lib/`、`fix/`、`nouns/` 的模块边界不变。
+
+### 行为修正（接口级）
+- `run_all`：新增 `_load_json_lenient()`；批量枚举的扫描产物（`*_nouns.json`、
+  `ai_fragments_*.json`）单个损坏时跳过并告警，不再打死整轮 Phase 1/2/3。
+  `lib.project_utils.load_json` 保持严格语义，宽松只放在调用点。
+- `apply/apply_fixes` ASS `replace_name`：重建行前 `pop('_raw_parts')`，
+  Name 修改才不会被 builder 静默丢弃。
+- `apply/apply_fixes._run_trad_to_simp`：SRT 走整行 `translate(TRAD_TO_SIMP_MAP)`；
+  原先只走 ASS 的 `split(',', 9)` 路径，SRT 项目繁→简永不生效。
+- `asr/qwen3_worker._segments_from_asr_text`：单句场景沿用 ASR 原文，
+  保留句内标点/空格（token 拼接会丢 `お前、何してんだよ！` 的顿号）。
+- `asr/qwen3_worker.main`：JSON 合法但非对象时回 `ok:false`，
+  长驻 worker 不再被一行坏消息打死。
+
+### 测试
+- 967 → **1162 passed**；覆盖 **64.0% → 74.0%**；新增 195 例。
+- `run_all` 34→96%、`scan` 38→95%、`apply` 35→100%、`worker` 37→99%、
+  `qwen3_transcribe` 27→99%、`ass_repair` 66→86%、`reuse/align` 70→96%。
+- 新文件 `tests/test_run_all_step_functions.py`（52 项）；6 个测试文件扩展。
+- 矩阵与剩余缺口见 `docs/test-plan.md` §0/§3。
+
+### 避坑
+- `load_json` 的严格语义不能全局放宽：已有测试锁定「坏 JSON 抛异常」。
+  需要容错的地方只包在「批量枚举产物」这类调用点。
+- Qwen3-ASR 的句内标点/空格不在 aligner token 里；单段时直接用原文，
+  多段才按 token 分配，否则 SRT 会丢标点。
+
 ## 2026-10-18 — 测试 P0 链路补齐 + 三处解析/写盘修正
 
 ### 架构变更

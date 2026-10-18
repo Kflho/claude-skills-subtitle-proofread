@@ -1,8 +1,13 @@
 """Tests for ass/ass_repair.py — ASS-specific checks (names/styles/...)."""
 
+import json
+import sys
+
+import pytest
+
 from ass.ass_repair import (
-    _classify_name, check_comment, check_drawing, check_names, check_oped,
-    check_styles,
+    ALL_CHECKS, _classify_name, check_comment, check_drawing, check_names,
+    check_oped, check_styles,
 )
 
 ASS = '''[Script Info]
@@ -78,3 +83,97 @@ def test_check_oped_compares_styles(tmp_path):
     diff = result['findings']['per_file_diffs'][0]
     assert diff['source_text'] == '歌です'
     assert diff['ref_text'] == 'песня'
+
+
+# ═══════════════════════════════════════════════════════════════
+# CLI (main)
+# ═══════════════════════════════════════════════════════════════
+
+def test_main_runs_all_checks_and_writes_json(tmp_path, monkeypatch, capsys):
+    _write_ass(tmp_path)
+    out = tmp_path / 'reports' / 'ass.json'
+    monkeypatch.setattr(sys, 'argv', [
+        'ass_repair.py', '--target-dir', str(tmp_path),
+        '--check', 'all', '-o', str(out)])
+
+    from ass.ass_repair import main
+    main()
+
+    data = json.loads(out.read_text(encoding='utf-8'))
+    assert data['checks_run'] == sorted(ALL_CHECKS)
+    assert set(data['results']) == {'names', 'styles', 'drawing', 'comment'}
+    assert data['results']['names']['summary']['non_target_names'] == 1
+    assert '[oped] SKIP' in capsys.readouterr().err
+
+
+def test_main_respects_check_and_skip_selection(tmp_path, monkeypatch):
+    _write_ass(tmp_path)
+    out = tmp_path / 'ass.json'
+    monkeypatch.setattr(sys, 'argv', [
+        'ass_repair.py', '--target-dir', str(tmp_path),
+        '--check', 'names,styles,drawing', '--skip', 'drawing',
+        '-o', str(out)])
+
+    from ass.ass_repair import main
+    main()
+
+    data = json.loads(out.read_text(encoding='utf-8'))
+    assert data['checks_run'] == ['names', 'styles']
+    assert set(data['results']) == {'names', 'styles'}
+
+
+def test_main_runs_oped_with_config(tmp_path, monkeypatch):
+    _write_ass(tmp_path)
+    cfg = tmp_path / 'oped.json'
+    cfg.write_text(json.dumps(
+        {'source_style': 'OP', 'ref_style': 'OP-REF'}), encoding='utf-8')
+    out = tmp_path / 'ass.json'
+    monkeypatch.setattr(sys, 'argv', [
+        'ass_repair.py', '--target-dir', str(tmp_path),
+        '--check', 'oped', '--oped-config', str(cfg), '-o', str(out)])
+
+    from ass.ass_repair import main
+    main()
+
+    data = json.loads(out.read_text(encoding='utf-8'))
+    assert data['results']['oped']['summary']['total_text_diffs'] == 1
+
+
+def test_main_rejects_unknown_check(tmp_path, monkeypatch, capsys):
+    _write_ass(tmp_path)
+    monkeypatch.setattr(sys, 'argv', [
+        'ass_repair.py', '--target-dir', str(tmp_path),
+        '--check', 'bogus'])
+
+    from ass.ass_repair import main
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 1
+    assert 'Unknown check(s): bogus' in capsys.readouterr().err
+
+
+def test_main_rejects_empty_selection(tmp_path, monkeypatch, capsys):
+    _write_ass(tmp_path)
+    monkeypatch.setattr(sys, 'argv', [
+        'ass_repair.py', '--target-dir', str(tmp_path),
+        '--check', 'names', '--skip', 'names'])
+
+    from ass.ass_repair import main
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 1
+    assert 'No checks selected' in capsys.readouterr().err
+
+
+def test_main_prints_json_to_stdout(tmp_path, monkeypatch, capsys):
+    _write_ass(tmp_path)
+    monkeypatch.setattr(sys, 'argv', [
+        'ass_repair.py', '--target-dir', str(tmp_path),
+        '--check', 'comment'])
+
+    from ass.ass_repair import main
+    main()
+
+    out = capsys.readouterr().out
+    data = json.loads(out)
+    assert data['results']['comment']['summary']['total_findings'] == 1

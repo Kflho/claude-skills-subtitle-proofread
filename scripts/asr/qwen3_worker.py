@@ -115,7 +115,11 @@ def _segments_from_asr_text(text: str, tokens: list[Token],
     chunks = _split_sentence_chunks(text)
     if len(chunks) <= 1:
         segs = build_segments(tokens)
-        if segs and text and text[-1] in _SENTENCE_MARKS:
+        if len(segs) == 1 and text:
+            # One utterance: keep the ASR text verbatim, including internal
+            # commas/spaces the aligner never times.
+            segs[0].text = text
+        elif segs and text and text[-1] in _SENTENCE_MARKS:
             segs[-1].text += text[-1]
         if not segs:
             segs = [Segment(text=text, start=tokens[0].start,
@@ -496,6 +500,12 @@ def main(argv: list[str] | None = None) -> int:
             request = json.loads(line)
         except json.JSONDecodeError as exc:
             _emit({'ok': False, 'id': None, 'error': f'bad json: {exc}'})
+            if args.once:
+                break
+            continue
+        if not isinstance(request, dict):
+            _emit({'ok': False, 'id': None,
+                   'error': 'bad json: request must be a JSON object'})
             if args.once:
                 break
             continue
