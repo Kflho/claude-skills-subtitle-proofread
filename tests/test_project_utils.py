@@ -177,6 +177,39 @@ def test_find_video_returns_none_when_missing(tmp_path):
     assert find_video(str(tmp_path), 'EP001') is None
 
 
+def test_find_video_matches_unpadded_release_names(tmp_path):
+    """Real releases use `01、Title.mkv`; EP001 must still find it."""
+    videos = tmp_path / 'videos'
+    videos.mkdir()
+    (videos / '01、漂流？冒険の島！.mkv').write_bytes(b'')
+    (videos / '02、爆裂進化！グレイモン.mkv').write_bytes(b'')
+
+    first = find_video(str(tmp_path), 'EP001', video_dir=str(videos))
+    second = find_video(str(tmp_path), 'EP002', video_dir=str(videos))
+    assert first and first.endswith('01、漂流？冒険の島！.mkv')
+    assert second and second.endswith('02、爆裂進化！グレイモン.mkv')
+
+
+def test_find_video_keeps_padded_names_and_rejects_other_numbers(tmp_path):
+    videos = tmp_path / 'videos'
+    videos.mkdir()
+    (videos / 'EP001.mkv').write_bytes(b'')
+    (videos / '201.mkv').write_bytes(b'')
+    (videos / '1080p sample.mkv').write_bytes(b'')
+
+    found = find_video(str(tmp_path), 'EP001', video_dir=str(videos))
+    assert found and found.endswith('EP001.mkv')
+
+    only_other = tmp_path / 'other'
+    only_other.mkdir()
+    (only_other / '201.mkv').write_bytes(b'')
+    (only_other / '1080p sample.mkv').write_bytes(b'')
+    empty_project = tmp_path / 'empty_project'
+    empty_project.mkdir()
+    assert find_video(str(empty_project), 'EP001',
+                      video_dir=str(only_other)) is None
+
+
 # ═══════════════════════════════════════════════════════════════
 # Backup / JSON
 # ═══════════════════════════════════════════════════════════════

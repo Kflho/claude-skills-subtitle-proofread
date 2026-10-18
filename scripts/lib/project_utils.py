@@ -372,9 +372,20 @@ def find_video(project_dir, episode, video_dir=None):
     """Find video file for an episode. Returns path or None.
 
     Searches: explicit video_dir > project/video > project/videos.
+
+    Matching uses the project's canonical episode extractor first, so real
+    release names like ``01、漂流？冒険の島！.mkv`` match ``EP001`` (the raw
+    ``001`` substring does not exist there).  A strict zero-padded substring
+    check remains as a fallback for names the extractor cannot parse.
     """
     ep_num = episode[2:]  # '064' from 'EP064'
     exts = ('.mkv', '.mp4', '.avi', '.mov')
+    try:
+        wanted = f'EP{int(ep_num):03d}'
+    except (TypeError, ValueError):
+        wanted = episode.upper()
+
+    from lib.whisper_utils import extract_ep_number
 
     candidates = []
     if video_dir:
@@ -383,16 +394,20 @@ def find_video(project_dir, episode, video_dir=None):
         os.path.join(project_dir, d) for d in VIDEO_CANDIDATES
     )
 
+    fallback = None
     for vdir in candidates:
         if not os.path.isdir(vdir):
             continue
-        for fname in os.listdir(vdir):
-            # Match episode number with word boundaries to avoid hash substring false positives
-            # e.g. "192" should match "鉄腕アトム - 192 -" but not "C319227A"
-            if fname.lower().endswith(exts) and re.search(rf'(?<!\d){ep_num}(?!\d)', fname):
-                return os.path.join(vdir, fname)
-
-    return None
+        for fname in sorted(os.listdir(vdir)):
+            if not fname.lower().endswith(exts):
+                continue
+            path = os.path.join(vdir, fname)
+            if extract_ep_number(fname) == wanted:
+                return path
+            if fallback is None and re.search(
+                    rf'(?<!\d){ep_num}(?!\d)', fname):
+                fallback = path
+    return fallback
 
 
 def find_srt(project_dir, episode):

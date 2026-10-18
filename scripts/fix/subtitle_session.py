@@ -139,7 +139,21 @@ class SubtitleSession:
                     self.srt_name = fname
                     break
 
-        # Find video
+        # Find video — canonical matcher first, so release names like
+        # `01、漂流？冒険の島！.mkv` resolve to EP001 (the old `'001' in
+        # fname` check cannot see them).  Raw token matching stays as a
+        # fallback for odd/non-episodic stems.
+        from lib.project_utils import find_video
+        found = find_video(self.project_dir, self.episode,
+                           video_dir=self._video_dir_override)
+        if found:
+            self.video_path = found
+            self.video_dir = os.path.dirname(found)
+            m = re.search(r'-\s*\d{3}\s*-\s*(.+?)\s*\(', os.path.basename(found))
+            if m:
+                self.episode_title = m.group(1).strip()
+            return
+
         candidates = []
         if self._video_dir_override:
             candidates.append(self._video_dir_override)

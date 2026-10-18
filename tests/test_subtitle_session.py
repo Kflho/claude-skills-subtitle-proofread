@@ -118,3 +118,19 @@ class TestSubtitleSessionInit:
         s = SubtitleSession('EP001', str(tmp_path))
         if s.srt_path:
             assert 'EP001' in s.srt_path
+
+    def test_video_resolution_accepts_unpadded_release_names(self, tmp_path):
+        """`01、Title.mkv` is EP001; the old `'001' in name` check missed it."""
+        srt_dir = tmp_path / 'AI审查后'
+        srt_dir.mkdir()
+        (srt_dir / 'EP001.srt').write_text(
+            "1\n00:00:01,000 --> 00:00:05,000\nテスト\n\n", encoding='utf-8')
+        videos = tmp_path / 'videos'
+        videos.mkdir()
+        (videos / '01、漂流？冒険の島！.mkv').write_bytes(b'')
+
+        session = SubtitleSession('EP001', str(tmp_path))
+        assert session.srt_path and session.srt_path.endswith('EP001.srt')
+        assert session.video_path
+        assert session.video_path.endswith('01、漂流？冒険の島！.mkv')
+        assert session.video_dir == str(videos)
