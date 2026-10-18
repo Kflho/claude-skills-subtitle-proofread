@@ -847,7 +847,34 @@ def step_ai_review(project_dir, lang, target_dir=None):
               file=sys.stderr)
         print(f'  then run: python run_all.py --lang {lang} --apply-ai-review',
               file=sys.stderr)
-    else:
+
+    # ASR-first route: non-auto repairs are written as per-episode worklists
+    # (Review ladder L1/L2).  These are decisions, not human review.
+    asr_pending = []
+    for fname in sorted(os.listdir(scan_dir)):
+        if not fname.endswith('.asr_review.json'):
+            continue
+        json_path = os.path.join(scan_dir, fname)
+        data = _load_json_lenient(json_path, label='asr-review')
+        if not data:
+            continue
+        items = data.get('items', [])
+        pending = [i for i in items if not i.get('decision')]
+        if pending:
+            asr_pending.append((data.get('episode', fname), len(pending),
+                                json_path))
+    if asr_pending:
+        total_asr = sum(count for _, count, _ in asr_pending)
+        print(f'\n[ai-review] ASR worklist: {total_asr} decisions across '
+              f'{len(asr_pending)} episode(s)', file=sys.stderr)
+        for ep, count, path in asr_pending:
+            print(f'  {ep}: {count} pending → {path}', file=sys.stderr)
+        print('  Claude: fill "decision" per item (keep/fix_time/replace_text/'
+              'delete), then write fixes to temp/scans/ai_review_fixes.json '
+              '(set_time/replace_text/delete_line) and rerun --resume.',
+              file=sys.stderr)
+
+    if total_entries == 0 and not asr_pending:
         print('[ai-review] No pending AI review entries.', file=sys.stderr)
 
     return True

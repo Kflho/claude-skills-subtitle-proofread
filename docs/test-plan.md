@@ -7,13 +7,14 @@
 
 ```text
 python -m pytest -q
-1377 passed in ~9s           # 无网络、无模型、无真实项目依赖
-coverage: 79.6% (14,499 statements)
+1380 passed in ~9s           # 无网络、无模型、无真实项目依赖
+coverage: 79.7% (14,569 statements)
 ```
 
-本轮 **−15 tests**（1392 → 1377）：删除百度翻译路径（`test_baidu_translate.py` 与
-`fix/translate_srt.py`，共 15 条）；`whisper_fixer` 的替换翻译测试改走 LLM mock。
-覆盖率 79.8% → 79.6%（删掉的百度模块原本有测试覆盖），0 failed。
+本轮 **+3 tests**（1377 → 1380）：ASR review 工作单、`apply_fixes.set_time`、
+AI review 步列出工作单。上一轮删百度 −15（`test_baidu_translate.py` 与
+`fix/translate_srt.py`）；`whisper_fixer` 的替换翻译测试改走 LLM mock。
+覆盖率 79.6% → 79.7%，0 failed。
 
 新增/扩展测试文件：
 
@@ -27,6 +28,7 @@ coverage: 79.6% (14,499 statements)
 | `test_project_utils.py` / `test_subtitle_session.py`（扩展） | 未补零视频名解析（`01、Title.mkv` → EP001）、201/1080p 反例、SubtitleSession 视频解析 |
 | `test_whisper_fixer.py`（改造） | 替换翻译改走 LLM：有 key 翻译、无 key 保留原文、失败批次保留原文；删除百度 mock |
 | `test_config.py`（改造） | 断言 `BAIDU_*` 配置已不存在（ADR-010） |
+| `test_apply_fixes.py` / `test_fix_by_asr.py` / `test_run_all_step_functions.py`（扩展） | ASR review 工作单（`<EP>.asr_review.json`）、`set_time` 改动时间码/秒值/非法区间、AI review 步列出工作单 |
 
 ### 覆盖率按目录（本轮 vs 上轮）
 
@@ -43,7 +45,7 @@ coverage: 79.6% (14,499 statements)
 | `scripts/eval` | 1,074 | **90.0%** | 90.3% | 新增 release gate；benchmark 新指标 |
 | `scripts/ass` | 313 | **86.3%** | 86.3% | CLI main 已测 |
 | `scripts/utils` | 285 | **80.4%** | 80.4% | — |
-| **合计** | **14,499** | **79.6%** | 79.8% | — |
+| **合计** | **14,569** | **79.7%** | 79.6% | — |
 
 ### 做得好的部分
 
@@ -177,7 +179,7 @@ python -m pytest -q tests/test_alignment_base.py tests/test_alignment_timeline.p
 
 ## 6. 覆盖率门槛（渐进）
 
-当前 **79.6%**。按缺口补，不追求一次到 85%：
+当前 **79.7%**。按缺口补，不追求一次到 85%：
 
 | 阶段 | 目标 | 重点 |
 |---|---:|---|
@@ -185,7 +187,7 @@ python -m pytest -q tests/test_alignment_base.py tests/test_alignment_timeline.p
 | 上上轮 | 64.0% | P0 链路 + 相邻联动 + 修复/片段/复用/专名补齐 |
 | 上轮 | 74.0% | run_all 步骤、scanner、apply、worker、ass/reuse CLI |
 | 再上轮 | 79.0% | whisper_utils、episode_workflow、reuse、asr_eval、CC 清洁 |
-| **现在** | **79.6%** | 时间轴质量、三集基准、display linger、diagnose/benchmark |
+| **现在** | **79.7%** | 时间轴质量、三集基准、display linger、diagnose/benchmark |
 | 下一轮 | ≥82% | 根脚本 65.8%、nouns 67.2%、whisper_backends 59%、align_cues 78% |
 
 > 覆盖率不是目的：**关键路径（扫描→修复→专名→翻译→应用→交付）每个分支至少有一条测试**，比总百分比更重要。

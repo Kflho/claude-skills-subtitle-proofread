@@ -669,6 +669,21 @@ def test_step_ai_review_without_pending_fragments(tmp_path, capsys):
     assert 'No pending AI review entries' in capsys.readouterr().err
 
 
+def test_step_ai_review_counts_asr_worklist(tmp_path, capsys):
+    scans = tmp_path / 'temp' / 'scans'
+    scans.mkdir(parents=True)
+    _write_json(scans / 'EP001.asr_review.json', {
+        'episode': 'EP001',
+        'items': [{'decision': ''}, {'decision': 'keep'}],
+    })
+
+    assert run_all.step_ai_review(str(tmp_path), 'ja') is True
+    err = capsys.readouterr().err
+    assert 'ASR worklist: 1 decisions' in err
+    assert 'EP001: 1 pending' in err
+    assert 'ai_review_fixes.json' in err
+
+
 def test_apply_ai_checklists_without_dir(tmp_path, capsys):
     assert run_all._apply_ai_checklists(str(tmp_path), 'ja') is False
     assert 'No temp/scans/' in capsys.readouterr().err

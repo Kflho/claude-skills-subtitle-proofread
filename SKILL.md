@@ -305,8 +305,12 @@ export LLM_BASE_URL='https://api.deepseek.com/v1'
 > `translate_srt.py` **自动检测源语言**（ja/ru/zh），动态切换 system prompt，无需手动指定。
 > 日语检测到假名时启用专用规则（敬语、主语省略等），非日语跳过。
 > `--lang zh` 时使用 jieba 分词 + 词典查询对标 jamdict。jieba 不可用时退回 n-gram + 启发式规则。
-> **翻译全部走 LLM**（ADR-010）：百度/传统 MT 路径已删除，不再维护或测试；
-> 无 `LLM_API_KEY` 时明确失败/保留原文，不静默降级到机翻。
+> **翻译全部走 LLM**（ADR-010/011）：百度/传统 MT 路径已删除，不再维护或测试；
+> 翻译是**唯一确定调用 LLM 的阶段**，用用户已配置的国内 key（`~/.claude/settings.json`
+> 的 `LLM_API_KEY`/`LLM_BASE_URL`/`LLM_MODEL`；DeepSeek，Claude Code 自动注入）。
+> 成本策略：优先免费/本地；需要 token 时只接受国内服务，国外服务暂不配置。
+> Review/专名/润色不新增 LLM 调用（走 agent 工作单或并入翻译 prompt）；
+> 无 key 时明确失败/保留原文，不回退机翻。
 > AI 润色为**可选**：Pipeline 末尾交互提问。需要 `LLM_API_KEY` 环境变量。无 key 时降级为 AI 助理自行润色（⚠️ 高 token 消耗，7.5 万 cue）。
 > ⚠️ **translate_srt.py 必须要有 LLM_API_KEY**：无 key 时脚本无法运行。不要静默降级为 AI 自行翻译——量级太大（193 集 × 200 条 = 不可行）。正确做法：告知用户 key 为空，请用户设置后重试。详见 [references/translation.md](references/translation.md)。
 

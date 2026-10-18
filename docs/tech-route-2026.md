@@ -9,6 +9,8 @@
 > **证据等级**：本文标注 `[A]` 官方文档/代码、`[B]` 第三方公开基准、`[C]` 架构推断。所有公开基准都需要在我们的 193 集素材上复测，不能直接当结论。
 >
 > **2026-10-18 修订**：翻译改为 **LLM-only**（百度路径已删除、不再维护/测试）；
+> **免费原则**：只考虑免费/本地技术，云 ASR、Qwen-MT、pyannote gated 等需 token/付费的
+> 服务不纳入；**翻译是唯一 LLM 例外**（用户已配置 DeepSeek，`~/.claude/settings.json`）。
 > 流程以 [`adr/010-asr-first-pipeline.md`](adr/010-asr-first-pipeline.md) 的 **ASR-first**
 > 设计为准；所有候选技术的接入位与现状见
 > [`adr/011-technology-integration-map.md`](adr/011-technology-integration-map.md)。
@@ -256,7 +258,11 @@ cue 文本替换 ──► 翻译 ──► 人工审查
 
 Whisper 的 `avg_logprob` / `no_speech_prob` / `compression_ratio` 仍然有价值，但只在 Whisper 路径内使用；新路径要用新置信度体系。
 
-### 3.5 云 API：只做难例兜底
+### 3.5 云 API：国内可选、国外不纳入（2026-10-18 修订）
+
+> 成本原则：优先本地/免费；需要 token 只接受国内服务（DashScope/Qwen-ASR、讯飞、腾讯等），
+> 且不默认启用；国外服务（MAI/Scribe/Gemini/gpt-4o）暂不配置。本地 Qwen3/Whisper
+> 足够覆盖当前素材，没有云兜底。
 
 | 服务 | 日语 | 时间戳/说话人 | 价格（参考） | 限制 | 适合 |
 |---|---|---|---|---|---|
@@ -458,8 +464,9 @@ FireRedVAD 还提供 **AED**（audio event detection）：
 
 ### 5.4 翻译
 
-**现状（2026-10-18 修订）**：百度路径已删除，翻译全部走 LLM（ADR-010）。
-以下是当时的调研记录，保留作为背景；实施以 ADR-010 为准。
+**现状（2026-10-18 修订）**：百度路径已删除，翻译全部走 LLM（ADR-010/011）。
+使用用户已配置的 LLM（`~/.claude/settings.json` 的 DeepSeek，已实测）；
+Qwen-MT / 云翻译不纳入（付费/需 token）。以下是当时的调研记录，保留作为背景。
 
 原状：百度 API + LLM 双路径；百度 1 QPS、200 万字符/月免费、通用 MT。
 

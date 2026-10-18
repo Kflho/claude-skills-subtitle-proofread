@@ -81,6 +81,16 @@ def test_fix_by_asr_replaces_text_only_with_write_text(project):
     assert report.applied == 0
     assert 'おまえなにしてんだ' in srt.read_text(encoding='utf-8')
 
+    worklist = json.loads(
+        (project / 'temp' / 'scans' / 'EP002.asr_review.json')
+        .read_text(encoding='utf-8'))
+    assert worklist['schema_version'] == 1
+    assert worklist['items']
+    item = worklist['items'][0]
+    assert item['decision'] == ''
+    assert item['asr_text'] == 'お前何してんだよ'
+    assert 'replace_text' in item['action'] or item['action'] == 'review_ai'
+
     fixer = Fixer('EP002', str(project), srt_dir=str(project))
     report = fixer.fix_by_asr(asr_result=result, write_text=True)
     assert report.applied == 1

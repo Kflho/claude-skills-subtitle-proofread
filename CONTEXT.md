@@ -122,8 +122,11 @@ scripts/
    `ai_review_fixes.json`、`auto_classify`，不新造人工队列；不把 review
    从一个文件挪到另一个文件冒充优化。
 
-9. **翻译全部 LLM**: 无传统 MT/百度 fallback（已移除、不再维护/测试）。
-   glossary-first + 场景/角色上下文；翻译是独立阶段，不是参考字幕的副产物。
+9. **翻译全部 LLM（唯一确定使用 LLM 的阶段）**: 无传统 MT/百度 fallback（已移除）。
+   翻译用用户已配置的**国内** LLM（`~/.claude/settings.json` 的 DeepSeek，
+   `LLM_MODEL=deepseek-v4-pro`，已实测）。成本原则：优先免费/本地；需要 token 时
+   **只接受国内服务**，国外服务暂不配置。翻译以外的阶段不新增 LLM 调用
+   （Review L1/L2 = 本 skill agent 工作单）；云 ASR 国内可选但不默认，国外不纳入。
 
 10. **技术只通过接缝接入**: 所有候选技术（ASR/FA/VAD/AED/说话人/分离/翻译/云/双引擎等）
     必须在 `docs/adr/011-technology-integration-map.md` 的接缝里有位置；可选能力默认
@@ -133,8 +136,8 @@ scripts/
 ## 测试
 
 ```bash
-cd <skill>/tests && pytest -q    # 1377 tests, ~9s, 无外部依赖
-cd <skill> && pytest -q tests --cov --cov-report=term-missing   # 覆盖率 79.6%，矩阵见 docs/test-plan.md
+cd <skill>/tests && pytest -q    # 1380 tests, ~9s, 无外部依赖
+cd <skill> && pytest -q tests --cov --cov-report=term-missing   # 覆盖率 79.7%，矩阵见 docs/test-plan.md
 ```
 
 分层: Tier 1 (纯函数) → Tier 2 (tempfile) → Tier 3 (mock 外部二进制)。
@@ -159,12 +162,17 @@ P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 
 
 素材现状：**验收作品定为数码宝贝（Digimon Adventure）**，目录 `D:\videos\Animation\TV\数码宝贝`。**EP01/02/03 视频完整（各约 1386s）**；用户人工复核三集视频/CC 均无真实偏移。日文参考：`日语字幕\` 下 S01E01–S01E54 共 54 集 `ja[cc].srt`，已清洁；主故事窗口 `[95,1240]`。01–05 另有中文字幕，只能做参考无关/翻译复用。素材台账 `eval/materials.md`，清单 `eval/manifest.digimon.json`（Qwen3）与 `eval/manifest.digimon.whisper.json`（A/B）。莎莉/阿童木历史素材只保留机制/吞吐回放。
 
-测试：1377 passed / 0 failed / 79.6% 覆盖；矩阵与剩余缺口见 `docs/test-plan.md`。
+测试：1380 passed / 0 failed / 79.7% 覆盖；矩阵与剩余缺口见 `docs/test-plan.md`。
 
 ## 配置
 
-所有配置在 `lib/config.py`。环境变量在 CLAUDE.md 中设置。关键变量:
-- `WHISPER_CLI` / `WHISPER_MODEL` — Whisper 路径
+所有配置在 `lib/config.py`。环境变量在 CLAUDE.md / `~/.claude/settings.json` 中设置。关键变量:
+- `WHISPER_CLI` / `WHISPER_MODEL` — Whisper 路径；用户环境已配置 whisper.cpp：
+  `D:/software/video/whisper-cublas-12.4.0-bin-x64/whisper-cli.exe`，
+  模型 kotoba q5 / large-v3 q5（fallback/A-B 可用）。
 - `ASR_ENGINE` / `ASR_MODEL` / `QWEN_PYTHON` — 2026 ASR 路线（默认 `whisper`，未启用）
 - `ASR_GLOBAL_OFFSET` — 整集偏移默认关；`--asr-global-offset` 或 `ASR_GLOBAL_OFFSET=1` 才应用
-- `LLM_API_KEY` — LLM API key（翻译/审查全部走 LLM）
+- `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` — 翻译用 LLM；用户已在
+  `~/.claude/settings.json` 的 `env` 配置（DeepSeek，`LLM_MODEL=deepseek-v4-pro`，已实测）。
+  Claude Code 会自动注入；其他 shell（如 DSH）需手动 export 或在命令前加载。
+  **只有翻译阶段允许调用它**；Review/润色等不新增 API 调用。

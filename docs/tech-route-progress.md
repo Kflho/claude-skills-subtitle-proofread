@@ -1,13 +1,13 @@
 # 2026 技术路线实施进度
 
 > **用途**：跨会话续跑。新会话先读本文件，再读 [`tech-route-2026.md`](tech-route-2026.md)、[`ADR-006`](adr/006-stable-asr-core.md)、[`ADR-007`](adr/007-cue-alignment.md)、[`ADR-008`](adr/008-qwen3-long-audio-chunking.md)、[`test-plan.md`](test-plan.md)。
-> **最后更新**：2026-10-18（第十轮：ASR-first 流程重设计 + 技术接入总图 + LLM-only 翻译；1377 tests / 79.6%）
+> **最后更新**：2026-10-18（第十轮：ASR-first 流程重设计 + 技术接入总图 + LLM-only 翻译；1380 tests / 79.7%）
 > **当前阶段**：EP01–03 视频/日文 CC 齐备；只读基准 + 防过拟合协议落地；**用户确认视频/CC 无真实偏移，并明确日语 CC 边界即测试标准**（不再另建人工金标）。第八轮把“P90 为什么下不去”拆开：test 集 90% 的 matched cue 起点系统性早 −0.37/−0.40 s（同段音频重转写复现，是当前对齐的起点缺陷，不是缓存/参考问题；EP001 仅 −55 ms），且 P90 只覆盖 42–45% 的 CC 字符；FA 塌缩吞掉成段对白（累计空洞 122–229 s）。`fix_by_asr` 整集偏移改为**默认关**，分段重对齐实测更差、留 P3。
 > **总目标**：把音频链路从 `WebRTC VAD → kotoba Whisper → 时间重叠匹配` 迁移到 `Qwen3-ASR → Qwen3-ForcedAligner → 全局文本对齐`；默认行为在 P2 验收前保持不变。
 
 ## 0. 当前一句话（clear 后从这里开始）
 
-已经完成：P1 稳定 ASR 核心、P2 对齐层、`run_all --asr` 接入、实机验证、held-out 三集基准；第八轮补齐 signed 偏差/覆盖分解/P90 归因/空洞诊断；**第九轮**按用户定位重排主次，并把测试标准收成一条 gate 命令（`release_gate.py` + `eval/gate.baseline.json`）。**用户已确认日语 CC 边界即测试标准**，所以 raw 数字就是验收结果：test P50 400 ms / P90 1196 ms（可靠 P90 510 ms），P2-14 未达标。**测试 1377 passed / 79.6% / 0 failed。**
+已经完成：P1 稳定 ASR 核心、P2 对齐层、`run_all --asr` 接入、实机验证、held-out 三集基准；第八轮补齐 signed 偏差/覆盖分解/P90 归因/空洞诊断；**第九轮**按用户定位重排主次，并把测试标准收成一条 gate 命令（`release_gate.py` + `eval/gate.baseline.json`）。**用户已确认日语 CC 边界即测试标准**，所以 raw 数字就是验收结果：test P50 400 ms / P90 1196 ms（可靠 P90 510 ms），P2-14 未达标。**测试 1380 passed / 79.7% / 0 failed。**
 
 **主次（用户定位：先应用新技术 + 建立测试标准，再慢慢改精度）：**
 
@@ -21,9 +21,14 @@
   `python scripts\eval\release_gate.py --manifests ... --baseline eval\gate.baseline.json`；
   按 CC 标准判 test 的 P50≤100 / 可靠 P90≤300，并与冻结基线比回归，退出码 0/1。
   剩余：把 auto/AI/human 三档计数接进 gate；基线只在确认新起点时冻结。
-- **主 3｜翻译换成 LLM-only**：✅ 百度路径已删除（代码/配置/测试/文档），
-  `whisper_fixer` 的替换翻译改走 `lib.llm.call_chat`；翻译阶段接 glossary + 场景，
-  无 key 时明确失败/保留原文，不回退机翻。
+- **主 3｜翻译换成 LLM-only**：✅ 百度路径已删除（代码/配置/测试/文档）；
+  ✅ 已找到并验证用户配置的 LLM（`~/.claude/settings.json`，DeepSeek，短句实测通过）；
+  ✅ `whisper_fixer` 的替换翻译改走 `lib.llm.call_chat`。下一步：把翻译接进 run_all
+  （glossary + 场景 + 长度；润色并入同一 prompt）。**翻译是唯一确定使用 LLM 的阶段**，Review 等
+  其它阶段不新增 API 调用；需要 token 时只接受国内服务，国外暂不配置。
+- **成本策略**：优先免费/本地。Qwen3 1.7B/0.6B + FA、whisper.cpp + kotoba/large-v3、Demucs
+  均已在本机；需要 token 时只接国内服务（DeepSeek 已配；国内云 ASR 可选不默认），
+  国外服务暂不配置。FireRedVAD/说话人等缺资产的项按 ADR-011 接缝留位，不阻塞主链路。
 - **次｜精度迭代**：起点 −0.4 s、FA 塌缩/空洞、覆盖率、chunk、Whisper 文本混合——
   等主 1/2 稳定后按证据逐个改，一次只动一个变量。
 
@@ -192,7 +197,7 @@ python scripts\eval\diagnose_timeline.py --asr-json temp\asr\digimon_ep002_main.
 
 **用户定位**：先应用新技术、建立测试标准，再慢慢改精度；不要陷进单点技术细节。
 **提交**：`d40ce74`（CC 即边界测试标准）+ 本轮 gate 提交（见 git log 顶部）。
-**测试**：1377 passed / 79.6% / 0 failed。
+**测试**：1380 passed / 79.7% / 0 failed。
 
 已完成：
 
@@ -227,17 +232,17 @@ python scripts\eval\diagnose_timeline.py --asr-json temp\asr\digimon_ep002_main.
 | Qwen3-ASR 1.7B（P0） | ✅ adapter/worker/router | ✅ `models/` | ✅ 3 集 + 端到端 | ✅ `--asr qwen3` opt-in |
 | Qwen3-FA 0.6B（P0） | ✅ | ✅ | ✅ | ✅ |
 | Qwen3-ASR 0.6B 草稿（P0） | 🟡 只能换 model，无模式/CLI | ✅ | 🟡 试跑 10 分钟未完成 EP001（1.7B 约 90s/集），无报告；疑似生成循环/超长，需先加 token/时间上限 | ⛔ 暂不可用 |
-| Whisper large-v3 兜底（P0） | ✅ adapter | ⚠️ 只有 HF 缓存；faster-whisper / CLI 都不可用 | ✅ 缓存 A/B | ⚠️ 运行时不可用 |
+| Whisper large-v3 兜底（P0） | ✅ adapter | ✅ whisper.cpp CLI + kotoba/large-v3（settings 已配置） | ✅ 缓存 A/B | ✅ 运行时可用（新管线未跑） |
 | FireRedVAD / AED（P1） | ⬜ | ⬜（无网、无模型） | ⬜ | ⛔ 离线阻塞 |
 | 置信度 v2：跨引擎/可读性（P1） | 🟡 对齐置信度有，跨引擎/LLM 无 | ⚠️ 需 Whisper 运行时 / LLM key | ⚠️ | ⬜ |
 | glossary-first → ASR context（P1） | 🟡 context 通到 worker；run_all 不传，`ASR_CONTEXT_FILE` 未使用 | ✅ glossary 可生成 | ❌ | ⬜ 零新资产，可立即接 |
-| LLM 主翻译 + glossary（P1） | ✅ 独立 `scripts/translate_srt.py`；百度路径已删除 | ❌ `LLM_API_KEY` 为空 | ❌ | ⚠️ 工具在，未进 run_all/未测；**翻译已定为 LLM-only**（ADR-010） |
+| LLM 主翻译 + glossary（P1） | ✅ 独立 `scripts/translate_srt.py`；百度路径已删除 | ✅ `~/.claude/settings.json` 已配 DeepSeek，短句实测通过 | ❌ | 🟡 工具在，未进 run_all；**翻译是唯一 LLM 例外**（ADR-011） |
 | 人声分离默认关（P2） | ✅ demucs，仅 Whisper 路径 | ✅ HTDemucs | ❌ ASR 路径 | 🟡 |
 | OP/ED AED + 指纹（P2） | ⬜ | 依赖 FireRedVAD | ⬜ | ⛔ |
 | 切片重对齐（P2） | ⬜（还是旧 spot fix） | ✅ FA | ❌ | ⬜ |
-| 说话人分离（P5） | ⬜ | ⬜ | ⬜ | ⛔ |
+| 说话人分离（P5） | ⬜ | ⬜（pyannote 需 HF token → 排除；3D-Speaker 免费待评估） | ⬜ | ⬜ |
 | VibeVoice（P5） | ⬜ | ⬜ 7B | ⬜ | ⛔ |
-| 云兜底（P5） | ⬜ | ❌ key/网络 | ⬜ | ⛔ |
+| 云兜底（P5） | ⬜ | ❌ 付费/token | ⬜ | ⛔ 免费原则排除 |
 
 **结论**：P0 的 ASR/FA 已接并跑过；P1 里只有 **glossary-first** 是零新资产、可立即接，
 **0.6B** 是资产在本机、可直接测。FireRedVAD / VibeVoice / 云兜底被离线挡住，
@@ -249,6 +254,16 @@ LLM 翻译被 key 挡住，Whisper 运行时被依赖挡住（只剩历史缓存
 1. 百度翻译静默砍掉，全部走 LLM；之后不再维护/测试传统机翻。
 2. 流程按选用的技术设计（取长补短），不硬塞进旧流程；旧流程只是工程实现，必要时重设计。
 3. review 不该有 272 条；旧流程里有很多替代人工的机制，先读懂再设计。
+4. **优先免费/本地；需要 token 只接受国内服务**，国外暂不配置。翻译阶段用已配置的
+   DeepSeek（国内）；Review 不新增 LLM API 调用；国内云 ASR 可选但不默认。
+
+**已核实的本机资产（2026-10-18）**：
+- LLM：`~/.claude/settings.json` 的 `env` 已配 `LLM_API_KEY` + `LLM_BASE_URL`（DeepSeek）
+  + `LLM_MODEL=deepseek-v4-pro`；短句翻译实测返回“早上好，你还好吗？”。Claude Code 自动注入，
+  DSH shell 需手动加载。
+- Whisper：`whisper-cli.exe` + kotoba q5 / large-v3 q5 在
+  `D:/software/video/whisper-cublas-12.4.0-bin-x64/`；之前“运行时缺失”的判断作废，fallback/A-B 可用。
+- Qwen3-1.7B/0.6B + FA、HTDemucs 在 `models/` / HF cache。
 
 **已落库**：
 - `docs/adr/010-asr-first-pipeline.md`：ASR-first 数据流、三种模式、Review 阶梯、
@@ -272,13 +287,13 @@ LLM 翻译被 key 挡住，Whisper 运行时被依赖挡住（只剩历史缓存
 L3 人工 ≤5%（现状 272 条全堆在报告）。
 
 **下一步（实现顺序）**：
-1. `fix_by_asr` 为每条非自动修复生成 `asr_review_<EP>.json`（证据 + 空 decision）。
-2. `apply_fixes` 加 `set_time`（SRT），让 AI 裁决能同时改时间/文本；run_all 汇总工作单。
+1. ✅ `fix_by_asr` 为每条非自动修复生成 `<EP>.asr_review.json`（证据 + 空 decision）。
+2. ✅ `apply_fixes` 加 `set_time`（SRT）；run_all 的 AI review 步会列出 ASR 工作单。
 3. 自动分级：高置信 `replace_text`（`--asr-fix-text` 时）直接 L0；其余进 L1。
 4. ASR-first 编排收口：`--asr qwen3` 跳过 VAD 门控/Whisper 修复区，Phase 3 接 LLM 翻译。
 5. 评测加 auto/AI/human 三档计数，进 gate，防止“把 review 挪个文件”冒充优化。
 
-**测试**：1377 passed / 79.6%（删除百度 15 条测试；其余不变）。
+**测试**：1380 passed / 79.7%（工作单 + set_time 新增 3 条；上一轮删百度 −15）。
 
 **0.6B 试跑（同轮，未完成）**：三集主故事窗口用 `Qwen3-ASR-0.6B + FA` 重转，
 10 分钟没跑完 EP001（1.7B 约 90s/集），GPU 37% / 4.9GB，无报告产出，手动终止。
@@ -291,7 +306,7 @@ L3 人工 ≤5%（现状 272 条全堆在报告）。
 | P0 | 边界测试标准 + 基线指标 | ✅ 用户确认日语 CC 边界即测试标准；三集基准 + 测量有效性（signed/覆盖/空洞）已落地 | `episode_benchmark` 新报告字段；CER/边界/偏差可复现 |
 | P1 | 稳定核心 + Qwen3/Whisper 适配 + 评测/CLI | ✅ 3 集跑通；Qwen3 vs Whisper large-v3 A/B 已记录；默认不变 | 契约/registry/router/CLI 稳定；A/B 有 raw + matched-span 数据 |
 | P2 | Qwen3-FA + cue mapper + align_repair | 🟡 核心/CLI/`run_all --asr` 完成；**P2-14 按 CC 标准未达标** | raw test P50 400 ms / 可靠 P90 510 ms；signed P50 −384 ms（起点缺陷） |
-| 测试 | 1377 tests / 79.6% 覆盖 / 0 failed | 🟡 主链补齐；剩余根脚本/nouns 旧入口/whisper_backends/align_cues | 关键路径每个分支至少一条测试 |
+| 测试 | 1380 tests / 79.7% 覆盖 / 0 failed | 🟡 主链补齐；剩余根脚本/nouns 旧入口/whisper_backends/align_cues | 关键路径每个分支至少一条测试 |
 | P3 | FireRedVAD/AED，VAD 降级为提示 | ⬜ 未开始 | speech/music/singing 时间线对比 |
 | P4 | glossary-first + 翻译 prompt，百度下线 | ⬜ 未开始 | 专名 F1 / 翻译人工评分 |
 | P5 | VibeVoice / 云兜底 | ⬜ 未开始 | 单集实验 + 成本/隐私评估 |

@@ -76,6 +76,7 @@ from lib.ass_utils import (
 
 from lib.subtitle_io import (
     read_subtitles, write_subtitles, apply_fixes_to_cues,
+    format_tc, time_to_ms,
     _find_cue as _find_cue_by_timecode,
 )
 
@@ -125,6 +126,42 @@ def apply_delete_line(cues, fix):
     old_text = cue['text'][:40]
     cues.remove(cue)
     return True, f"删除 SRT cue: {old_text}"
+
+
+def _as_seconds(value):
+    """Accept seconds (int/float) or an SRT timecode string."""
+    if value is None or value == '':
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return time_to_ms(str(value)) / 1000.0
+    except (TypeError, ValueError):
+        return None
+
+
+def apply_set_time(cues, fix):
+    """Move one cue's start/end (AI review decision, SRT only)."""
+    cue = _find_srt_cue(cues, fix)
+    if cue is None:
+        return False, f"未找到 cue: start={fix.get('start', '?')}"
+    start = _as_seconds(fix.get('new_start', fix.get('start_new')))
+    end = _as_seconds(fix.get('new_end', fix.get('end_new')))
+    if start is None and end is None:
+        return False, 'set_time: 缺少 new_start/new_end'
+
+    old_start = float(cue.get('start_s', 0.0) or 0.0)
+    old_end = float(cue.get('end_s', old_start) or old_start)
+    new_start = old_start if start is None else start
+    new_end = old_end if end is None else end
+    if new_end < new_start:
+        return False, 'set_time: new_end < new_start'
+    cue['start_s'] = new_start
+    cue['end_s'] = new_end
+    cue['start'] = format_tc(new_start)
+    cue['end'] = format_tc(new_end)
+    return True, (f"{format_tc(old_start)} --> {format_tc(old_end)} ⇒ "
+                  f"{format_tc(new_start)} --> {format_tc(new_end)}")
 
 
 def apply_merge_cues(cues, fix):
@@ -414,6 +451,8 @@ def main():
                         ok, msg = apply_delete_line(cues, fix)
                     elif action == 'merge_cues':
                         ok, msg = apply_merge_cues(cues, fix)
+                    elif action == 'set_time':
+                        ok, msg = apply_set_time(cues, fix)
                     elif action == 'replace_name':
                         ok, msg = False, "SRT 文件不支持 Name 字段替换"
                     else:
@@ -445,6 +484,13 @@ def main():
                                         'ep': ep_tag, 'time': pre_time,
                                         'original': pre_text,
                                         'corrected': f'合并 {fix.get("count", 2)} 个 cues',
+                                        'status': '✅',
+                                    })
+                                elif action == 'set_time':
+                                    report_entries.append({
+                                        'ep': ep_tag, 'time': pre_time,
+                                        'original': pre_text,
+                                        'corrected': msg.split('⇒')[-1].strip()[:120],
                                         'status': '✅',
                                     })
                     else:

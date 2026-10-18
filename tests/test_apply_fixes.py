@@ -12,6 +12,7 @@ from apply.apply_fixes import (
     _norm_timecode, _resolve_ass_fix_lines, apply_delete_comment,
     apply_delete_line, apply_delete_style, apply_merge_cues,
     apply_replace_global, apply_replace_global_regex, apply_replace_text,
+    apply_set_time,
 )
 
 
@@ -45,6 +46,31 @@ def test_delete_line_removes_cue():
 
     ok, msg = apply_delete_line(cues, {'start': '00:00:01,000'})
     assert ok and 'already deleted' in msg
+
+
+def test_set_time_moves_one_cue():
+    cues = [cue('00:00:01,000', '00:00:02,000', 'a')]
+    ok, msg = apply_set_time(cues, {
+        'start': '00:00:01,000',
+        'new_start': '00:00:01,500',
+        'new_end': '00:00:02,500',
+    })
+    assert ok
+    assert cues[0]['start'] == '00:00:01,500'
+    assert cues[0]['end'] == '00:00:02,500'
+    assert cues[0]['start_s'] == pytest.approx(1.5)
+    assert cues[0]['end_s'] == pytest.approx(2.5)
+
+
+def test_set_time_accepts_seconds_and_rejects_bad_range():
+    cues = [cue('00:00:01,000', '00:00:02,000', 'a')]
+    ok, _ = apply_set_time(cues, {'start': '00:00:01,000',
+                                  'new_start': 1.25, 'new_end': 1.75})
+    assert ok and cues[0]['start_s'] == pytest.approx(1.25)
+
+    ok, msg = apply_set_time(cues, {'start': '00:00:01,250',
+                                    'new_start': 3.0, 'new_end': 2.0})
+    assert not ok and 'new_end' in msg
 
 
 def test_merge_cues_joins_text_and_end():
