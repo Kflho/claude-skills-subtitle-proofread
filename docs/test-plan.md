@@ -180,7 +180,7 @@ python -m pytest -q tests/test_alignment_base.py tests/test_alignment_timeline.p
 | 上轮 | 74.0% | run_all 步骤、scanner、apply、worker、ass/reuse CLI |
 | 再上轮 | 79.0% | whisper_utils、episode_workflow、reuse、asr_eval、CC 清洁 |
 | **现在** | **79.7%** | 时间轴质量、三集基准、display linger、diagnose/benchmark |
-| 下一轮 | ≥82% | 根脚本 65.7%、nouns 67.2%、whisper_backends 59%、align_cues 78% |
+| 下一轮 | ≥82% | 根脚本 65.8%、nouns 67.2%、whisper_backends 59%、align_cues 78% |
 
 > 覆盖率不是目的：**关键路径（扫描→修复→专名→翻译→应用→交付）每个分支至少有一条测试**，比总百分比更重要。
 > 0 覆盖的旧脚本（`auto_classify` / `auto_clean_glossary` / Whisper 批处理与补丁）不在主链，先确认是否保留再决定补测或删除。
