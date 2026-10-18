@@ -7,13 +7,12 @@
 
 ```text
 python -m pytest -q
-1380 passed in ~9s           # 无网络、无模型、无真实项目依赖
-coverage: 79.7% (14,569 statements)
+1386 passed in ~9s           # 无网络、无模型、无真实项目依赖
+coverage: 79.7% (14,673 statements)
 ```
 
-本轮 **+3 tests**（1377 → 1380）：ASR review 工作单、`apply_fixes.set_time`、
-AI review 步列出工作单。上一轮删百度 −15（`test_baidu_translate.py` 与
-`fix/translate_srt.py`）；`whisper_fixer` 的替换翻译测试改走 LLM mock。
+本轮 **+9 tests**（1377 → 1386）：+3 ASR review 工作单/`set_time`/AI review 列表，
++6 AudioHints 契约 + FireRedVAD provider（worker 用 fake runner，不加载模型）。
 覆盖率 79.6% → 79.7%，0 failed。
 
 新增/扩展测试文件：
@@ -29,12 +28,13 @@ AI review 步列出工作单。上一轮删百度 −15（`test_baidu_translate.
 | `test_whisper_fixer.py`（改造） | 替换翻译改走 LLM：有 key 翻译、无 key 保留原文、失败批次保留原文；删除百度 mock |
 | `test_config.py`（改造） | 断言 `BAIDU_*` 配置已不存在（ADR-010） |
 | `test_apply_fixes.py` / `test_fix_by_asr.py` / `test_run_all_step_functions.py`（扩展） | ASR review 工作单（`<EP>.asr_review.json`）、`set_time` 改动时间码/秒值/非法区间、AI review 步列出工作单 |
+| `test_audio_hints.py`（新） | `AudioEvent`/`AudioHints` 契约往返、summary 比例；FireRedVAD provider 解析 worker JSON、失败/错误 JSON/缺失模型 |
 
 ### 覆盖率按目录（本轮 vs 上轮）
 
 | 目录 | 语句 | 覆盖 | 上轮 | 说明 |
 |---|---:|---:|---:|---|
-| `scripts/lib`（含子目录） | 3,566 | **85.8%** | 85.8% | 删百度配置；新增 `lost_spans`、视频名解析；对齐/ASR 契约稳 |
+| `scripts/lib`（含子目录） | 3,670 | **86.0%** | 85.8% | 新增 AudioHints 契约/provider；对齐/ASR 契约稳 |
 | `scripts/fix` | 3,080 | **77.3%** | 78.0% | 删除百度翻译模块；SubtitleSession 视频解析 + 早退提示；whisper_pipeline 81% |
 | `scripts/nouns` | 2,424 | **67.2%** | 67.2% | `auto_classify` / `auto_clean_glossary` 仍 0%（旧入口） |
 | `scripts` 根 | 2,013 | **65.8%** | 65.7% | run_all 96%、translate_srt 85%、polish_zh 99% |
@@ -45,7 +45,7 @@ AI review 步列出工作单。上一轮删百度 −15（`test_baidu_translate.
 | `scripts/eval` | 1,074 | **90.0%** | 90.3% | 新增 release gate；benchmark 新指标 |
 | `scripts/ass` | 313 | **86.3%** | 86.3% | CLI main 已测 |
 | `scripts/utils` | 285 | **80.4%** | 80.4% | — |
-| **合计** | **14,569** | **79.7%** | 79.6% | — |
+| **合计** | **14,673** | **79.7%** | 79.7% | — |
 
 ### 做得好的部分
 

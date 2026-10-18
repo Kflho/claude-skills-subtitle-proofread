@@ -1,13 +1,13 @@
 # 2026 技术路线实施进度
 
 > **用途**：跨会话续跑。新会话先读本文件，再读 [`tech-route-2026.md`](tech-route-2026.md)、[`ADR-006`](adr/006-stable-asr-core.md)、[`ADR-007`](adr/007-cue-alignment.md)、[`ADR-008`](adr/008-qwen3-long-audio-chunking.md)、[`test-plan.md`](test-plan.md)。
-> **最后更新**：2026-10-18（第十轮：ASR-first 重设计 + 技术接入总图 + 模型审计；1380 tests / 79.7%）
+> **最后更新**：2026-10-18（第十轮：ASR-first 重设计 + 技术接入总图 + 模型审计；1386 tests / 79.7%）
 > **当前阶段**：EP01–03 视频/日文 CC 齐备；只读基准 + 防过拟合协议落地；**用户确认视频/CC 无真实偏移，并明确日语 CC 边界即测试标准**（不再另建人工金标）。第八轮把“P90 为什么下不去”拆开：test 集 90% 的 matched cue 起点系统性早 −0.37/−0.40 s（同段音频重转写复现，是当前对齐的起点缺陷，不是缓存/参考问题；EP001 仅 −55 ms），且 P90 只覆盖 42–45% 的 CC 字符；FA 塌缩吞掉成段对白（累计空洞 122–229 s）。`fix_by_asr` 整集偏移改为**默认关**，分段重对齐实测更差、留 P3。
 > **总目标**：把音频链路从 `WebRTC VAD → kotoba Whisper → 时间重叠匹配` 迁移到 `Qwen3-ASR → Qwen3-ForcedAligner → 全局文本对齐`；默认行为在 P2 验收前保持不变。
 
 ## 0. 当前一句话（clear 后从这里开始）
 
-已经完成：P1 稳定 ASR 核心、P2 对齐层、`run_all --asr` 接入、实机验证、held-out 三集基准；第八轮补齐 signed 偏差/覆盖分解/P90 归因/空洞诊断；**第九轮**按用户定位重排主次，并把测试标准收成一条 gate 命令（`release_gate.py` + `eval/gate.baseline.json`）。**用户已确认日语 CC 边界即测试标准**，所以 raw 数字就是验收结果：test P50 400 ms / P90 1196 ms（可靠 P90 510 ms），P2-14 未达标。**测试 1380 passed / 79.7% / 0 failed。**
+已经完成：P1 稳定 ASR 核心、P2 对齐层、`run_all --asr` 接入、实机验证、held-out 三集基准；第八轮补齐 signed 偏差/覆盖分解/P90 归因/空洞诊断；**第九轮**按用户定位重排主次，并把测试标准收成一条 gate 命令（`release_gate.py` + `eval/gate.baseline.json`）。**用户已确认日语 CC 边界即测试标准**，所以 raw 数字就是验收结果：test P50 400 ms / P90 1196 ms（可靠 P90 510 ms），P2-14 未达标。**测试 1386 passed / 79.7% / 0 failed。**
 
 **主次（用户定位：先应用新技术 + 建立测试标准，再慢慢改精度）：**
 
@@ -197,7 +197,7 @@ python scripts\eval\diagnose_timeline.py --asr-json temp\asr\digimon_ep002_main.
 
 **用户定位**：先应用新技术、建立测试标准，再慢慢改精度；不要陷进单点技术细节。
 **提交**：`d40ce74`（CC 即边界测试标准）+ 本轮 gate 提交（见 git log 顶部）。
-**测试**：1380 passed / 79.7% / 0 failed。
+**测试**：1386 passed / 79.7% / 0 failed。
 
 已完成：
 
@@ -233,7 +233,7 @@ python scripts\eval\diagnose_timeline.py --asr-json temp\asr\digimon_ep002_main.
 | Qwen3-FA 0.6B（P0） | ✅ | ✅ | ✅ | ✅ |
 | Qwen3-ASR 0.6B 草稿（P0） | 🟡 只能换 model，无模式/CLI | ✅ | 🟡 试跑 10 分钟未完成 EP001；无日语独立基准 | ⛔ 审计：非领先，暂不接 |
 | Whisper large-v3 兜底（P0） | ✅ adapter | ✅ whisper.cpp CUDA + kotoba/large-v3 | ✅ 历史 A/B | ⛔ 按用户规则：不下载、不再测试 |
-| FireRedVAD / AED（P1） | ⬜ | ⬜ 权重 0.01GB（ModelScope/HF），代码 GitHub | ⬜ 待下载 | ✅ 审计 P0 下载 |
+| FireRedVAD / AED（P1） | ✅ provider/CLI 已接线 | ✅ 权重 0.01GB + 代码 | ✅ EP001 442 事件 | ✅ 主流程未消费 |
 | 置信度 v2：跨引擎/可读性（P1） | 🟡 对齐置信度有，跨引擎/LLM 无 | ⚠️ 跨引擎需第二本地引擎；LLM 可读性不新增调用 | ⚠️ | ⬜ |
 | glossary-first → ASR context（P1） | 🟡 context 通到 worker；run_all 不传，`ASR_CONTEXT_FILE` 未使用 | ✅ glossary 可生成 | ❌ | ⬜ 零新资产，可立即接 |
 | LLM 主翻译 + glossary（P1） | ✅ 独立 `scripts/translate_srt.py`；百度路径已删除 | ✅ `~/.claude/settings.json` 已配 DeepSeek，短句实测通过 | ❌ | 🟡 工具在，未进 run_all；**翻译是唯一 LLM 例外**（ADR-011） |
@@ -293,7 +293,7 @@ L3 人工 ≤5%（现状 272 条全堆在报告）。
 4. ASR-first 编排收口：`--asr qwen3` 跳过 VAD 门控/Whisper 修复区，Phase 3 接 LLM 翻译。
 5. 评测加 auto/AI/human 三档计数，进 gate，防止“把 review 挪个文件”冒充优化。
 
-**测试**：1380 passed / 79.7%（工作单 + set_time 新增 3 条；上一轮删百度 −15）。
+**测试**：1386 passed / 79.7%（AudioHints +6；上一轮删百度 −15）。
 
 **0.6B 试跑（同轮，未完成）**：三集主故事窗口用 `Qwen3-ASR-0.6B + FA` 重转，
 10 分钟没跑完 EP001（1.7B 约 90s/集），GPU 37% / 4.9GB，无报告产出，手动终止。
@@ -307,8 +307,8 @@ L3 人工 ≤5%（现状 272 条全堆在报告）。
 |---|---|---|
 | ✅ 保留 | Qwen3-ASR-1.7B + Qwen3-FA | 2026-01；日语媒体 WER 0.185 第一；FA 日语 AAS 42.2ms |
 | ✅ P0 下载 | FireRedVAD + AED | 2026-03；FLEURS-VAD-102 F1 97.57，超 Silero 95.95/TEN 95.19；0.01GB |
-| 🟡 P1 实验 | VibeVoice-ASR | 2026-01；60min Who/When/What、热词、MIT；13–17GB，动画域未验 |
-| 🟡 P2 可选 | Mel-Band RoFormer | 2023；比 Demucs 新；先 A/B，不默认 |
+| ✅ P1 下载 | VibeVoice-ASR-BitNet | 2026-01；BitNet GGUF **1.58GB**（CPU）；`asr_infer.exe` 已构建；单集未测 |
+| ✅ P2 下载 | Mel-Band RoFormer | fp16 456MB + fp32 913MB；比 Demucs 新；运行时未接 |
 | ⛔ 淘汰 | Parakeet JA / ReazonSpeech v2 | 2024 年模型，日语 WER 0.344/0.348，非领先 |
 | ⛔ 淘汰 | Whisper 全系 / WhisperX | 用户规则：只保留本机 CUDA，不下载/不再测试 |
 | ⛔ 淘汰 | BuzzASR | 2026-09 但基于 Whisper large-v3，违反约束 |
@@ -316,14 +316,21 @@ L3 人工 ≤5%（现状 272 条全堆在报告）。
 | ⛔ 降级 | Demucs | 2021/22 老模型，只作 fallback |
 | ⛔ 暂不接 | Qwen3-ASR-0.6B | 无日语领先证据；试跑 10min 未完成 EP001 |
 
-**该下的**：P0 只有 FireRedVAD（权重 0.01GB + 代码 + `.venv-audio`）；
-P1 VibeVoice-BitNet 仅在同意做单集“角色归属是否改善翻译”实验时下；
-P2 分离暂缓。Whisper 系一个都不下。
+**下载/接线状态（2026-10-19）**：
+- FireRedVAD/AED：权重 0.01GB 已下；`.venv-qwen` + `fireredvad` 0.0.2 已验证；
+  `lib/audio/base.py` + `lib/audio/fireredvad.py` + `scripts/audio/detect_events.py` 已接线；
+  EP001 已生成 `temp/scans/EP001.audio_hints.json`（442 事件；speech 48.8% / singing 8.9% / music 78.1%）。
+  主流程尚未消费 hints（下一步 OP/ED/空洞）。
+- VibeVoice-ASR-BitNet：只有 GGUF（1.58GB，不碰 13GB safetensors）；VibeASR.cpp 已 clone + MinGW 构建出
+  `models/VibeASR.cpp/build/bin/asr_infer.exe`；单集测试未跑。
+- Mel-Band RoFormer：fp16/fp32 权重已下；ComfyUI 格式，运行时/适配器未接。
+- Whisper 系：一个都没下，按用户规则只保留本机 CUDA。
 
 **证据**：Neosophie 2026-05 日语 9 模型实测、Qwen3/FireRedVAD 模型卡与 HF 发布时间、
-FireRedASR2S 论文。详细报告：`docs/model-audit-2026-10.md`。
+FireRedASR2S 论文。详细报告：`docs/model-audit-2026-10.md`；调用手册：`docs/model-assets.md`。
 
-**下一步**：等用户确认 P0；下载后先在本机 EP001 复测 VAD/AED，再更新 ADR-011 台账。
+**下一步**：1) 主流程消费 `AudioHints`（OP/ED 候选、FA 空洞诊断）；
+2) VibeVoice 单集“角色归属是否改善翻译”实验；3) Review 自动分级 + gate 计数。
 
 ## 1. 状态总览
 
@@ -332,7 +339,7 @@ FireRedASR2S 论文。详细报告：`docs/model-audit-2026-10.md`。
 | P0 | 边界测试标准 + 基线指标 | ✅ 用户确认日语 CC 边界即测试标准；三集基准 + 测量有效性（signed/覆盖/空洞）已落地 | `episode_benchmark` 新报告字段；CER/边界/偏差可复现 |
 | P1 | 稳定核心 + Qwen3/Whisper 适配 + 评测/CLI | ✅ 3 集跑通；Qwen3 vs Whisper large-v3 A/B 已记录；默认不变 | 契约/registry/router/CLI 稳定；A/B 有 raw + matched-span 数据 |
 | P2 | Qwen3-FA + cue mapper + align_repair | 🟡 核心/CLI/`run_all --asr` 完成；**P2-14 按 CC 标准未达标** | raw test P50 400 ms / 可靠 P90 510 ms；signed P50 −384 ms（起点缺陷） |
-| 测试 | 1380 tests / 79.7% 覆盖 / 0 failed | 🟡 主链补齐；剩余根脚本/nouns 旧入口/whisper_backends/align_cues | 关键路径每个分支至少一条测试 |
+| 测试 | 1386 tests / 79.7% 覆盖 / 0 failed | 🟡 主链补齐；剩余根脚本/nouns 旧入口/whisper_backends/align_cues | 关键路径每个分支至少一条测试 |
 | P3 | FireRedVAD/AED，VAD 降级为提示 | ⬜ 未开始 | speech/music/singing 时间线对比 |
 | P4 | glossary-first + 翻译 prompt，百度下线 | ⬜ 未开始 | 专名 F1 / 翻译人工评分 |
 | P5 | VibeVoice / 云兜底 | ⬜ 未开始 | 单集实验 + 成本/隐私评估 |

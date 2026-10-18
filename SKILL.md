@@ -101,6 +101,26 @@ python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json \
 
 已验证过的项目跳过，直接从 CLAUDE.md export 环境变量即可。
 
+### 2026 模型资产（已下载，别重下）
+
+**新会话先读 [docs/model-assets.md](docs/model-assets.md)**：模型在 `models/`（gitignored），
+包含路径、调用命令、已验证结果和集成位。速查：
+
+| 模型 | 路径 | 调用 |
+|---|---|---|
+| FireRedVAD/AED | `models/FireRedVAD/{VAD,Stream-VAD,AED}` | `.venv-qwen` + `fireredvad`；`scripts/audio/detect_events.py` |
+| VibeVoice-ASR-BitNet | `models/VibeVoice-ASR-BitNet/*.gguf` | VibeASR.cpp（CPU，MinGW 已编译）；GGUF 1.58GB |
+| Mel-Band RoFormer | `models/MelBandRoformer/*.safetensors` | 仅权重；运行时未接线 |
+| Qwen3-ASR/FA | `models/Qwen3-ASR-*`, `models/Qwen3-ForcedAligner-0.6B` | `.venv-qwen` worker |
+
+```powershell
+# FireRedVAD/AED → AudioHints JSON（16k mono wav）
+python scripts/audio/detect_events.py --wav temp/firered_ep001.wav `
+  --out temp/scans/EP001.audio_hints.json --mode aed
+```
+
+> Whisper 系按用户规则**不下载、不再测试**；本机只保留 whisper.cpp CUDA（路径由 `WHISPER_CLI` 指定）。
+
 ### 跑 pipeline
 
 **⚠️ 破坏性改动前必须 git 备份。** Pipeline 的 Phase 2/3 会直接修改 SRT 文件（原地覆写），

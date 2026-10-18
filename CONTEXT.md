@@ -136,7 +136,7 @@ scripts/
 ## 测试
 
 ```bash
-cd <skill>/tests && pytest -q    # 1380 tests, ~9s, 无外部依赖
+cd <skill>/tests && pytest -q    # 1386 tests, ~9s, 无外部依赖
 cd <skill> && pytest -q tests --cov --cov-report=term-missing   # 覆盖率 79.7%，矩阵见 docs/test-plan.md
 ```
 
@@ -161,15 +161,27 @@ Parakeet JA、ReazonSpeech v2、BuzzASR、WhisperX、pyannote、Sortformer v1 �
 Demucs 降级 fallback；Whisper 全系只保留本机 CUDA，不下载/不再测试；
 Qwen3-0.6B 无日语领先证据，暂不接。
 
+**模型资产/调用手册**：`docs/model-assets.md`（新会话先读，别重下）。
+模型都在 `models/`（gitignored）：FireRedVAD 已下载并实测（EP001 speech 666.7s /
+music 893.8s / singing 101.8s）；VibeVoice-ASR-BitNet GGUF 1.58GB 已下，VibeASR.cpp
+已编译（单集未测）；Mel-Band RoFormer fp16/fp32 权重已下（运行时未接线）。
+`.venv-qwen` 含 torch 2.6、modelscope、fireredvad。
+
 核心变化：`Qwen3-ASR-1.7B + Qwen3-ForcedAligner-0.6B` 替代 `Whisper kotoba + 时间重叠匹配`；`FireRedVAD` 只作提示/AED；Whisper 只保留本机 CUDA（不下载/不再测试）。**流程按 ASR-first 重设计**（ADR-010）：3-Phase 只保留编排骨架，内部不再用 VAD 门控修复区、不再用时间重叠贴 cue；review 走 L0 自动 → L1 AI 批审 → L2 AI 复核 → L3 人工残留；翻译用已配置的国内 LLM（DeepSeek，唯一 LLM 阶段；百度已移除）。迁移期默认链路仍是旧 Whisper，回滚开关 `ASR_ENGINE=whisper`。
 
 ASR 架构已按「稳定核心 + 插件适配器」落地：`lib/asr/base.py`（契约）、`registry.py`（自动发现）、`router.py`（路由），新模型只写 `lib/asr/adapters/<name>.py`，不改 core。P1 进度见 `docs/tech-route-progress.md`。
+
+音频事件接缝已落地第一段：`lib/audio/base.py`（`AudioEvent`/`AudioHints` JSON 契约）、
+`lib/audio/fireredvad.py`（主环境 subprocess 调 `.venv-qwen` worker，不 import torch）、
+`scripts/audio/detect_events.py`（16k mono wav → `<EP>.audio_hints.json`）。
+FireRedVAD/AED 已下载并实测，EP001 生成 442 个事件（speech 48.8% / singing 8.9% / music 78.1%）；
+**主流程尚未消费 hints**，下一步接 OP/ED 候选与 FA 空洞诊断（只作提示，不参与门控）。
 
 P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 → 信号/置信度；`quality.py` 评估零时长/overlong/空洞 `lost_spans`，token 灾难性塌缩才回退 segment）、`fix/align_repair.py`（修复计划/时间码/整集偏移/相邻 cue 联动；结尾 display linger 保留）、`scripts/asr/align_cues.py`（端到端 CLI，默认 dry-run；整集偏移改为 opt-in）、`run_all --asr`（flag 控制；`--asr-global-offset` 单独 opt-in）。**用户确认日语 CC 边界即测试标准**（不再另建人工金标），raw 数字直接判定，评测入口是 scripts/eval/release_gate.py（目标 + 基线回归，退出码 0/1）；三集基准：`temp/reports/digimon_qwen3_raw.{json,md}`、`digimon_whisper_raw.{json,md}`（第八轮新增 signed 偏差/覆盖分解/空洞：`temp/reports/digimon_qwen3_r8.*`、`digimon_whisper_r8.*`）。**第八轮结论**：test 集 90% matched cue 起点系统性早 0.37–0.40 s（重转写复现，是当前对齐的起点缺陷；EP001 仅 −55 ms），P90 只覆盖 42–45% 的 CC 字符，FA 塌缩吞掉成段对白（累计空洞 122–229 s）；分段重对齐/overlong/cue 级 rate trim 均实测无收益，起点偏差与空洞要 P3 VAD 才能修。
 
 素材现状：**验收作品定为数码宝贝（Digimon Adventure）**，目录 `D:\videos\Animation\TV\数码宝贝`。**EP01/02/03 视频完整（各约 1386s）**；用户人工复核三集视频/CC 均无真实偏移。日文参考：`日语字幕\` 下 S01E01–S01E54 共 54 集 `ja[cc].srt`，已清洁；主故事窗口 `[95,1240]`。01–05 另有中文字幕，只能做参考无关/翻译复用。素材台账 `eval/materials.md`，清单 `eval/manifest.digimon.json`（Qwen3）与 `eval/manifest.digimon.whisper.json`（A/B）。莎莉/阿童木历史素材只保留机制/吞吐回放。
 
-测试：1380 passed / 0 failed / 79.7% 覆盖；矩阵与剩余缺口见 `docs/test-plan.md`。
+测试：1386 passed / 0 failed / 79.7% 覆盖；矩阵与剩余缺口见 `docs/test-plan.md`。
 
 ## 配置
 
