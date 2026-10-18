@@ -5,6 +5,28 @@
 >
 > **记录规则**：只记架构/流程/接口级变更（新增/删除/重命名脚本、工作流顺序调整、报告格式变更）。不记修 bug、调参数、加 flag 等正常开发活动。
 
+## 2026-10-18 — 测试收尾 2（whisper_utils / episode_workflow / reuse / eval）
+
+### 架构变更
+- 无核心架构变更；发现并标记（未删除）两处死代码：`episode_workflow._write_ai_review_json`
+  无调用方、`--mode` 是已废除的残留 flag。
+
+### 行为修正（接口级）
+- `lib/whisper_utils.separate_vocals`：`out_dir = output_dir or dirname(audio) or '.'`；
+  原先裸相对文件名会触发 `os.makedirs('')`，在调用 demucs 前崩溃。
+- `fix/episode_workflow.step_translate`：成功日志用 `target_lang`，不再硬编码 `→ ja`。
+- `fix/episode_workflow.step_diff`：删除计算后未使用的 `fixed_starts`。
+
+### 测试
+- 1162 → **1295 passed**；覆盖 **74.0% → 78.9%**；新增 133 例。
+- `whisper_utils` 45→100%、`episode_workflow` 36→100%、`reuse/common` 49→100%、
+  `reuse/apply` 65→98%、`asr_eval` 47→99%。
+- 矩阵与剩余缺口见 `docs/test-plan.md` §0/§3。
+
+### 避坑
+- “默认同输入目录”的函数要写 `dirname(...) or '.'`；Windows/POSIX 下裸文件名都会得到空串。
+- `episode_workflow` 的 `--mode` 只被 argparse 接受、不参与选步；不要误以为它能强制 audio/text 模式。
+
 ## 2026-10-18 — 测试收尾（run_all / scanner / apply / worker）+ 5 个健壮性修复
 
 ### 架构变更

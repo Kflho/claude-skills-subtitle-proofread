@@ -1,54 +1,52 @@
 # 测试与覆盖率计划
 
-> 最后更新：2026-10-18（第四轮：run_all 步骤 / scanner / apply / worker 收尾）
+> 最后更新：2026-10-18（第五轮：whisper_utils / episode_workflow / reuse / eval 收尾）
 > 目标不变：**能力靠测试证明，不靠真实项目碰运气。** 真实项目只负责发现问题；每个问题在修之前先落一个最小 fixture test。
 
 ## 0. 现状
 
 ```text
 python -m pytest -q
-1162 passed in ~7.2s         # 无网络、无模型、无真实项目依赖
-coverage: 74.0% (13,627 statements)
+1295 passed in ~10s          # 无网络、无模型、无真实项目依赖
+coverage: 78.9% (13,626 statements)
 ```
 
-本轮 **+195 tests**（967 → 1162），覆盖率 **64.0% → 74.0%**，0 failed。
+本轮 **+133 tests**（1162 → 1295），覆盖率 **74.0% → 78.9%**，0 failed。
 
 新增/扩展测试文件：
 
 | 文件 | 覆盖对象 |
 |---|---|
-| `test_run_all_step_functions.py`（新） | `step_scan/step_nouns/step_apply_all/step_deliver/step_clean`、suspect 报告、glossary 追加、AI 复核应用、degraded report、`main` 资源/flag 分支 |
-| `test_unified_scanner.py`（扩展） | `scan_all` 聚合、VAD 时间线缓存/跳过/失败、`find_video`、`extract_speech_timeline`、findings/issues 写出、CLI `main`、jieba/janome 与 n-gram 回退 |
-| `test_apply_fixes.py`（扩展） | `main` 全分支（SRT/ASS/全局替换/报告/dry-run）、ASS Name、繁→简（SRT+ASS）、degloss |
-| `test_qwen3_worker.py` / `test_qwen3_cli.py`（扩展） | chunk/offset 合并、零时长补齐、segments 文本、align、worker 协议、CLI 选项与返回码 |
-| `test_ass_repair.py`（扩展） | CLI `main`：all/check/skip、oped config、非法参数、stdout JSON |
-| `test_reuse.py`（扩展） | `reuse/align.py` CLI：matches 写出、report、集号/variants 报错 |
+| `test_whisper_utils.py`（扩展） | ASS/SRT 写回、`vad_filter_audio` 的成对/不成对静音、抽音频、音轨探测、人声分离、文本判定与集号策略（45% → 100%） |
+| `test_episode_workflow.py`（扩展） | `step_translate/compare/audio/apply/diff`、`_write_ai_review_json`、`_run_pipeline` 资源组合、`main` 各分支（36% → 100%） |
+| `test_asr_eval.py`（扩展） | `_resolve_audio`、`evaluate_episode`、`_summary`、`_markdown`、`main`/limit/list-engines（47% → 99%） |
+| `test_reuse_common.py` / `test_reuse.py`（扩展） | variants/参考加载/目标对齐、`extend` 续行合并、R6 冲突、apply CLI（common 49→100%、apply 65→98%） |
 
 ### 覆盖率按目录（本轮 vs 上轮）
 
 | 目录 | 语句 | 覆盖 | 上轮 | 说明 |
 |---|---:|---:|---:|---|
-| `scripts/lib` | 3,313 | **75.9%** | 75.4% | 对齐/ASR 契约、gates、llm、video_scan 较稳；whisper_utils 45% |
-| `scripts/fix` | 3,220 | **72.6%** | 72.6% | whisper_pipeline 81%、whisper_fixer 93%、fragment_processor 90%、align_repair 92.5% |
-| `scripts/nouns` | 2,424 | **67.2%** | 67.2% | aggregate 86%、build_glossary 92%、extractor 85%、find_suspect_nouns 74% |
-| `scripts` 根 | 2,011 | **65.7%** | 42.3% | run_all 34→96%、translate_srt 85%、polish_zh 99% |
-| `scripts/asr` | 581 | **95.0%** | 42.5% | worker 37→99%、CLI 27→99% |
-| `scripts/reuse` | 389 | **73.8%** | 62.2% | align 70→96%、apply 65%、common 49% |
-| `scripts/scan` | 372 | **94.6%** | 37.6% | scan_all/VAD/CLI 全部补齐；剩 tokenizer import 分支 |
-| `scripts/apply` | 380 | **100.0%** | 35.1% | main、ASS、繁→简、degloss 全分支 |
-| `scripts/eval` | 339 | **61.9%** | 61.9% | asr_eval 47%；bench 84% |
-| `scripts/ass` | 313 | **86.3%** | 65.5% | CLI main 已测；剩 oped 多文件差异分支 |
+| `scripts/lib` | 3,313 | **84.9%** | 75.9% | whisper_utils 45→100%；对齐/ASR 契约稳 |
+| `scripts/fix` | 3,219 | **77.9%** | 72.6% | episode_workflow 36→100%；whisper_pipeline 81% |
+| `scripts/nouns` | 2,424 | **67.2%** | 67.2% | `auto_classify` / `auto_clean_glossary` 仍 0%（旧入口） |
+| `scripts` 根 | 2,011 | **65.7%** | 65.7% | run_all 96%、translate_srt 85%、polish_zh 99% |
+| `scripts/asr` | 581 | **95.0%** | 95.0% | worker 99%、CLI 99% |
+| `scripts/reuse` | 389 | **97.9%** | 73.8% | align 96%、apply 98%、common 100% |
+| `scripts/scan` | 372 | **94.6%** | 94.6% | scan_all/VAD/CLI 补齐 |
+| `scripts/apply` | 380 | **100.0%** | 100.0% | main/ASS/繁→简/degloss 全分支 |
+| `scripts/eval` | 339 | **93.2%** | 61.9% | asr_eval 99%；bench 84% |
+| `scripts/ass` | 313 | **86.3%** | 86.3% | CLI main 已测 |
 | `scripts/utils` | 285 | **80.4%** | 80.4% | — |
-| **合计** | **13,627** | **74.0%** | 64.0% | — |
+| **合计** | **13,626** | **78.9%** | 74.0% | — |
 
 ### 做得好的部分
 
 - **P2 对齐核心**（`lib/alignment/*`）：90–98%，含重复台词、乱序 cue、零时长、全局偏移。
-- **ASR 链路**：契约/路由/适配器 75–97%；worker 99%、CLI 99%（chunk/offset/零时长/协议/CLI 返回码）。
+- **ASR 链路**：契约/路由/适配器 75–97%；worker 99%、CLI 99%；`whisper_utils` 100%（含 VAD/抽音频/ASS 写回）。
 - **三条主链路**：Whisper 修复（VAD→Tier1→Tier2）、翻译（LLM/百度）、专名（提取→聚合→glossary）；OP/ED 的器乐/歌词/正片判定。
-- **编排与步骤**：`run_all.main()` 顺序/闸门 + 各 `step_*` 的实际副作用（文件、命令、报告、降级报告）96%。
-- **Phase 1 扫描**：`scan_all` 聚合、VAD 缓存/跳过/失败、findings/issues 写出、CLI 95%。
-- **批量应用 / 复用**：`apply_fixes` 100%；`reuse/align.py` CLI 96%。
+- **编排与步骤**：`run_all.main()` + 各 `step_*` 96%；`episode_workflow` 100%（含 `_run_pipeline` 资源组合）。
+- **批量应用 / 复用**：`apply_fixes` 100%；`reuse/*` 97.9%。
+- **评测链路**：`asr_eval` 99%（CER/边界/音频解析/CLI）。
 - **安全策略**：dry-run 不写盘、VAD 删条默认不写、OP/ED 只覆写歌词、只填空行——每条都有对应断言。
 
 ## 1. 测试原则
@@ -77,15 +75,15 @@ coverage: 74.0% (13,627 statements)
 | Phase 1 扫描 | `scan/unified_scanner.py` | `test_unified_scanner` | **94.6%** | `scan_all`/VAD/CLI 已测；剩 tokenizer import 与少量分支 |
 | Phase 2 修复编排 | `fix/whisper_pipeline.py` | `test_whisper_pipeline` | **81%** | VAD/Tier1/Tier2/main 已测；`_cluster_garbled_cues` 回退路径可补 |
 | Whisper 后端 | `lib/whisper_backends.py` | `test_whisper_backends` | **59%** | faster/openai 已测；`validate_backend`、缺失参数的 branch 未测 |
-| Whisper 工具 | `lib/whisper_utils.py` | `test_whisper_utils` | **45%** | 纯函数已测；ASS 解析、VAD、抽音频、人声分离等 ffmpeg 包装未测 |
+| Whisper 工具 | `lib/whisper_utils.py` | `test_whisper_utils` | **100%** | VAD/ASS/抽音频/人声分离/文本判定全覆盖 |
 | Fixer/片段 | `fix/whisper_fixer.py`, `fragment_processor.py` | `test_whisper_fixer`, `test_fragment_processor` | **90–93%** | 剩余：paired `__DELETE__` 分支、报告更新异常路径 |
 | OP/ED | `fix/oped_fixer.py`, `oped_fill.py`, `ass/ass_repair.py` | `test_oped_fixer`, `test_oped_fill`, `test_ass_repair` | **70–86%** | `ass_repair` CLI 已补；Whisper 采样与 oped 多文件差异仍可补 |
 | Phase 3 专名 | `nouns/*` | 5 个测试文件 | **74–96%** | `auto_classify` / `auto_clean_glossary` 仍 0%（旧入口，不在主链） |
 | 翻译 | `translate_srt.py`, `fix/translate_srt.py`, `polish_zh.py` | 3 个测试文件 | **85–99%** | 只剩 `main` 的少量分支与真实 API 形状 |
 | 批量应用 | `apply/apply_fixes.py` | `test_apply_fixes` | **100.0%** | 全部分支已测；2 个防御性 partial |
-| 参考复用 | `reuse/*` | `test_reuse`, `test_reuse_common` | **73.8%** | `align.py` CLI 96%；`apply.py` 65%、`common.py` 49% |
-| 总编排 | `run_all.py`, `fix/episode_workflow.py` | `test_run_all_*`, `test_episode_workflow` | **96% / 36%** | run_all 各 `step_*` 已补；episode_workflow 剩余分支 |
-| 评测/回归 | `eval/*` | `test_asr_eval`, `test_alignment_bench` | 47–84% | manifest 缺路径分支 |
+| 参考复用 | `reuse/*` | `test_reuse`, `test_reuse_common` | **97.9%** | align 96%、apply 98%、common 100% |
+| 总编排 | `run_all.py`, `fix/episode_workflow.py` | `test_run_all_*`, `test_episode_workflow` | **96% / 100%** | run_all 剩日志/防御分支 |
+| 评测/回归 | `eval/*` | `test_asr_eval`, `test_alignment_bench` | **84–99%** | asr_eval 99%（limit/list-engines/错误行已测） |
 
 ## 3. 优先补测（P0 → P2）
 
@@ -105,18 +103,21 @@ coverage: 74.0% (13,627 statements)
 
 - [x] `fix/whisper_fixer.py`（93%）与 `fix/fragment_processor.py`（90%）：VAD 缓存闸门、Tier1 三分类、Tier2/重试、AI 片段生成与应用。
 - [x] `nouns/find_suspect_nouns.py`（74%）的 `_cluster_by_source` / `search_corrections` / `_apply_correction_fixes` / `_format_candidates`。
-- [x] `reuse/align.py`（96%）、`reuse/apply.py`（65%）：R1–R5 采纳规则、复核缓存与失败、锚点链、dry-run/写盘、CLI 主流程。
+- [x] `reuse/align.py`（96%）、`reuse/apply.py`（98%）：R1–R6 采纳规则、复核缓存与失败、锚点链、dry-run/写盘、CLI 主流程。
 - [x] `nouns/noun_checker.py`（79%）与 `nouns/apply_map.py`（96%）的主流程：提取模式、表格解析、运行替换、清单与映射导出。
 - [x] `run_all.step_scan/step_nouns/step_apply_all/step_deliver/step_clean` 的副作用分支（命令参数、缓存命中、报告写入、降级报告、dry-run）。
 - [x] `main()` 剩余资源/flag 分支：`--input-dir .`、`--episodes/--limit`、`--no-skip-if-clean`、dry-run ASS、zh 润色确认、AI review 提示。
 
-### P2（剩余）
+### P2（已完成 / 剩余）
 
 - [x] `scan/unified_scanner.py` 的 `scan_all` / VAD / main（94.6%）。
 - [x] `apply/apply_fixes.py` 的 main、ASS 分支、繁→简（100%）。
 - [x] `qwen3_worker` 的 chunk 分支（fake `model.transcribe`，99%）与 `qwen3_transcribe` CLI（99%）。
-- [ ] `whisper_utils` 的音频/VAD 段（45%，大量 ffmpeg 包装）：ASS 解析、`vad_filter_audio`、抽音频、人声分离。
+- [x] `whisper_utils` 的音频/VAD 段（45% → 100%）：ASS 解析、`vad_filter_audio`、抽音频、人声分离。
+- [x] `episode_workflow`（36% → 100%）、`reuse/*`（73.8% → 97.9%）、`eval/asr_eval`（47% → 99%）。
 - [ ] `nouns/auto_classify.py`、`nouns/auto_clean_glossary.py`（0%，旧入口，不在主链；若保留则补最小冒烟）。
+- [ ] `lib/whisper_backends.py`（59%）、`asr/align_cues.py`（78%）、`fix/whisper_pipeline.py`（81%）。
+- [ ] **待决策 / 清理**：`fix/episode_workflow._write_ai_review_json` 无调用方（死代码）；`--mode` 是已废除的残留 flag。保留则文档标注，删除则连同测试一起移除。
 
 ## 4. 运行方式
 
@@ -145,6 +146,10 @@ python -m pytest -q tests\test_run_all_step_functions.py tests\test_unified_scan
   tests\test_apply_fixes.py tests\test_qwen3_worker.py tests\test_qwen3_cli.py `
   tests\test_ass_repair.py tests\test_reuse.py
 
+# 第五轮（whisper_utils / episode_workflow / reuse / eval）
+python -m pytest -q tests\test_whisper_utils.py tests\test_episode_workflow.py `
+  tests\test_reuse.py tests\test_reuse_common.py tests\test_asr_eval.py
+
 # 只跑 P2 相关
 python -m pytest -q tests/test_alignment_base.py tests/test_alignment_timeline.py `
   tests/test_cue_mapper.py tests/test_cue_diagnostics.py `
@@ -164,23 +169,25 @@ python -m pytest -q tests/test_alignment_base.py tests/test_alignment_timeline.p
 
 ## 6. 覆盖率门槛（渐进）
 
-当前 **74.0%**。不追求一次到 80%，按缺口补：
+当前 **78.9%**。按缺口补，不追求一次到 85%：
 
 | 阶段 | 目标 | 重点 |
 |---|---:|---|
-| 上上轮 | 36% | 基线 |
-| 上轮 | 64.0% | P0 链路 + 相邻联动 + 修复/片段/复用/专名补齐 |
-| **现在** | **74.0%** | run_all 步骤、scanner、apply、worker、ass/reuse CLI |
-| 下一轮 | ≥76% | whisper_utils 音频/VAD、eval manifest、reuse/apply+common |
-| 再下一轮 | ≥80% | episode_workflow、translate_srt 分支、fix 剩余路径 |
+| 基线 | 36% | 起点 |
+| 上上轮 | 64.0% | P0 链路 + 相邻联动 + 修复/片段/复用/专名补齐 |
+| 上轮 | 74.0% | run_all 步骤、scanner、apply、worker、ass/reuse CLI |
+| **现在** | **78.9%** | whisper_utils、episode_workflow、reuse、asr_eval |
+| 下一轮 | ≥82% | 根脚本 65.7%、nouns 67.2%、whisper_backends 59%、align_cues 78% |
 
 > 覆盖率不是目的：**关键路径（扫描→修复→专名→翻译→应用→交付）每个分支至少有一条测试**，比总百分比更重要。
-> 本轮新增的 3 个 0 覆盖旧脚本（`auto_classify` / `auto_clean_glossary` / Whisper 批处理与补丁）不在主链，先确认是否保留再决定补测或删除。
+> 0 覆盖的旧脚本（`auto_classify` / `auto_clean_glossary` / Whisper 批处理与补丁）不在主链，先确认是否保留再决定补测或删除。
 
 ## 7. 顺带修掉的真 bug（都有回归测试）
 
 | 位置 | 问题 | 测试 |
 |---|---|---|
+| `lib/whisper_utils.separate_vocals` | 裸相对文件名（如 `ep.wav`）且未传 `output_dir` 时 `dirname=''`，`os.makedirs('')` 在调用 demucs 前抛 `FileNotFoundError` | `test_bare_filename_defaults_to_current_directory` |
+| `fix/episode_workflow.step_translate` | 成功日志硬编码 `→ ja`，`--lang zh` 时误导 | `test_step_translate_runs_translator_with_project_pythonpath` |
 | `run_all._step_noun_classify` / `step_ai_review` | 扫描产物（`*_nouns.json`、`ai_fragments_*.json`）被批量枚举；单个文件截断/损坏时 `load_json` 抛 `JSONDecodeError`，直接打死 Phase 1/2/3 | `test_step_noun_classify_without_unknowns_skips_ai`、`test_step_ai_review_counts_pending_fragments` |
 | `apply/apply_fixes` ASS `replace_name` | `build_dialogue_line` 复用 `_raw_parts` 只刷新 text，Name 改动被丢弃；报告仍显示 applied | `test_main_ass_replace_text_name_and_delete` |
 | `apply/apply_fixes._run_trad_to_simp` | 只走 ASS `split(',', 9)` 路径，SRT 行永不匹配，`--trad-to-simp` / `--lang zh` 在 SRT 项目上始终 0 changed | `test_run_trad_to_simp_converts_srt_text`、`test_main_trad_to_simp_flag_converts_srt` |

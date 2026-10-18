@@ -732,7 +732,7 @@ def separate_vocals(audio_path, output_dir=None, python_exe=None):
     if python_exe is None:
         python_exe = sys.executable
 
-    out_dir = output_dir or os.path.dirname(audio_path)
+    out_dir = output_dir or os.path.dirname(audio_path) or '.'
     os.makedirs(out_dir, exist_ok=True)
 
     try:

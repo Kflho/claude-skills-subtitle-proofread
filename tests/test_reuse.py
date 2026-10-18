@@ -306,6 +306,148 @@ def test_apply_run_requires_matches_file(tmp_path, monkeypatch):
     assert 'reuse/align.py' in str(exc.value)
 
 
+def test_apply_run_requires_target_file(tmp_path):
+    with pytest.raises(SystemExit) as exc:
+        reuse_apply.run('SP01', _run_args(tmp_path, tmp_path / 'out'), [],
+                        make_fold())
+    assert '找不到 SP01' in str(exc.value)
+
+
+def test_apply_extend_merges_consecutive_reference_lines():
+    targets = [tgt('我今天去了学校和朋友玩')]
+    refs = [ref('我今天去了', gi=0, start_s=1.0),
+            ref('学校和朋友玩', gi=1, start_s=2.0)]
+
+    a, b = reuse_apply.extend(
+        0, 0, 0, targets, refs, set(), adj_gap=4.0, max_ext=2.0,
+        fold=make_fold())
+
+    assert (a, b) == (0, 1)
+
+
+def test_apply_extend_stops_on_episode_gap_length_or_similarity():
+    targets = [tgt('我今天去了学校和朋友玩')]
+    base = ref('我今天去了', gi=0, start_s=1.0)
+
+    def ext(next_ref, used=frozenset(), max_ext=2.0):
+        return reuse_apply.extend(
+            0, 0, 0, targets, [base, next_ref], set(used),
+            adj_gap=4.0, max_ext=max_ext, fold=make_fold())
+
+    assert ext(ref('学校和朋友玩', gi=1, ep='EP002', start_s=2.0)) == (0, 0)
+    assert ext(ref('学校和朋友玩', gi=1, start_s=10.0)) == (0, 0)
+    assert ext(ref('学校和朋友玩', gi=1, start_s=2.0), max_ext=0.9) == (0, 0)
+    assert ext(ref('完全无关的其他内容', gi=1, start_s=2.0)) == (0, 0)
+    assert ext(ref('学校和朋友玩', gi=1, start_s=2.0), used={1}) == (0, 0)
+
+
+def test_apply_run_rejects_second_use_of_same_reference(tmp_path, monkeypatch):
+    target = tmp_path / 'zh'
+    target.mkdir()
+    _write_srt(target / 'SP01.srt', ['我喜欢这部动画', '我喜欢这部动画'])
+    out = tmp_path / 'out'
+    out.mkdir()
+    (out / 'matches_SP01.json').write_text(json.dumps({
+        'matches': {'0': {'gi': 0}, '1': {'gi': 0}},
+    }), encoding='utf-8')
+    references = [ref('我很喜欢这部动画', gi=0)]
+    monkeypatch.setattr(
+        reuse_apply, 'load_target',
+        lambda *a, **k: [tgt('我喜欢这部动画'), tgt('我喜欢这部动画')])
+
+    reuse_apply.run('SP01', _run_args(target, out), references, make_fold())
+
+    report = (out / 'apply_SP01.txt').read_text(encoding='utf-8')
+    assert '采纳 1  丢弃 1' in report
+    assert 'R6与已采纳冲突' in report
+
+
+def test_apply_run_rejects_conflict_introduced_by_extension(tmp_path,
+                                                           monkeypatch):
+    target = tmp_path / 'zh'
+    target.mkdir()
+    _write_srt(target / 'SP01.srt', ['我今天去了学校和朋友玩',
+                                     '学校和朋友玩得开心'])
+    out = tmp_path / 'out'
+    out.mkdir()
+    (out / 'matches_SP01.json').write_text(json.dumps({
+        'matches': {'0': {'gi': 0}, '1': {'gi': 1}},
+    }), encoding='utf-8')
+    references = [
+        ref('我今天去了学校', gi=0, start_s=1.0),
+        ref('和朋友玩得很快乐', gi=1, start_s=2.0),
+    ]
+    monkeypatch.setattr(
+        reuse_apply, 'load_target',
+        lambda *a, **k: [tgt('我今天去了学校和朋友玩'),
+                         tgt('和朋友玩得开心')])
+
+    reuse_apply.run('SP01', _run_args(target, out, max_ext=2.0),
+                    references, make_fold())
+
+    report = (out / 'apply_SP01.txt').read_text(encoding='utf-8')
+    assert '采纳 1  丢弃 1' in report
+    assert 'R6与已采纳冲突' in report
+    assert '..' in report  # merged reference range is shown
+
+
+# ═══════════════════════════════════════════════════════════════
+# reuse/apply.py CLI
+# ═══════════════════════════════════════════════════════════════
+
+def _apply_argv(tmp_path, episodes='SP01,SP02', extra=()):
+    return ['apply.py', '-e', episodes,
+            '--source-dir', str(tmp_path / 'src'),
+            '--target-dir', str(tmp_path / 'zh'),
+            '--reference-dir', str(tmp_path / 'ref'),
+            '--out-dir', str(tmp_path / 'out'), *extra]
+
+
+def test_apply_main_runs_each_tag_in_dry_run(tmp_path, monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(reuse_apply, 'load_variants', lambda p: ([], []))
+    monkeypatch.setattr(reuse_apply, 'load_reference',
+                        lambda *a, **k: [{'text': '参考'}])
+    monkeypatch.setattr(reuse_apply, 'run',
+                        lambda tag, args, ref, fold: calls.append(tag))
+    monkeypatch.setattr(sys, 'argv', _apply_argv(tmp_path))
+
+    reuse_apply.main()
+
+    assert calls == ['SP01', 'SP02']
+    assert (tmp_path / 'out').is_dir()
+    assert '（dry-run）' in capsys.readouterr().out
+
+
+def test_apply_main_apply_skips_dry_run_notice(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(reuse_apply, 'load_variants', lambda p: ([], []))
+    monkeypatch.setattr(reuse_apply, 'load_reference',
+                        lambda *a, **k: [{'text': '参考'}])
+    monkeypatch.setattr(reuse_apply, 'run', lambda *a, **k: None)
+    monkeypatch.setattr(sys, 'argv', _apply_argv(tmp_path, extra=['--apply']))
+
+    reuse_apply.main()
+
+    assert '（dry-run）' not in capsys.readouterr().out
+
+
+def test_apply_main_rejects_unparseable_episodes(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, 'argv', _apply_argv(tmp_path, episodes='???'))
+
+    with pytest.raises(SystemExit) as exc:
+        reuse_apply.main()
+    assert '集号无法解析' in str(exc.value)
+
+
+def test_apply_main_rejects_missing_variants_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, 'argv', _apply_argv(
+        tmp_path, extra=['--variants', str(tmp_path / 'nope.json')]))
+
+    with pytest.raises(SystemExit) as exc:
+        reuse_apply.main()
+    assert 'variants 文件不存在' in str(exc.value)
+
+
 # ═══════════════════════════════════════════════════════════════
 # reuse/align.py CLI — pair every selected episode, write matches
 # ═══════════════════════════════════════════════════════════════

@@ -87,7 +87,7 @@ def step_translate(project_dir, episode, scan_result, dry_run=False, target_lang
         print(f'  {" ".join(str(p) for p in cmd_parts)}')
         return out_path
 
-    print(f'[translate] Translating: {os.path.basename(ref_path)} → ja')
+    print(f'[translate] Translating: {os.path.basename(ref_path)} → {target_lang}')
     try:
         env = os.environ.copy()
         if _SCRIPT_DIR not in env.get('PYTHONPATH', ''):
@@ -287,9 +287,6 @@ def step_diff(project_dir, episode, scan_result, applied_fixes):
     if not issues:
         print('[diff] No issues.')
         return
-
-    # Build a set of fixed start times
-    fixed_starts = {a['start'] for a in applied_fixes} if applied_fixes else set()
 
     print(f'[diff] {episode} changes:')
     print()
