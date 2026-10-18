@@ -132,7 +132,7 @@ EP01 视频 ✅，用户已人工核对 CC 同步；EP02/03 .mkv.downloading 0 B
 日文 CC S01E01–S54 ✅；已清洁到 temp/references/digimon/
 主故事参考：EP001/002/003.main.srt 已切；EP001 另有 -95s 平移版
 压缩包： C:\Users\54238\Desktop\数码宝贝.zip.downloading ≈20.54GB 🟡
-测试：1306 passed / 79.0%；提交 141b1f1
+测试：1306 passed / 79.0%；最新提交 89a22cc（交接文档）
 ```
 
 

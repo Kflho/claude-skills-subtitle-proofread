@@ -28,6 +28,8 @@
 - [ ] **死代码决策**：`episode_workflow._write_ai_review_json`（无调用方）、`--mode`（残留 flag）、`auto_classify` / `auto_clean_glossary` 旧入口：保留补冒烟，或删除并移除对应测试。
 - [ ] **可选工具化**：把 CC 清洁 + 主故事窗口 + 参考平移做成一个可复用脚本，补测试；当前 clean 工具只做标签清除。
 
+> **新会话入口**：先读本节 A/B/C，再读 `eval/materials.md` §6/§7。
+
 ### B. 等素材
 
 - [ ] **EP02/03 视频**：`D:\videos\Animation\TV\数码宝贝` 下 `.mkv.downloading` 目前 0 B；完整后跑三集。
@@ -43,7 +45,7 @@
 压缩包：C:\Users\54238\Desktop\数码宝贝.zip.downloading ≈20.54GB 🟡
 参考：temp/references/digimon/ 已清洁；EP001/002/003.main.srt 已切主故事窗口
 测试：1306 passed / 79.0% / 0 failed
-提交：141b1f1（CC 清洁 + 素材/EP01 冒烟记录）
+提交：89a22cc（clear 交接；上一提交 141b1f1 = CC 清洁 + EP01 冒烟）
 ```
 
 ## 1. 状态总览
