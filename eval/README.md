@@ -64,17 +64,22 @@ python scripts/eval/asr_eval.py --manifest eval/manifest.json `
 主故事窗口、CER、token 时间轴质量、cue 对齐一次出齐；只读，不生成阈值：
 
 ```powershell
-# 基线（默认 policy）
+# Qwen3 主口径（raw / 无偏移；参考字幕只打分）
 python scripts/eval/episode_benchmark.py --manifest eval/manifest.digimon.json `
-  --json-out temp/reports/digimon_benchmark_baseline.json `
-  --output temp/reports/digimon_benchmark_baseline.md
+  --json-out temp/reports/digimon_qwen3_raw.json `
+  --output temp/reports/digimon_qwen3_raw.md
 
-# A/B：opt-in 的 segment-start overlong trim
-python scripts/eval/episode_benchmark.py --manifest eval/manifest.digimon.json `
-  --repair-overlong `
-  --json-out temp/reports/digimon_benchmark_repair.json `
-  --output temp/reports/digimon_benchmark_repair.md
+# Whisper large-v3 q5 A/B（同参考、同窗口）
+python scripts/eval/episode_benchmark.py --manifest eval/manifest.digimon.whisper.json `
+  --json-out temp/reports/digimon_whisper_raw.json `
+  --output temp/reports/digimon_whisper_raw.md
+
+# 可选：只对确有独立证据的整文件漂移做全局偏移（不要用它吸收 ASR/CC onset bias）
+... --global-offset
 ```
+
+> 2026-10-18 用户人工复核：视频/CC 无真实偏移；`--global-offset` 不是默认项，
+> offset-corrected 数字不能当验收。
 
 对比时只看同一 split、同一 ASR 缓存；dev 看方向，test 冻结后跑一次。
 

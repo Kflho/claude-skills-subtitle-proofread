@@ -22,7 +22,7 @@ coverage: 79.6% (14,325 statements)
 | `test_diagnose_timeline.py`（新） | 零时长 run/overlong 提取、无参考诊断、参考打分与 `--shift`、修复变体 |
 | `test_alignment_timeline.py`（扩展） | 质量判定随轴、degraded 告警、灾难性回退 segment、opt-in trim、evidence 字段 |
 | `test_cue_mapper.py` / `test_cue_diagnostics.py` / `test_align_repair.py`（扩展） | 零时长 span 不自动修、display linger 保留结尾、start-only fix、负 end error |
-| `test_align_cues_cli.py`（扩展） | 默认整集偏移、`--no-global-offset`、报告字段 |
+| `test_align_cues_cli.py`（扩展） | 整集偏移 opt-in（默认 raw）、报告字段 |
 
 ### 覆盖率按目录（本轮 vs 上轮）
 

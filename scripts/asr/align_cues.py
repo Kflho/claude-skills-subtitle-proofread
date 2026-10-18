@@ -164,12 +164,13 @@ def main(argv: list[str] | None = None) -> int:
                              'local speech rate (opt-in; can shift long '
                              'sung/vowel tokens)')
     parser.add_argument('--global-offset', dest='global_offset',
-                        action='store_true', default=True,
-                        help='estimate one whole-file drift and shift every '
-                             'cue first (default; mirrors fix_by_asr)')
-    parser.add_argument('--no-global-offset', dest='global_offset',
-                        action='store_false',
-                        help='keep raw cue times (diagnostics)')
+                        action='store_true', default=False,
+                        help='estimate and apply one whole-file drift before '
+                             'mapping. Off by default: on the Digimon CC the '
+                             'estimator absorbs the ASR-vs-CC onset bias, '
+                             'which the user confirmed is not a video offset. '
+                             'Use only with independent evidence of a real '
+                             'cut/frame-rate drift.')
     parser.add_argument('--work-dir', default='temp/align')
     args = parser.parse_args(argv)
 

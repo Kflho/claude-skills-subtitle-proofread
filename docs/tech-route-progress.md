@@ -1,19 +1,19 @@
 # 2026 技术路线实施进度
 
 > **用途**：跨会话续跑。新会话先读本文件，再读 [`tech-route-2026.md`](tech-route-2026.md)、[`ADR-006`](adr/006-stable-asr-core.md)、[`ADR-007`](adr/007-cue-alignment.md)、[`ADR-008`](adr/008-qwen3-long-audio-chunking.md)、[`test-plan.md`](test-plan.md)。
-> **最后更新**：2026-10-18（第六轮：三集就绪 + 参考基准 + 去启发式；1362 tests / 79.6%；EP01–03 主故事窗口已跑）
-> **当前阶段**：EP01–03 视频/日文 CC 齐备；`episode_benchmark.py` 只读基准 + `eval/protocol.md` 防过拟合协议落地；`align_cues` 默认整集偏移；结尾「display linger」不再被自动截短。默认仍走 Whisper，P2-14 指标未达标。
+> **最后更新**：2026-10-18（第七轮：按用户人工结论改为无偏移 + Whisper large-v3 A/B；1362 tests / 79.6%）
+> **当前阶段**：EP01–03 视频/日文 CC 齐备；只读基准 + 防过拟合协议落地；**用户确认视频/CC 无真实偏移**，此前 -0.37/-0.40 s 是 ASR 起点 vs CC 显示起点的系统差，整集偏移已降级为 opt-in 诊断。Whisper large-v3 q5 A/B 已跑：文本更好、打轴更差。默认仍走 Whisper，P2-14 未达标。
 > **总目标**：把音频链路从 `WebRTC VAD → kotoba Whisper → 时间重叠匹配` 迁移到 `Qwen3-ASR → Qwen3-ForcedAligner → 全局文本对齐`；默认行为在 P2 验收前保持不变。
 
 ## 0. 当前一句话（clear 后从这里开始）
 
-已经完成：P1 稳定 ASR 核心、P2 对齐层、`run_all --asr` 接入、实机验证、相邻 cue 联动；**第六轮**把日语参考字幕变成可复现的 held-out 基准（EP01=dev，EP02/03=test），并据此修掉两个真实问题：`align_cues` 没做整集偏移（test P50 400→57.5 ms）、自动修复会截短字幕显示时间（三集 113 条 → 0 条）。同时补了时间轴质量评估/segment 兜底、只读评测器、负结果记录。**测试 1362 passed / 79.6% / 0 failed。**
+已经完成：P1 稳定 ASR 核心、P2 对齐层、`run_all --asr` 接入、实机验证、相邻 cue 联动；**第六/七轮**把日语参考字幕变成可复现的 held-out 基准（EP01=dev，EP02/03=test），并据用户人工复核确认**没有真实视频偏移**：`estimate_global_offset` 的 -0.37/-0.40 s 是在吸收 ASR 起点与 CC 显示起点的系统差，不能当修正。真实收益只剩：结尾 display linger 不再被自动截短（三集 106→0 条）、零时长 span 不自动修、质量诊断/segment 兜底、只读评测器。**测试 1362 passed / 79.6% / 0 failed。**
 
 **下一步按顺序：**
 
-1. **P2-14 验收**：三集已跑（§4.6）。当前 test split：CER micro 0.2633、起点 P50 57.5 ms、全匹配 P90 1151 ms、可靠匹配 P90 385 ms、±100 ms 68.3%。**P90 仍 >300 ms，未达标**；剩余误差来自短语气词/重复台词的歧义匹配和 FA 零时长，不能靠调阈值。
-2. **机制修复（不是调参）**：P3 FireRedVAD 或分段重对齐，处理 FA 在音乐/重叠段的零时长；短 cue 的歧义匹配按 ADR-007 的置信度规则进 review，不计入自动修复。
-3. **P0 A/B**：同一批三集跑 Qwen3 1.7B 60s vs Whisper large-v3 q5，记录 CER、RTF、零时长、时间轴覆盖；dev/test 分开。**当前本机没有 `whisper-cli` / faster-whisper / Whisper 模型，需先安装或提供模型**；否则只能做 Qwen3 0.6B vs 1.7B 的参考无关 A/B。
+1. **P2-14 验收（raw / 无偏移）**：test split 当前 CER micro 0.2633、起点 P50 400 ms、全匹配 P90 1196 ms、可靠匹配 P90 510 ms、±100 ms 5.1%。**P90 远未达标**；主因是短语气词/重复台词歧义和 FA 零时长。
+2. **机制修复（不是调参）**：P3 FireRedVAD 或分段重对齐，处理 FA 在音乐/重叠段的零时长；短 cue 的歧义匹配按 ADR-007 的置信度规则进 review，不计入自动修复。禁止再用整集/局部偏移把指标做低。
+3. **A/B 已跑（EP01–03，raw）**：Whisper large-v3 q5 文本更好（test CER 0.204 vs Qwen3 0.263，match 195 vs 153），但打轴更差（P50 757 vs 400 ms，可靠 P90 1325 vs 510 ms）。下一步评估“Whisper 文本 + Qwen3-FA 对齐”的混合是否可行（需先解决词级对齐输入）。
 4. **chunk 调参**：只用无参考内部指标（零时长率、RTF）在 dev 上选 45/60/90；test 只验证一次。
 5. **P4 翻译/润色**：prompt 用原文 + glossary + 场景，不把参考字幕当答案；沿用 ADR-009 的证据规则。
 6. **默认切换**：P2-14 达标前不切 `ASR_ENGINE`。
@@ -38,24 +38,27 @@
 - [x] **三集评测**：主故事窗口 [95,1240]、缓存 ASR JSON、`episode_benchmark.py` 基线/最终报告已生成。
 - [ ] **后续**：P0 A/B、chunk 调参、12 集 manifest、默认切换评估。
 
-### C. 当前现场（2026-10-18 第六轮）
+### C. 当前现场（2026-10-18 第七轮）
 
 ```text
 素材：EP01/02/03 视频 ✅；日文 CC 54 集 ✅；中文 ASS 01–05 ✅
-参考：EP00X.main.srt（主故事窗口）；EP001 已人工确认同步，EP02/03 待确认
-ASR：temp/asr/digimon_ep00X_main.qwen3.json（1.7B + FA，60s chunk）
-基准：temp/reports/digimon_benchmark_final.{json,md}（dev/test 分组）
+参考：EP00X.main.srt（主故事窗口）；用户人工复核：视频/CC 无真实偏移
+ASR：Qwen3 1.7B + FA JSON；Whisper large-v3 q5 JSON（temp/asr/*_main.*.json）
+基准：temp/reports/digimon_qwen3_raw.{json,md}、digimon_whisper_raw.{json,md}
 协议：eval/protocol.md；ADR-009（参考=考卷）
 测试：1362 passed / 79.6% / 0 failed
-提交：b5a3052（基准 + 报告补充）
 ```
 
 ### D. 第七轮待办（按优先级）
 
-1. **用户确认 EP02/03 日文 CC 与视频同步**：当前 -0.37/-0.40 s 是估计偏移；若 CC 本身不齐，test 基准要重算。EP01 已确认。
-2. **测量有效性**：加 dialogue-covered CER（只统计有语音覆盖的 cue）和 P90 outlier 报告；不改参数，先让数字能解释。
+1. **P2-14 raw 验收**：test CER 0.2633、P50 400 ms、可靠 P90 510 ms、±100 ms 5.1%；
+   P90 远未达标。不要再把整集/局部偏移写进指标。
+2. **测量有效性**：加 dialogue-covered CER（只统计有语音覆盖的 cue）和 P90 outlier 报告；
+   不改参数，先让数字能解释。另：`fix_by_asr` 仍默认整集偏移（既有行为），在无真实偏移的
+   素材上运行前要确认；下一步给它加显式开关。
 3. **P90 机制修复**：在 dev 上试分段重对齐（FA 对短窗口更稳），处理零时长/坍缩；有效再进 test，不靠调阈值。
-4. **P0 A/B**：Whisper 未安装/无模型（`whisper-cli`、faster-whisper 都不可用），需先装 faster-whisper + large-v3 或提供 CLI；否则只能做 Qwen3 0.6B vs 1.7B 的参考无关 A/B。
+4. **A/B 后续**：Whisper large-v3 文本更好、打轴更差；评估“Whisper 文本 + Qwen3-FA 对齐”
+   的混合方案（需解决把 Whisper 文本喂给 FA 的接口），或至少把 Whisper 作为文本候选。
 5. **chunk 45/60/90**：只用零时长率/RTF 在 dev 选，test 验证一次。
 6. **P4 翻译/润色**：prompt 用原文 + glossary + 场景；参考字幕不回流。
 
@@ -328,46 +331,60 @@ P2 align：match 55/286，garbled 115，missing_asr 74，no_speech 40
 参考先过滤字幕卡/非对白，并单独统计 ASR 漏掉的短语气词；token 时间轴需单独修（或分段重对齐）。
 当前 EP02/03 视频已到位，三集基准见 §4.6。
 
-### 三集参考基准（2026-10-18 第六轮；EP01=dev，EP02/03=test）
+### 三集参考基准（2026-10-18 第六/七轮；EP01=dev，EP02/03=test）
 
 **协议**：`eval/protocol.md`、ADR-009。参考字幕只打分，不回流参数；test 冻结后只跑一次。
 **素材**：EP00X 视频（1386 s）；主故事窗口 `[95,1240]`；清洁 CC `temp/references/digimon/EP00X.main.srt`。
 **ASR**：Qwen3-ASR-1.7B + FA-0.6B，60 s 自切，缓存 `temp/asr/digimon_ep00X_main.qwen3.json`。
+**用户人工复核（第七轮）**：视频/CC **没有真实偏移**；此前 -0.37/-0.40 s 是 ASR 起点 vs CC
+显示起点的系统差。以下全部按 **raw / 无偏移**。
 
-| split | 集 | CER | ref chars | cues | match | P50 起 | P90 起 | ±100 ms | 可靠 n | 可靠 P90 | offset | auto | 截短 |
+| split | 集 | CER | ref chars | cues | match | P50 起 | P90 起 | ±100 ms | 可靠 n | 可靠 P90 | auto | 截短 | token zero |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| dev | EP001 | 0.3643 | 2056 | 276 | 49 | 129 ms | 1897 ms | 46.9% | 35 | 424 ms | — | 13 | 0 |
-| test | EP002 | 0.2581 | 4107 | 370 | 79 | 69 ms | 559 ms | 65.8% | 68 | 361 ms | -0.37 s | 19 | 0 |
-| test | EP003 | 0.2698 | 3336 | 317 | 79 | 46 ms | 1743 ms | 70.9% | 71 | 410 ms | -0.40 s | 9 | 0 |
-| test 合计 | 2 | 0.2633 micro | 7443 | 687 | 158 | 57.5 ms | 1151 ms | 68.3% | 139 | 385 ms | — | 28 | 0 |
+| dev | EP001 | 0.3643 | 2056 | 276 | 49 | 129 ms | 1897 ms | 46.9% | 35 | 424 ms | 13 | 0 | 9.4% |
+| test | EP002 | 0.2581 | 4107 | 370 | 79 | 394 ms | 837 ms | 7.6% | 69 | 494 ms | 21 | 0 | 3.2% |
+| test | EP003 | 0.2698 | 3336 | 317 | 74 | 406 ms | 1555 ms | 2.7% | 64 | 526 ms | 17 | 0 | 6.3% |
+| test 合计 | 2 | 0.2633 micro | 7443 | 687 | 153 | 400 ms | 1196 ms | 5.1% | 133 | 510 ms | 38 | 0 | 4.7% |
 
 「可靠」= match 且 cue 字数 ≥3、confidence ≠ low；1–2 字语气词天然歧义，单列不进主 P90。
-报告：`temp/reports/digimon_benchmark_final.{json,md}`（本机缓存）；冻结摘要
+合并样本（pooled）test：all P50 402 / P90 1059 / ±100 ms 5.2%；可靠 P50 392 / P90 521 / ±100 ms 5.3%。
+报告：`temp/reports/digimon_qwen3_raw.{json,md}`；冻结摘要
 [`eval/reports/digimon_benchmark_2026-10-18.md`](../eval/reports/digimon_benchmark_2026-10-18.md)。
 
-**真实收益（有参考对比）**：
+**Whisper large-v3 q5 A/B（同参考、同窗口、raw）**：
 
-1. **整集偏移进 `align_cues`**：此前 CLI 不做偏移，test split 原始 P50 400 ms、±100 ms 5.1%；
-   默认开 `estimate_global_offset` 后 P50 57.5 ms、±100 ms 68.3%。偏移由 cue↔ASR 匹配估计，
-   不读参考文本，真实无 CC 场景可用。
-2. **结尾 display linger 不再截短**：参考 CC 显示时间普遍晚于 ASR 语音结束（起点匹配好的
+| split | 集 | CER | match | P50 起 | P90 起 | ±100 ms | 可靠 n | 可靠 P90 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| dev | EP001 | 0.3069 | 52/276 | 560 ms | 2569 ms | 9.6% | 39 | 1135 ms |
+| test | EP002 | 0.2089 | 96/370 | 824 ms | 1578 ms | 3.1% | 84 | 1448 ms |
+| test | EP003 | 0.1981 | 99/317 | 689 ms | 1729 ms | 4.0% | 88 | 1203 ms |
+| test 合计 | 2 | 0.2041 micro | 195/687 | 757 ms | 1653 ms | 3.5% | 172 | 1325 ms |
+
+结论：**Whisper 文本更好**（test CER 0.204 vs 0.263，match 195 vs 153），**Qwen3+FA 打轴更好**
+（P50 400 vs 757 ms，可靠 P90 510 vs 1325 ms）。Whisper 只有 segment 级时间戳；混合方案
+（Whisper 文本 + Qwen3-FA 对齐）是后续候选，不在本轮实现。
+
+**真实收益（与参考对比）**：
+
+1. **结尾 display linger 不再截短**：参考 CC 显示时间普遍晚于 ASR 语音结束（起点匹配好的
    条件下，end error 中位数 EP01 0.53 s / EP02 0.33 s / EP03 0.19 s）。旧逻辑会改 end；
-   现在 `end_is_display_linger` 保留结尾，只修起点。三集自动修复 143→41 条，其中
-   **会缩短结尾的 113→0 条**；起点 P50/P90 不变。测试见 `test_cue_diagnostics` / `test_align_repair`。
-3. **零时长 span 不自动修**：collapsed token 只给 review，不再把 cue 移到单点（`confidence_for`/
+   现在 `end_is_display_linger` 保留结尾，只修起点。raw 下三集自动修复 121→51 条，其中
+   **会缩短结尾的 106→0 条**；起点 P50/P90 不变。
+2. **零时长 span 不自动修**：collapsed token 只给 review，不再把 cue 移到单点（`confidence_for`/
    `action_for`）；EP01 匹配里的 2 条 collapsed span 已从 auto 降级。
-4. **时间轴质量可诊断/可回退**：`diagnose_timeline.py` 输出零时长 run、overlong、质量分；
+3. **时间轴质量可诊断/可回退**：`diagnose_timeline.py` 输出零时长 run、overlong、质量分；
    `TimelinePolicy` 只在 token 灾难性塌缩时回退 segment（EP01–03 都保留 token，段级更差）。
 
-**负结果（不采纳）**：
+**被否掉的“优化”**：
 
-- segment-start overlong trim（本地速率裁剪开头）：EP01 dev 严格变好（match 49→51，
-  P90 1897→1738），但 EP02/03 test 无提升且有 3 条匹配变差；保持 **opt-in**，不做默认。
-- cursor 回看（让 cue 回读前一 cue 抢走的字符）：match 49→58 / 79→100，但 P90 和 ±100 ms
-  全面变差（EP01 1897→2803，EP02 559→1002）；不采纳。
-- 参考 CC 的字幕卡/歌词使 CER 偏高（0.26–0.36），且 CC 写法与 ASR 不同；CER 只作相对比较。
+- **整集偏移**：用户人工确认无真实偏移；`estimate_global_offset` 得到 -0.37/-0.40 s 是在吸收
+  ASR 起点与 CC 显示起点的系统差。把它当默认修正会让字幕整体提前，已从 `align_cues` 默认移除，
+  只保留 `--global-offset` 作为“确有独立证据的整文件漂移”诊断开关。**不要再把它写进验收指标。**
+- **局部偏移原型**：同样会吸收该偏差，不采纳。
+- segment-start overlong trim：EP01 dev 提升、EP02/03 test 中性，保持 opt-in。
+- cursor 回看：增加 match 但 P90/±100 ms 变差，不采纳。
 
-**仍缺什么**：可靠匹配 P90 385 ms > 300 ms 目标；主因是短语气词/重复台词歧义匹配和
+**仍缺什么**：可靠匹配 P90 510 ms 远高于 300 ms 目标；主因是短语气词/重复台词歧义匹配和
 FA 在音乐/重叠段的零时长。需要 P3 VAD 或分段重对齐，不能继续在 test 上调阈值/常数。
 
 ### 本轮会话记录（2026-10-18 第四轮：测试收尾）

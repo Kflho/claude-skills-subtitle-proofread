@@ -27,15 +27,17 @@
 
 ## Consequences
 
-- ✅ 三集有了可复现的冻结基线：`temp/reports/digimon_benchmark_final.{json,md}`。
-- ✅ 证明了两个改动是真实收益：
-  - `align_cues` 默认先做整集偏移估计：test split 原始 P50 400 ms → 57.5 ms，
-    ±100ms 5.1% → 68.3%；
-  - 字幕结尾「display linger」保留：三集自动修复中原本 113 条会缩短结尾，
-    现在 0 条；起点边界指标不变。
-- ✅ 也留下了负结果：segment-start overlong trim 只在 EP01 提升、EP02/03 中性，
-  保持 opt-in；cursor 回看增加 match 但 P90/±100ms 变差，不采纳。
-- ⚠️ test 的可靠匹配 P90 仍 385 ms（目标 ≤300 ms），CER 0.26；剩余误差主要来自
+- ✅ 三集有了可复现的冻结基线：`temp/reports/digimon_qwen3_raw.{json,md}`、
+  `digimon_whisper_raw.{json,md}`；冻结摘要 `eval/reports/digimon_benchmark_2026-10-18.md`。
+- ✅ 证明了真实收益：字幕结尾 display linger 保留后，raw 下三集原本 106 条自动修复会缩短结尾，
+  现在 0 条；起点 P50/P90 不变。Whisper large-v3 q5 A/B 也已跑：文本更好、打轴更差。
+- ❌ **整集偏移被否**：用户人工复核确认视频/CC 无偏移；`estimate_global_offset` 的
+  -0.37/-0.40 s 是在吸收 ASR 起点与 CC 显示起点的系统差。把 offset-corrected 的
+  P50 57.5 ms / ±100 ms 68.3% 当优化会让字幕整体提前。`align_cues` 已改为 opt-in。
+- ❌ 局部偏移原型同样会吸收该偏差，不采纳。
+- ✅ 也留下了负结果：segment-start overlong trim 只在 EP01 提升、EP02/03 中性，保持 opt-in；
+  cursor 回看增加 match 但 P90/±100 ms 变差，不采纳。
+- ⚠️ raw test 的可靠匹配 P90 510 ms（目标 ≤300 ms）、CER 0.263；剩余误差主要来自
   短语气词/重复台词的歧义匹配与 FA 零时长，需要 P3 VAD 或分段重对齐，不能靠调阈值。
 - ⚠️ 参考 CC 本身含字幕卡/写法差异，CER 只能作相对比较；结尾边界是显示时间，
   不应作为语音边界误差的主指标。

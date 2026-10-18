@@ -73,8 +73,8 @@
 
 - 压缩包已下载/解压到 `D:\videos\Animation\TV\数码宝贝`：EP01/02/03 `.mkv` 完整（各 ~1.26–1.37 GB，约 1386 s）。
 - 04–05 只有中文字幕，没有视频；日文 CC 共 54 集。
-- EP01 用户已人工确认 CC 与视频同步；EP02/03 尚未逐句确认。三集基准实测全局偏移 -0.37 / -0.40 s，可能是音频切点或 CC 版本差异，**不能当成 CC 错**，需人工听校后再定。
-- 清单 `eval/manifest.digimon.json`：EP01=dev，EP02/03=test；主故事窗口 `[95,1240]`；ASR 缓存 `temp/asr/digimon_ep00X_main.qwen3.json`。
+- 用户仔细复核后确认：EP01/02/03 的视频/CC **都没有真实偏移**。此前 `estimate_global_offset` 得到的 -0.37/-0.40 s 是 ASR 起点 vs CC 显示起点的系统差，不是视频偏移；**按无偏移评估**。
+- 清单 `eval/manifest.digimon.json`（Qwen3）与 `eval/manifest.digimon.whisper.json`（Whisper A/B）：EP01=dev，EP02/03=test；主故事窗口 `[95,1240]`；ASR 缓存 `temp/asr/digimon_ep00X_main.{qwen3,whisper}.json`。
 
 ## 6. EP01 首轮冒烟（2026-10-18，非验收）
 
@@ -101,20 +101,23 @@ P2 align：match 55/286，garbled 115，missing_asr 74，no_speech 40
 **结论**：首轮数字不能当 P2-14 结果。三集评测改用 **主故事窗口 [95,1240]**，
 参考只作 held-out 基准（`eval/protocol.md`），不回流参数；短语气词/字幕卡单独统计。
 
-### 6.1 三集基准（2026-10-18 第六轮）
+### 6.1 三集基准（2026-10-18 第七轮，raw / 无偏移）
 
-EP01=dev，EP02/03=test；Qwen3 1.7B + FA，60 s 自切；`episode_benchmark.py --global-offset`。
+EP01=dev，EP02/03=test；Qwen3 1.7B + FA，60 s 自切；**用户人工复核视频/CC 无真实偏移**。
 
-| split | 集 | CER | match | P50 起 | P90 起 | ±100ms | 可靠 P90 | offset | 自动修 / 截短 |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| dev | EP001 | 0.3643 | 49/276 | 129 ms | 1897 ms | 46.9% | 424 ms | — | 13 / 0 |
-| test | EP002 | 0.2581 | 79/370 | 69 ms | 559 ms | 65.8% | 361 ms | -0.37 s | 19 / 0 |
-| test | EP003 | 0.2698 | 79/317 | 46 ms | 1743 ms | 70.9% | 410 ms | -0.40 s | 9 / 0 |
-| test 合计 | 2 | 0.2633 | 158/687 | 57.5 ms | 1151 ms | 68.3% | 385 ms | — | 28 / 0 |
+| split | 集 | CER | match | P50 起 | P90 起 | ±100ms | 可靠 P90 | 自动修 / 截短 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| dev | EP001 | 0.3643 | 49/276 | 129 ms | 1897 ms | 46.9% | 424 ms | 13 / 0 |
+| test | EP002 | 0.2581 | 79/370 | 394 ms | 837 ms | 7.6% | 494 ms | 21 / 0 |
+| test | EP003 | 0.2698 | 74/317 | 406 ms | 1555 ms | 2.7% | 526 ms | 17 / 0 |
+| test 合计 | 2 | 0.2633 | 153/687 | 400 ms | 1196 ms | 5.1% | 510 ms | 38 / 0 |
 
-- 整集偏移（既有算法，本轮接进 `align_cues` 默认）把 test P50 从 400 ms 降到 57.5 ms。
-- 结尾 display linger 保留后，原本 113 条「会缩短结尾」的自动修复降为 0；起点指标不变。
-- 可靠 P90 385 ms 仍高于 300 ms 目标；主因是短语气词/重复台词歧义和 FA 零时长，需要 P3 VAD/分段重对齐。
+- 此前用 `estimate_global_offset` 得到的 -0.37/-0.40 s 是 ASR 起点 vs CC 显示起点的系统差，
+  用户确认不是视频偏移；`align_cues` 已改为 opt-in，不再默认修正。
+- 结尾 display linger 保留后，raw 下原本 106 条「会缩短结尾」的自动修复降为 0；起点指标不变。
+- Whisper large-v3 q5 A/B（raw）：test CER 0.204、match 195/687、P50 757 ms、可靠 P90 1325 ms；
+  **文本更好、打轴更差**。
+- 可靠 P90 510 ms 仍远高于 300 ms 目标；主因是短语气词/重复台词歧义和 FA 零时长，需要 P3 VAD/分段重对齐。
 
 ## 7. clear 后恢复入口
 
@@ -140,12 +143,12 @@ python scripts\eval\diagnose_timeline.py `
   --srt temp\references\digimon\EPXXX.main.srt --shift -95
 ```
 
-当前状态（2026-10-18 第六轮）：
+当前状态（2026-10-18 第七轮）：
 
 ```text
-EP01/02/03 视频 ✅；日文 CC 54 集 ✅；EP01 CC 同步已人工确认，EP02/03 待确认
-主故事窗口 [95,1240]；ASR 缓存 temp/asr/digimon_ep00X_main.qwen3.json
-基准：temp/reports/digimon_benchmark_final.{json,md}
+EP01/02/03 视频 ✅；日文 CC 54 集 ✅；用户人工复核：视频/CC 无真实偏移
+主故事窗口 [95,1240]；ASR 缓存 temp/asr/digimon_ep00X_main.qwen3.json 与 .whisper.json
+基准：temp/reports/digimon_qwen3_raw.{json,md}、digimon_whisper_raw.{json,md}
 协议：eval/protocol.md；ADR-009（参考=考卷）
 测试：1362 passed / 79.6%
 ```

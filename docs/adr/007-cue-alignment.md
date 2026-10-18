@@ -34,9 +34,9 @@
 
 9. **不改默认管线**：P2 以独立 CLI 交付（`scripts/asr/align_cues.py`），默认 dry-run。`run_all`/`fix_orchestrator` 的接入等真实金标验收后再做（方案 §8.1 P2 验收）。
 
-10. **结尾是显示时间，不是语音边界**（2026-10-18，三集基准后补）：日文 CC 的 cue end 普遍晚于 ASR 语音结束（起点匹配好的条件下中位数 0.19–0.53 s），这是字幕阅读时间。`CueAlignment.end_is_display_linger()` 在 `0 < end_error ≤ max_time_shift` 且起点可修时保留原结尾，只移动起点；负 end error（语音超出 cue）仍按真实截断处理。三集回放：原本 113 条自动修复会缩短结尾，改后 0 条，起点 P50/P90 不变。依据见 ADR-009 与 `eval/protocol.md`。
+10. **结尾是显示时间，不是语音边界**（2026-10-18，三集基准后补）：日文 CC 的 cue end 普遍晚于 ASR 语音结束（起点匹配好的条件下中位数 0.19–0.53 s），这是字幕阅读时间。`CueAlignment.end_is_display_linger()` 在 `0 < end_error ≤ max_time_shift` 且起点可修时保留原结尾，只移动起点；负 end error（语音超出 cue）仍按真实截断处理。raw 三集回放：原本 106 条自动修复会缩短结尾，改后 0 条，起点 P50/P90 不变。依据见 ADR-009 与 `eval/protocol.md`。
 
-11. **整集偏移进默认 CLI**：`align_cues.py` 默认先 `estimate_global_offset`（≥20 条高相似 match + MAD ≤150 ms），有偏移就整体平移后重映射；`--no-global-offset` 保留原始诊断。三集 test：P50 400→57.5 ms、±100 ms 5.1%→68.3%。
+11. **整集偏移改为 opt-in 诊断**（2026-10-18 第七轮修正）：`align_cues` 默认**不**做全局偏移。用户人工复核确认 EP02/03 的视频/CC 没有真实偏移；`estimate_global_offset` 的 -0.37/-0.40 s 是在吸收 ASR 起点与 CC 显示起点的系统差。把它当默认修正会让字幕整体提前。保留 `--global-offset` 供“确有独立证据的整文件漂移”（不同剪辑/帧率）使用；局部偏移同样不采纳。**注意**：`fix_by_asr` 仍保留既有的默认整集偏移行为；在无真实偏移的素材上运行前应先确认，后续给它加显式开关。
 
 ## Consequences
 
@@ -57,8 +57,10 @@
   163ms 边界修正），精度没有实质退化。
 - ⚠️ 对齐依赖 cue 文本可读；纯图形/矢量（ASS `\p1`）cue 无文本，天然是 `empty_text`/`no_speech`。
 - ⚠️ ASS 写回目前只更新文本、不更新时间码，`align_cues.py --write` 对 `.ass` 直接拒绝（退出码 4），避免「成功但什么都没改」。
-- ✅ **三集 held-out 基准已建立**（2026-10-18）：EP01=dev，EP02/03=test；只读评测器 `scripts/eval/episode_benchmark.py`，协议 `eval/protocol.md`。test 现状：CER micro 0.2633、起点 P50 57.5 ms、±100 ms 68.3%、可靠匹配 P90 385 ms。
-- ⚠️ **P90 未达标**：可靠匹配 385 ms > 300 ms；剩余误差来自短语气词/重复台词歧义和 FA 零时长，需要 P3 VAD/分段重对齐，不能靠调阈值。
+- ✅ **三集 held-out 基准已建立**（2026-10-18）：EP01=dev，EP02/03=test；只读评测器 `scripts/eval/episode_benchmark.py`，协议 `eval/protocol.md`。raw test：CER micro 0.2633、起点 P50 400 ms、可靠匹配 P90 510 ms、±100 ms 5.1%。
+- ⚠️ **P90 远未达标**：可靠匹配 510 ms > 300 ms；剩余误差来自短语气词/重复台词歧义和 FA 零时长，需要 P3 VAD/分段重对齐，不能靠调阈值。
+- ⚠️ **整集偏移是伪修正**：用户人工确认视频/CC 无偏移；`estimate_global_offset` 的 -0.37/-0.40 s 是 ASR 起点 vs CC 显示起点的系统差。`align_cues` 已改为 opt-in；不要把 offset-corrected 数字当验收。
+- ✅ **Whisper A/B 已跑**（large-v3 q5）：文本更好（test CER 0.204 vs Qwen3 0.263，match 195 vs 153），打轴更差（P50 757 vs 400 ms，可靠 P90 1325 vs 510 ms）。Whisper 只有 segment 时间戳。
 - ⚠️ **两个负结果**：segment-start overlong trim 只在 EP01 dev 提升、EP02/03 test 中性，保持 opt-in；cursor 回看增加 match 但 P90 变差，不采纳。
 
 ## Alternatives rejected

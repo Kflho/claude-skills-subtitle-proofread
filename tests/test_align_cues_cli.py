@@ -141,7 +141,7 @@ def _write_srt(path, cues):
     path.write_text('\n'.join(lines), encoding='utf-8')
 
 
-def test_global_offset_is_detected_and_applied_by_default(tmp_path):
+def test_global_offset_is_opt_in(tmp_path):
     cues = [(10.0 + i * 3, 11.0 + i * 3, f'あ{i}') for i in range(22)]
     srt = tmp_path / 'ep.srt'
     _write_srt(srt, cues)
@@ -152,7 +152,7 @@ def test_global_offset_is_detected_and_applied_by_default(tmp_path):
     output = tmp_path / 'report.json'
 
     code = main(['--srt', str(srt), '--asr-json', str(asr),
-                 '--output', str(output)])
+                 '--output', str(output), '--global-offset'])
     assert code == 0
     payload = json.loads(output.read_text(encoding='utf-8'))
     assert payload['global_offset'] == pytest.approx(0.5, abs=0.01)
@@ -160,7 +160,7 @@ def test_global_offset_is_detected_and_applied_by_default(tmp_path):
 
     raw_out = tmp_path / 'raw.json'
     code = main(['--srt', str(srt), '--asr-json', str(asr),
-                 '--output', str(raw_out), '--no-global-offset'])
+                 '--output', str(raw_out)])
     assert code == 0
     raw = json.loads(raw_out.read_text(encoding='utf-8'))
     assert raw['global_offset'] is None

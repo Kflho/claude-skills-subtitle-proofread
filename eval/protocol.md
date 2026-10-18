@@ -53,7 +53,7 @@
 | `TimelinePolicy.fallback_*` | 零时长 ≥50%、单 run ≥10% unit、overlong ≥20% | 相对阈值，避免按集长度改变含义 | 单测 + EP01–03 均不回退（segment 由同一批 token 生成） |
 | `TimelinePolicy.repair_overlong` | 仅 segment 起始 token，>max(2 s, 6×rate) | 机制：FA 把前导静音吸进句首 token；局部中位速率 | dev 严格变好，test 中性 → **opt-in** |
 | `align_repair` display linger | 0 < end_error ≤ max_time_shift 且起点可修 | EP01–03 CC 分布：起点匹配好时 end 中位 +0.53/+0.33/+0.19 s | 三集 113→0 条截短，起点指标不变 |
-| `align_cues` 整集偏移 | ≥20 条高相似 + MAD ≤150 ms | 既有 ADR-007 实现；Sari +0.5 s 回放 367/370 | test P50 400→57.5 ms |
+| `align_cues` 整集偏移 | **opt-in，默认关**；只在有独立证据（不同剪辑/帧率）时用 | 用户人工复核 Digimon 视频/CC 无偏移；估计值 -0.37/-0.40 s 是 ASR 起点 vs CC 显示起点的系统差 | 不要用 offset-corrected 数字当验收；局部偏移原型同样不采纳 |
 | `_select_window` search | ±6 s | 先验 + cue 间隔；未用 CC 调 | 待做窗口扰动自洽诊断 |
 | cursor 回看 | 未启用 | 实测增加 match 但 P90/±100 ms 变差 | 负结果，不采纳 |
 
@@ -79,4 +79,7 @@
 - CC 含说话人标签/字幕卡/歌词，清洁后仍有非对白；CER 会偏高；
 - CC 写法（片假名、省略语气词）与 ASR 不同，文本差异不全是 ASR 错；
 - 主故事窗口边界由人工切；EP01 已由用户确认与视频同步，EP02/03 尚未逐句人工核对；
+- **不要用全局偏移吸收 onset bias**：用户人工复核确认 Digimon EP02/03 视频/CC 没有真实偏移；
+  raw 才是验收口径。估计的 -0.37/-0.40 s 是 ASR 起点与 CC 显示起点的系统差；全局/局部偏移
+  都会让字幕整体提前，不作为默认修正。
 - `match` 只统计文本相似度 ≥0.85 的 cue，低相似 cue 不进 P50/P90，样本量要一起看。

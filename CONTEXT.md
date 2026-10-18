@@ -71,7 +71,7 @@ scripts/
 ├── asr/                        # 2026 ASR/P2 独立入口（不接默认管线）
 │   ├── qwen3_worker.py         #   长驻 worker（隔离 venv）
 │   ├── qwen3_transcribe.py     #   单文件转录 CLI
-│   └── align_cues.py           #   P2 对齐 CLI（默认 dry-run；默认整集偏移）
+│   └── align_cues.py           #   P2 对齐 CLI（默认 dry-run；整集偏移 opt-in）
 │
 ├── eval/                       # 评测（只读；参考字幕=考卷，见 eval/protocol.md）
 │   ├── asr_eval.py             #   P0 全文件 CER/边界
@@ -131,9 +131,9 @@ P0 链路（Whisper 编排/VAD、翻译、专名、OP/ED、编排）已补齐；
 
 ASR 架构已按「稳定核心 + 插件适配器」落地：`lib/asr/base.py`（契约）、`registry.py`（自动发现）、`router.py`（路由），新模型只写 `lib/asr/adapters/<name>.py`，不改 core。P1 进度见 `docs/tech-route-progress.md`。
 
-P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 → 信号/置信度；`quality.py` 评估零时长/overlong，token 灾难性塌缩才回退 segment）、`fix/align_repair.py`（修复计划/时间码/整集偏移/相邻 cue 联动；结尾 display linger 保留）、`scripts/asr/align_cues.py`（端到端 CLI，默认 dry-run，默认先做整集偏移）、`run_all --asr`（flag 控制）。参考字幕按 `eval/protocol.md` 只作 held-out 基准；三集基准看 `temp/reports/digimon_benchmark_final.{json,md}`。莎莉 EP001 历史实机验证：`qwen_asr` 180s 分块会塌缩 → worker 自切 60s + 补零（ADR-008；机械/吞吐验证，不作金标）。
+P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 → 信号/置信度；`quality.py` 评估零时长/overlong，token 灾难性塌缩才回退 segment）、`fix/align_repair.py`（修复计划/时间码/整集偏移/相邻 cue 联动；结尾 display linger 保留）、`scripts/asr/align_cues.py`（端到端 CLI，默认 dry-run；整集偏移改为 opt-in）、`run_all --asr`（flag 控制）。参考字幕按 `eval/protocol.md` 只作 held-out 基准；用户已确认视频/CC 无真实偏移，raw 才是验收口径。三集基准：`temp/reports/digimon_qwen3_raw.{json,md}`、`digimon_whisper_raw.{json,md}`。
 
-素材现状：**验收作品定为数码宝贝（Digimon Adventure）**，目录 `D:\videos\Animation\TV\数码宝贝`。**EP01/02/03 视频完整（各约 1386s）**；EP01 已由用户人工核对日文 CC 与视频同步，EP02/03 待确认（实测有 -0.37/-0.40s 全局偏移）。日文参考：`日语字幕\` 下 S01E01–S01E54 共 54 集 `ja[cc].srt`，已清洁；主故事窗口 `[95,1240]`。01–05 另有中文字幕，只能做参考无关/翻译复用。素材台账 `eval/materials.md`，清单 `eval/manifest.digimon.json`（EP01=dev，EP02/03=test）。莎莉/阿童木历史素材只保留机制/吞吐回放。
+素材现状：**验收作品定为数码宝贝（Digimon Adventure）**，目录 `D:\videos\Animation\TV\数码宝贝`。**EP01/02/03 视频完整（各约 1386s）**；用户人工复核三集视频/CC 均无真实偏移。日文参考：`日语字幕\` 下 S01E01–S01E54 共 54 集 `ja[cc].srt`，已清洁；主故事窗口 `[95,1240]`。01–05 另有中文字幕，只能做参考无关/翻译复用。素材台账 `eval/materials.md`，清单 `eval/manifest.digimon.json`（Qwen3）与 `eval/manifest.digimon.whisper.json`（A/B）。莎莉/阿童木历史素材只保留机制/吞吐回放。
 
 测试：1362 passed / 0 failed / 79.6% 覆盖；矩阵与剩余缺口见 `docs/test-plan.md`。
 
