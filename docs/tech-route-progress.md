@@ -66,9 +66,9 @@ ASR：Qwen3 1.7B + FA JSON；Whisper large-v3 q5 JSON（temp/asr/*_main.*.json�
 
 | 阶段 | 内容 | 状态 | 验收 |
 |---|---|---|---|
-| P0 | 评测金标清单 + 基线指标 | 🟡 代码就绪；金标待用户素材 | `eval/manifest.json` 填真实集；旧管线 CER/边界可复现 |
-| P1 | 稳定核心 + Qwen3/Whisper 适配 + 评测/CLI | 🟡 smoke 通过；A/B 等用户素材（阿童木任务已取消） | 3 集跑通；A/B 有记录；默认不变 |
-| P2 | Qwen3-FA + cue mapper + align_repair | 🟡 核心/CLI/run_all/实机验证完成；默认未切 | 边界 P50 ≤100ms / P90 ≤300ms（待金标） |
+| P0 | 评测金标清单 + 基线指标 | 🟡 三集基准已跑；参考是 CC 考卷、非人工金标 | `episode_benchmark` + `manifest.digimon*`；CER/边界可复现；用户确认无偏移 |
+| P1 | 稳定核心 + Qwen3/Whisper 适配 + 评测/CLI | ✅ 3 集跑通；Qwen3 vs Whisper large-v3 A/B 已记录；默认不变 | 契约/registry/router/CLI 稳定；A/B 有 raw 数据 |
+| P2 | Qwen3-FA + cue mapper + align_repair | 🟡 核心/CLI/`run_all --asr` 完成；P2-14 未达标 | raw test P50 400 ms / 可靠 P90 510 ms（目标 100/300）；进度见 §4.6 |
 | 测试 | 1362 tests / 79.6% 覆盖 / 0 failed | 🟡 主链补齐；剩余根脚本/nouns 旧入口/whisper_backends/align_cues | 关键路径每个分支至少一条测试 |
 | P3 | FireRedVAD/AED，VAD 降级为提示 | ⬜ 未开始 | speech/music/singing 时间线对比 |
 | P4 | glossary-first + 翻译 prompt，百度下线 | ⬜ 未开始 | 专名 F1 / 翻译人工评分 |
