@@ -9,7 +9,7 @@
 |---|---|---|---|---|
 | FireRedVAD / AED | `models/FireRedVAD/{VAD,Stream-VAD,AED}` | ~7 MB | `.venv-qwen` + `fireredvad` 0.0.2（CPU） | ✅ 已下载、已实测 |
 | FireRedVAD 代码 | `models/FireRedVAD-code/` | ~1 MB | 参考代码/示例 | ✅ |
-| VibeVoice-ASR-BitNet | `models/VibeVoice-ASR-BitNet/` | ~1.58 GB（GGUF） | `VibeASR.cpp`（CPU，MinGW 已构建） | ✅ 已下/已编译；60s 实测无 who/when |
+| VibeVoice（已删除） | — | — | — | ⛔ 说话人无用，2026-10 用户决定删除；资产已清理 |
 | Mel-Band RoFormer | `models/MelBandRoformer/` | fp16 456 MB / fp32 913 MB | 暂无（ComfyUI 格式，需适配） | ✅ 权重已下；运行时未接线 |
 | Qwen3-ASR-1.7B | `models/Qwen3-ASR-1.7B` | ~3.9 GB | `.venv-qwen` + `qwen-asr` worker | ✅ 已有 |
 | Qwen3-ForcedAligner-0.6B | `models/Qwen3-ForcedAligner-0.6B` | ~1.2 GB | 同上 | ✅ 已有 |
@@ -94,62 +94,13 @@ python scripts/audio/detect_events.py --wav temp/firered_ep001.wav `
 （AED 的 speech 与 VAD 的 666.7s 不同，前者更严格；两条都保留作证据）。
 下一步：主流程消费 hints（OP/ED 候选、FA 空洞诊断），**只作提示，不参与门控**。
 
-## 3. VibeVoice-ASR-BitNet（✅ 已下/已编译；能力测试负面）
+## 3. 说话人 / VibeVoice（已删除）
 
-### 3.1 是什么
+2026-10 用户决定：**说话人没有用途，删除 VibeVoice 与 diarization 计划**。
+`models/VibeVoice-ASR-BitNet` 与 `models/VibeASR.cpp` 已删除。
+删除前的能力测试（BitNet 60s：无 who/when、只有纯文本、专名更差）保留在
+`docs/capability-tests.md`，防止以后又把它当“说话人方案”捡回来。
 
-`microsoft/VibeVoice-ASR-BitNet` 是 VibeVoice-ASR 的 **CPU 边缘版**（VibeASR.cpp）：
-异构量化 I8_S（VAE）+ I2_S（LM），总大小 **1.58 GB**，i7-13700 上 4 线程 RTF≈0.37。
-官方定位支持 Who/When/What、热词和 50+ 语言；但**本机 60s 实测（text/json 两种 prompt）
-只输出纯文本，没有 who/when**，且专名比 Qwen3 差（见 `docs/capability-tests.md`）。
-不是 7B fp16 的 17 GB 版本，**不要下 safetensors**。
-
-### 3.2 路径（下载完成后）
-
-```text
-models/VibeVoice-ASR-BitNet/vibeasr-vae-encoder-i8_s.gguf      # ~0.65 GB
-models/VibeVoice-ASR-BitNet/vibeasr-lm-i2_s-embed-q6_k.gguf   # ~0.92 GB
-models/VibeVoice-ASR-BitNet/{config,generation_config,tokenizer,...}.json
-```
-
-来源：ModelScope `microsoft/VibeVoice-ASR-BitNet`（HF 同名；HF CDN 慢，用 ModelScope）。
-
-### 3.3 运行时（已构建）
-
-- `cmake` 4.4.4 装在 `.venv-qwen\Scripts\cmake.exe`；MinGW `g++`/`mingw32-make` 在 `C:\mingw64\bin`。
-- 已 clone + 构建：`models/VibeASR.cpp/build/bin/asr_infer.exe`（3.0 MB，2026-10-19）。
-- 构建命令（复现用）：
-
-```powershell
-# 需要 cmake + MinGW；本机已装
-git clone --recursive https://github.com/microsoft/VibeASR.cpp.git models\VibeASR.cpp
-cd models\VibeASR.cpp
-..\..\.venv-qwen\Scripts\cmake.exe -B build -G "MinGW Makefiles" `
-  -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc `
-  -DCMAKE_CXX_COMPILER=g++ -DCMAKE_MAKE_PROGRAM=mingw32-make
-..\..\.venv-qwen\Scripts\cmake.exe --build build --target asr_infer -j 8
-```
-
-```powershell
-# 运行（CPU；-t 线程数；--context 可放角色/专名热词）
-models\VibeASR.cpp\build\bin\asr_infer.exe `
-  --vae-model models\VibeVoice-ASR-BitNet\vibeasr-vae-encoder-i8_s.gguf `
-  --lm-model  models\VibeVoice-ASR-BitNet\vibeasr-lm-i2_s-embed-q6_k.gguf `
-  --audio temp\firered_ep001.wav -t 8 --context "デジモン, 太一, アグモン"
-```
-
-> 60s 实测已完成：RTF 0.435，**没有 who/when，只有纯文本**，专名更差；
-> 不能当说话人来源（见 `docs/capability-tests.md`）。
-
-- **MSVC 不支持**；必须 GCC/Clang（MinGW-w64）。
-- 纯 CPU，16 GB 显存无关；RTF <1 可接受。
-- 输出实测是纯文本，**没有 who/when**；不要直接当 SRT 或说话人来源。
-
-### 3.4 集成位（未接线）
-
-- 只做 **单集实验**：角色归属/热词是否改善翻译人称/敬称；不设默认 ASR。
-- 候选接缝：`lib/asr/adapters/vibevoice.py`（ASR）或独立的 diarization stage。
-- 若收益不明显：保留 Qwen3-ASR + CC 边界，不进入主链路。
 
 ## 4. Mel-Band RoFormer（✅ 权重已下载）
 
@@ -175,8 +126,7 @@ models/MelBandRoformer/MelBandRoformer_fp32.safetensors   # 913 MB（下载中�
 1. **FireRedVAD → AudioHints**：新建 `lib/audio/base.py`（`AudioEvent`, `AudioHints`, provider 协议）
    + `lib/audio/fireredvad_provider.py`（subprocess 调 `.venv-qwen`，避免主环境 torch）；
    先输出 `speech/music/singing` 时间线，接 OP/ED 候选与空洞诊断。
-2. **VibeVoice 说话人**：BitNet 60s 实测无 who/when，不能顶；若要说话人，先决定
-   7B fp16（17GB）或专用 diarizer（3D-Speaker/Sortformer），再单集验收益。
+2. **说话人**：已删除（用户决定）；不要再引入 VibeVoice 或 diarizer。
 3. **Mel-Band A/B**：找运行时/适配器；只做分离 vs 原音频的 ASR 对比，默认关。
 4. 所有新模型只通过 ADR-011 的接缝接入；没有指标不算完成。
 
@@ -185,11 +135,6 @@ models/MelBandRoformer/MelBandRoformer_fp32.safetensors   # 913 MB（下载中�
 ```powershell
 # FireRedVAD（已完成）
 hf download FireRedTeam/FireRedVAD --local-dir models\FireRedVAD
-
-# VibeVoice BitNet（ModelScope，选 GGUF + JSON，不选 safetensors）
-.venv-qwen\Scripts\python.exe -c "from modelscope import snapshot_download; \
-snapshot_download('microsoft/VibeVoice-ASR-BitNet', local_dir='models/VibeVoice-ASR-BitNet', \
-allow_file_pattern=['*.gguf','*.json','README.md'])"
 
 # Mel-Band（ModelScope）
 .venv-qwen\Scripts\python.exe -c "from modelscope import snapshot_download; \
@@ -215,6 +160,6 @@ HF CDN 在本机很慢（~0.1–0.7 MB/s，常卡住）；ModelScope 可到 2–
 
 1. 先读本页，确认 `models/` 路径存在；**不要重新下载**。
 2. FireRedVAD 用 `.venv-qwen`，跑一次 `hello_zh.wav` 验证 import/权重。
-3. VibeVoice 只认 GGUF（1.58 GB），不认 17 GB safetensors；运行时是 VibeASR.cpp。
+3. 说话人/VibeVoice 已删除；不要再下载。
 4. 所有模型只通过 `docs/adr/011-technology-integration-map.md` 的接缝接入。
 5. Whisper 系不下载、不测试。

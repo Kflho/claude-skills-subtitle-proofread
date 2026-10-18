@@ -10,7 +10,7 @@
 |---|---|---|---|---|
 | Qwen3-ASR-1.7B + FA | 日语 ASR + 字符级对齐 | 3 集 CC 基准、端到端、signed/空洞 | **有强证据**，日语媒体第一梯队 | ✅ 主 ASR/对齐 |
 | FireRedVAD + AED | VAD + speech/singing/music | README 样例、EP001 全窗口、空洞归因 | 能跑、能分事件；**空洞归因只支持“过滤”，不支持“门控”** | 🟡 只作 AudioHints 证据 |
-| VibeVoice-ASR-BitNet | 60min Who/When/What + 热词 | 60s 日语动画片段（text/json 两种 prompt） | **没有 who/when；只有纯文本，专名更差** | ⛔ 不能接说话人/时间轴 |
+| VibeVoice-ASR-BitNet | 60min Who/When/What + 热词 | 60s 日语动画片段（text/json 两种 prompt） | **没有 who/when；专名更差；用户决定删除说话人** | ⛔ 已删资产，不接 |
 | Mel-Band RoFormer | 人声分离 | 无（只有权重，运行时未接） | 未测 | ⛔ 暂不接 |
 | LLM 翻译（DeepSeek） | 日→中翻译 | 1 句短句 API 验证 | 能调用；**无成集质量证据** | 🟡 只做 20 cue pilot |
 | Review 阶梯 | L0-L3 减人工 | 单元测试（工作单/set_time） | 机制可用；**无 pilot 收益证据** | 🟡 先做 EP001 小样本 pilot |
@@ -47,7 +47,7 @@
 - 阈值敏感性：`speech_threshold=0.4` 等默认值未扫；不同 BGM 强度下可能漂移。
 - 与 CC 边界的相关性：AED speech onset 是否比 ASR 更接近 cue 边界，未测。
 
-## 3. VibeVoice-ASR-BitNet：能力测试（负面）
+## 3. VibeVoice-ASR-BitNet：能力测试（负面，资产已删除）
 
 60s 日语动画片段（主窗口起点后 60s，CPU 8 线程，greedy）：
 
@@ -59,10 +59,8 @@
 | 结论 | 这个 **BitNet/1.5B CPU 版不是 7B 的 Who/When/What 能力**；只能当“另一个文本 ASR”，且更差 |
 
 **因此**：原计划“用 VibeVoice 做说话人归属/翻译人称”**没有依据，不能接**。
-若确实需要说话人，只有三条路：
-1. 下 7B fp16（17GB，16GB 显存不够，需量化/CPU，成本高）；
-2. 换专用 diarizer（3D-Speaker / Sortformer / pyannote，需另测）；
-3. 放弃说话人，翻译只靠上下文。
+用户已决定：**说话人没有用途，删除 VibeVoice 与 diarization**；资产已清理，
+不再考虑 7B fp16 或专用 diarizer。
 
 ## 4. Mel-Band：未测
 
@@ -97,5 +95,5 @@ FA 日语 AAS 42.2ms（官方）。这是目前唯一“可以直接接主链路
 2. FireRedVAD 空洞归因扩到 EP002/003（验证 6/30 是否稳定）。
 3. Review pilot：EP001 272 条里抽 20 条，AI 填 decision → apply → 对比 review 数与质量。
 4. 翻译 pilot：20 cue + glossary，测术语一致性/漏译/长度。
-5. VibeVoice：先决定要不要说话人；要的话测 7B fp16 或专用 diarizer，不再用 BitNet 顶。
+5. ~~VibeVoice/说话人~~：已删除（用户决定），不再做。
 6. Mel-Band：先补运行时，再做 60–120s A/B。

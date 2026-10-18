@@ -3,7 +3,7 @@
 > **目的**：下载前先回答“这些技术真的新、真的领先吗”。
 > **结论**：只有 **FireRedVAD** 是“新且明确领先、值得马上下载”的；
 > **Qwen3-ASR-1.7B + FA 已在本机，仍是日语媒体 ASR/对齐第一梯队**，不用重下；
-> **VibeVoice-ASR** 是唯一值得做单集实验的可选领先模型（13–17 GB，重）；
+> **VibeVoice/说话人已删除**（用户决定说话人无用；BitNet 实测也无 who/when）；
 > 其余（Parakeet JA、ReazonSpeech、BuzzASR、WhisperX、pyannote、Sortformer v1、Demucs）
 > 要么旧、要么不是日语领先、要么被许可/环境挡住。**Whisper 系按你的要求不下、不测。**
 > **2026-10-19 更新**：P0 FireRedVAD 已下载、实测并接入 `AudioHints` provider/CLI；
@@ -26,7 +26,7 @@
 | Qwen3-ASR-0.6B | 2026-01-28 | 无日语独立基准；本机试跑 10 分钟未完成 EP001（疑似循环） | 未证明、当前不可用 | 已有，暂不接 |
 | **Qwen3-FA-0.6B** | 2026-01-28 | 日语 AAS **42.2 ms**（raw）、81.3 ms（300s）；NFA/WhisperX 无日语数 | **日语对齐领先** | 已有，保留 |
 | **FireRedVAD + AED** | 2026-02/03 | FLEURS-VAD-102 F1 **97.57**，超过 Silero 95.95 / TEN 95.19 / FunASR 90.91 / WebRTC 52.30；支持 speech/singing/music | **新且领先（自评，需本机复测）** | **P0 下载** |
-| VibeVoice-ASR-7B | 2026-01-21 | 60 分钟单次、Who/When/What、热词、50+ 语言、MIT；HF 68.7 万下载 | 新、差异化领先；**动画域未验证** | P1 可选实验 |
+| VibeVoice-ASR-7B | 2026-01-21 | 60 分钟单次、Who/When/What、热词、50+ 语言、MIT | 说话人无用，**已删除** | 不下载/不接 |
 | Parakeet TDT 0.6B JA | 2024-05（2025-02 更新） | 被 2025-08 的 v3 取代；日文本体非领先 | **旧** | 不下 |
 | Parakeet TDT 0.6B v3 | 2025-08 | 快（RTF 0.003），日语 WER **0.344**；模型卡语言列表无日语 | 速度型，非领先 | 不下 |
 | ReazonSpeech nemo-v2 | 2024-01 | 日语 WER 0.348；两年未更新 | **旧** | 不下 |
@@ -56,20 +56,16 @@
 - 为什么是它：2026-03 发布，唯一同时覆盖 VAD + AED、且公开 F1 超过 Silero/TEN/FunASR；
   0.6M 参数、CPU 可跑，适合当“音频事件提示”，不参与门控。
 
-### P1｜可选实验（先单集验证收益，再决定）
+### P1｜已删除（说话人无用）
 
-**VibeVoice-ASR-BitNet**（或 fp16）
-- 权重：`microsoft/VibeVoice-ASR-BitNet`（12.96 GB，MIT）或 `microsoft/VibeVoice-ASR`（17.35 GB）。
-- 目标：`models/VibeVoice-ASR-BitNet/`；16 GB VRAM 需顺序加载，不能与 Qwen3 同时常驻。
-- 验证：EP001 单集，比较“谁在说”对翻译人称/敬称的改善；不看 CER 单项。
-- 风险：7B、BitNet/量化运行时未定；动画重叠喊叫域未验证；不设默认。
-- 若 OOM/收益不明显：不进入主链路，保留 Qwen3 + 字幕边界。
+**VibeVoice / 说话人**：用户决定删除；`models/VibeVoice-ASR-BitNet` 与 `VibeASR.cpp` 已清理。
+BitNet 60s 实测无 who/when，也不能做文本 ASR（专名更差），不再考虑。
 
-### P2｜可选（有明确需求再下）
+### P2｜已下，未接线
 
 **Mel-Band RoFormer（人声分离）**
-- `Kijai/MelBandRoformer_comfy`（1.37 GB，许可待确认）或 MIT GGUF 0.46 GB；
-  用 `audio-separator` 之类的推理封装，先做“原音频 vs 分离音频”的 ASR A/B。
+- `Kijai/MelBandRoformer_comfy` fp16 456MB / fp32 913MB 已下载；运行时/适配器未接。
+- 先补运行时，再做“原音频 vs 分离音频”的 60–120s ASR A/B；默认关。
 - Demucs 仅保留为已有 fallback，不再投入。
 
 ### 不下（明确淘汰/排除）
@@ -111,13 +107,13 @@
 - **保留**：Qwen3-ASR-1.7B + Qwen3-FA；Whisper 本机 CUDA 只作已有 fallback，不再下载/测试。
 - **新增**：FireRedVAD/AED → `AudioHints`（OP/ED、空洞诊断、翻译场景）。
 - **降级**：0.6B 草稿、Demucs、Sortformer v1、Parakeet/Reazon 从计划中移除。
-- **可选**：VibeVoice（说话人/热词）、Mel-Band RoFormer（分离），都必须先单集 A/B。
-  VibeVoice-BitNet 60s 实测**无 who/when**、只有纯文本 → 不能接说话人；7B fp16 或专用 diarizer 另议。
+- **可选**：Mel-Band RoFormer（分离），先单集 A/B。
+  VibeVoice/说话人已删除（用户决定），不再考虑 7B fp16 或专用 diarizer。
 - **观察**：FireRedASR2-LLM（2026-02，中文强；日语无基准）、Voxtral Mini 4B（更新但更差）。
 
 ## 6. 状态与下一步
 
 1. ✅ P0 FireRedVAD：权重 + 代码已下；EP001 实测；`lib/audio` provider/CLI 已接入。
-2. ✅ P1 VibeVoice-BitNet：GGUF 1.58GB 已下；VibeASR.cpp 已用 MinGW 编译；**单集测试待跑**。
+2. ⛔ P1 VibeVoice/说话人：已删除（用户决定说话人无用；资产/运行时已清理）。
 3. ✅ P2 Mel-Band：fp16/fp32 权重已下；运行时未接，分离 A/B 暂缓。
 4. 下一步：主流程消费 `AudioHints`（OP/ED、空洞诊断）；VibeVoice 单集“角色归属是否改善翻译”；Review 自动分级 + gate 计数。

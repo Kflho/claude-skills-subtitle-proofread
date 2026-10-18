@@ -128,7 +128,7 @@ scripts/
    **只接受国内服务**，国外服务暂不配置。翻译以外的阶段不新增 LLM 调用
    （Review L1/L2 = 本 skill agent 工作单）；云 ASR 国内可选但不默认，国外不纳入。
 
-10. **技术只通过接缝接入**: 所有候选技术（ASR/FA/VAD/AED/说话人/分离/翻译/云/双引擎等）
+10. **技术只通过接缝接入**: 所有候选技术（ASR/FA/VAD/AED/分离/翻译/云/双引擎等）
     必须在 `docs/adr/011-technology-integration-map.md` 的接缝里有位置；可选能力默认
     null 实现，新增 = 加 adapter/stage + 配置 + 证据，不改流程。**没有接缝的技术不接；
     没有指标（能力 + review/成本）的接入不算完成。**
@@ -148,23 +148,23 @@ P0 链路（Whisper 编排/VAD、翻译、专名、OP/ED、编排）已补齐；
 
 2026 技术栈修订提案：`docs/tech-route-2026.md`；决策记录：`docs/adr/005-asr-alignment-stack.md`、`docs/adr/006-stable-asr-core.md`、`docs/adr/007-cue-alignment.md`、`docs/adr/008-qwen3-long-audio-chunking.md`、`docs/adr/009-reference-as-benchmark.md`、`docs/adr/010-asr-first-pipeline.md`、`docs/adr/011-technology-integration-map.md`。
 
-**技术接入总图**（ADR-011）：所有候选技术按接缝分层——Ingest/Separator、AudioEvents（VAD/AED/说话人）、
+**技术接入总图**（ADR-011）：所有候选技术按接缝分层——Ingest/Separator、AudioEvents（VAD/AED）、
 ASR/FA registry、Ensemble、Alignment/Repair、Evidence/Review、Glossary/Translation、Evaluation。
-当前**未接入**：FireRedVAD/AED、Silero/TEN、说话人分离（pyannote/VibeVoice）、RoFormer、云 ASR、
+当前**未接入**：FireRedVAD/AED（仅 provider/CLI）、Silero/TEN、RoFormer、云 ASR、
 跨引擎一致性、LLM 可读性、OP/ED 指纹、切片重对齐、chunk 选择、glossary→ASR context、
 run_all 翻译阶段、Review 阶梯、auto/AI/human 指标。可选能力默认 null，新增不改流程。
+**说话人/VibeVoice 已由用户删除（2026-10）**，不再保留接缝或计划。
 
 **2026-10 技术审计**（`docs/model-audit-2026-10.md`）：下载前先验“新 = 领先”。
 Qwen3-ASR-1.7B/FA 仍是日语媒体第一梯队（WER 0.185 / AAS 42.2ms），保留；
-**P0 只下 FireRedVAD/AED**（2026-03，F1 97.57，0.01GB）；VibeVoice 可选实验；
+**P0 只下 FireRedVAD/AED**（2026-03，F1 97.57，0.01GB）；说话人/VibeVoice 已删除；
 Parakeet JA、ReazonSpeech v2、BuzzASR、WhisperX、pyannote、Sortformer v1 淘汰；
 Demucs 降级 fallback；Whisper 全系只保留本机 CUDA，不下载/不再测试；
 Qwen3-0.6B 无日语领先证据，暂不接。
 
 **模型资产/调用手册**：`docs/model-assets.md`（新会话先读，别重下）。
 模型都在 `models/`（gitignored）：FireRedVAD 已下载并实测（EP001 speech 666.7s /
-music 893.8s / singing 101.8s）；VibeVoice-ASR-BitNet GGUF 1.58GB 已下，VibeASR.cpp
-已编译（单集未测）；Mel-Band RoFormer fp16/fp32 权重已下（运行时未接线）。
+music 893.8s / singing 101.8s）；Mel-Band RoFormer fp16/fp32 权重已下（运行时未接线）。
 `.venv-qwen` 含 torch 2.6、modelscope、fireredvad。
 
 核心变化：`Qwen3-ASR-1.7B + Qwen3-ForcedAligner-0.6B` 替代 `Whisper kotoba + 时间重叠匹配`；`FireRedVAD` 只作提示/AED；Whisper 只保留本机 CUDA（不下载/不再测试）。**流程按 ASR-first 重设计**（ADR-010）：3-Phase 只保留编排骨架，内部不再用 VAD 门控修复区、不再用时间重叠贴 cue；review 走 L0 自动 → L1 AI 批审 → L2 AI 复核 → L3 人工残留；翻译用已配置的国内 LLM（DeepSeek，唯一 LLM 阶段；百度已移除）。迁移期默认链路仍是旧 Whisper，回滚开关 `ASR_ENGINE=whisper`。
@@ -177,7 +177,7 @@ ASR 架构已按「稳定核心 + 插件适配器」落地：`lib/asr/base.py`�
 FireRedVAD/AED 已下载并实测，EP001 生成 442 个事件（speech 48.8% / singing 8.9% / music 78.1%）；
 **主流程尚未消费 hints**。能力测试（`docs/capability-tests.md`）：EP001 的 30 个空洞里
 只有 6 个（77.1s）是 speech 主导，9 个（105.6s）更像音乐 → hints 只能做证据过滤，不能做门控；
-OP/ED 需整集音频另测。VibeVoice-BitNet 60s 实测无 who/when，不能接说话人。
+OP/ED 需整集音频另测。说话人/VibeVoice 已删除（用户决定），不再保留计划。
 
 P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 → 信号/置信度；`quality.py` 评估零时长/overlong/空洞 `lost_spans`，token 灾难性塌缩才回退 segment）、`fix/align_repair.py`（修复计划/时间码/整集偏移/相邻 cue 联动；结尾 display linger 保留）、`scripts/asr/align_cues.py`（端到端 CLI，默认 dry-run；整集偏移改为 opt-in）、`run_all --asr`（flag 控制；`--asr-global-offset` 单独 opt-in）。**用户确认日语 CC 边界即测试标准**（不再另建人工金标），raw 数字直接判定，评测入口是 scripts/eval/release_gate.py（目标 + 基线回归，退出码 0/1）；三集基准：`temp/reports/digimon_qwen3_raw.{json,md}`、`digimon_whisper_raw.{json,md}`（第八轮新增 signed 偏差/覆盖分解/空洞：`temp/reports/digimon_qwen3_r8.*`、`digimon_whisper_r8.*`）。**第八轮结论**：test 集 90% matched cue 起点系统性早 0.37–0.40 s（重转写复现，是当前对齐的起点缺陷；EP001 仅 −55 ms），P90 只覆盖 42–45% 的 CC 字符，FA 塌缩吞掉成段对白（累计空洞 122–229 s）；分段重对齐/overlong/cue 级 rate trim 均实测无收益，起点偏差与空洞要 P3 VAD 才能修。
 

@@ -15,6 +15,9 @@
 > 设计为准；所有候选技术的接入位与现状见
 > [`adr/011-technology-integration-map.md`](adr/011-technology-integration-map.md)。
 > 本文保留调研背景，冲突处以 ADR-010/011 和 `CONTEXT.md` 核心原则为准。
+>
+> **2026-10-19 最后修订**：**说话人/VibeVoice 已由用户删除**（无用；资产与计划清除）。
+> 以下 VibeVoice/diarization 章节仅作历史调研，不再实施。
 
 ---
 

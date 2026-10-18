@@ -50,17 +50,15 @@ class AudioEvent:
 class AudioHints:
     """Timeline hints for one episode.
 
-    ``events`` is a flat list (kind + span); ``speakers`` is reserved for
-    diarization and stays empty until a provider fills it.  Hints are
-    advisory only: the pipeline must not drop cues because VAD missed
-    them (ADR-010).
+    ``events`` is a flat list (kind + span).  Hints are advisory only:
+    the pipeline must not drop cues because VAD missed them (ADR-010).
+    Speaker diarization is out of scope (user decision 2026-10).
     """
 
     events: list[AudioEvent] = field(default_factory=list)
     source: str = ''
     duration: float = 0.0
     confidence: dict = field(default_factory=dict)
-    speakers: list[dict] = field(default_factory=list)
     meta: dict = field(default_factory=dict)
 
     @classmethod
@@ -93,7 +91,6 @@ class AudioHints:
             'source': self.source,
             'duration': round(self.duration, 3),
             'confidence': dict(self.confidence),
-            'speakers': list(self.speakers),
             'meta': dict(self.meta),
             'events': [e.to_dict() for e in self.events],
         }
@@ -108,6 +105,5 @@ class AudioHints:
             source=str(data.get('source', '')),
             duration=float(data.get('duration', 0.0) or 0.0),
             confidence=dict(data.get('confidence') or {}),
-            speakers=list(data.get('speakers') or []),
             meta=dict(data.get('meta') or {}),
         )

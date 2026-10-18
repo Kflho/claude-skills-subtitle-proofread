@@ -240,13 +240,13 @@ python scripts\eval\diagnose_timeline.py --asr-json temp\asr\digimon_ep002_main.
 | 人声分离默认关（P2） | ✅ demucs，仅 Whisper 路径 | ✅ HTDemucs | ❌ ASR 路径 | ⛔ 审计：老模型，只作 fallback |
 | OP/ED AED + 指纹（P2） | ⬜ | 依赖 FireRedVAD | ⬜ | ⛔ |
 | 切片重对齐（P2） | ⬜（还是旧 spot fix） | ✅ FA | ❌ | ⬜ |
-| 说话人分离（P5） | ⬜ | ⬜（pyannote 需 HF token → 排除；3D-Speaker 免费待评估） | ⬜ | ⬜ |
-| VibeVoice（P5） | ⬜ | ⬜ 7B | ⬜ | ⛔ |
+| 说话人分离（P5） | ⛔ 已删除（用户决定说话人无用） | — | — | 不再考虑 |
+| VibeVoice（P5） | ⛔ 已删除（资产/运行时已清理） | — | — | 不再考虑 |
 | 云兜底（P5） | ⬜ | ❌ 付费/token | ⬜ | ⛔ 免费原则排除 |
 
-**结论**：P0 的 ASR/FA 已接并跑过；P1 里只有 **glossary-first** 是零新资产、可立即接，
-**0.6B** 是资产在本机、可直接测。FireRedVAD / VibeVoice / 云兜底被离线挡住，
-LLM 翻译被 key 挡住，Whisper 运行时被依赖挡住（只剩历史缓存做 A/B）。
+**结论（2026-10-19 更新）**：P0 的 ASR/FA 已接并跑过；FireRedVAD 已下载并接 provider/CLI；
+LLM key 已找到并验证；Whisper 只保留本机 CUDA、不再测试；**说话人/VibeVoice 已删除**。
+下一步先做 FireRedVAD 整集 OP/ED 能力实验，再谈 hints 进主流程。
 
 ## 0.10 第十轮：ASR-first 重设计 + Review 阶梯 + 去百度
 
@@ -307,7 +307,7 @@ L3 人工 ≤5%（现状 272 条全堆在报告）。
 |---|---|---|
 | ✅ 保留 | Qwen3-ASR-1.7B + Qwen3-FA | 2026-01；日语媒体 WER 0.185 第一；FA 日语 AAS 42.2ms |
 | ✅ P0 下载 | FireRedVAD + AED | 2026-03；FLEURS-VAD-102 F1 97.57，超 Silero 95.95/TEN 95.19；0.01GB |
-| ✅ P1 下载 | VibeVoice-ASR-BitNet | 2026-01；BitNet GGUF **1.58GB**（CPU）；`asr_infer.exe` 已构建；单集未测 |
+| ⛔ 删除 | VibeVoice / 说话人 | 用户决定说话人无用；BitNet 实测无 who/when；资产与运行时已清理 |
 | ✅ P2 下载 | Mel-Band RoFormer | fp16 456MB + fp32 913MB；比 Demucs 新；运行时未接 |
 | ⛔ 淘汰 | Parakeet JA / ReazonSpeech v2 | 2024 年模型，日语 WER 0.344/0.348，非领先 |
 | ⛔ 淘汰 | Whisper 全系 / WhisperX | 用户规则：只保留本机 CUDA，不下载/不再测试 |
@@ -321,8 +321,8 @@ L3 人工 ≤5%（现状 272 条全堆在报告）。
   `lib/audio/base.py` + `lib/audio/fireredvad.py` + `scripts/audio/detect_events.py` 已接线；
   EP001 已生成 `temp/scans/EP001.audio_hints.json`（442 事件；speech 48.8% / singing 8.9% / music 78.1%）。
   主流程尚未消费 hints（下一步 OP/ED/空洞）。
-- VibeVoice-ASR-BitNet：只有 GGUF（1.58GB，不碰 13GB safetensors）；VibeASR.cpp 已 clone + MinGW 构建出
-  `models/VibeASR.cpp/build/bin/asr_infer.exe`；单集测试未跑。
+- VibeVoice / 说话人：**已删除**（用户决定说话人无用）；`models/VibeVoice-ASR-BitNet`、
+  `models/VibeASR.cpp` 已清理，不再下载/测试。
 - Mel-Band RoFormer：fp16/fp32 权重已下；ComfyUI 格式，运行时/适配器未接。
 - Whisper 系：一个都没下，按用户规则只保留本机 CUDA。
 
@@ -330,8 +330,8 @@ L3 人工 ≤5%（现状 272 条全堆在报告）。
 - FireRedVAD 空洞归因（EP001）：30 个空洞/375.2s，只有 **6 个/77.1s** speech 覆盖 ≥50%；
   9 个/105.6s speech <20%（更像音乐）；20 个/268.7s music ≥80%。
   → 只能做“空洞过滤/证据”，不能做门控；OP/ED 需整集音频另测。
-- VibeVoice-BitNet 60s 实测：RTF 0.435；**没有 who/when**（text/json prompt 都只有纯文本），
-  专名更差（地球→子宮、八神太一→山見大知）。→ **不能接说话人**；7B fp16 或专用 diarizer 另议。
+- VibeVoice-BitNet 60s 实测（删除前记录）：RTF 0.435；**没有 who/when**（text/json prompt 都只有纯文本），
+  专名更差。→ 说话人无用，已删除；不再考虑 7B fp16 或专用 diarizer。
 - Mel-Band：只有权重，无运行时/无 A/B → 不接。
 - 详细台账：`docs/capability-tests.md`。
 
@@ -340,7 +340,7 @@ FireRedASR2S 论文。详细报告：`docs/model-audit-2026-10.md`；调用手�
 
 **下一步（先测再接）**：1) FireRedVAD 整集 AED → OP/ED 候选（CC 歌词/人工抽检）；
 2) 空洞归因扩 EP002/003；3) Review 20 条 pilot；4) 翻译 20 cue pilot；
-5) VibeVoice 说话人先决定 7B/专用 diarizer；6) Mel-Band 先补运行时再 A/B。
+5) Mel-Band 先补运行时再 A/B。说话人/VibeVoice 已删除，不再列。
 
 ## 1. 状态总览
 
@@ -352,7 +352,7 @@ FireRedASR2S 论文。详细报告：`docs/model-audit-2026-10.md`；调用手�
 | 测试 | 1386 tests / 79.7% 覆盖 / 0 failed | 🟡 主链补齐；剩余根脚本/nouns 旧入口/whisper_backends/align_cues | 关键路径每个分支至少一条测试 |
 | P3 | FireRedVAD/AED，VAD 降级为提示 | ⬜ 未开始 | speech/music/singing 时间线对比 |
 | P4 | glossary-first + 翻译 prompt，百度下线 | ⬜ 未开始 | 专名 F1 / 翻译人工评分 |
-| P5 | VibeVoice / 云兜底 | ⬜ 未开始 | 单集实验 + 成本/隐私评估 |
+| P5 | 云兜底 | ⬜ 未开始 | 成本/隐私评估；VibeVoice/说话人已删除 |
 
 图例：⬜ 未开始 / 🟡 进行中 / ✅ 完成 / ⛔ 阻塞
 

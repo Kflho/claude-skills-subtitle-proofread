@@ -22,26 +22,26 @@
 > 缺资产时只能等模型，不用云服务替代。
 >
 > **2026-10 技术审计**（`docs/model-audit-2026-10.md`）：下载前先判“新 = 领先”。
-> 结论：**P0 只下 FireRedVAD**；Qwen3-1.7B/FA 保留；VibeVoice 可选（13–17GB）；
+> 结论：**P0 只下 FireRedVAD**；Qwen3-1.7B/FA 保留；VibeVoice/说话人已删除；
 > Whisper 系不下载/不测试（用户规则）；Parakeet JA、ReazonSpeech、BuzzASR、
 > WhisperX、pyannote、Sortformer v1 淘汰；Demucs 降级为 fallback。
 >
 > **接入前能力测试**（`docs/capability-tests.md`）：模型卡声称 ≠ 本机能力。
 > FireRedVAD 只证明可做空洞过滤（6/30 speech 主导），OP/ED 未测；
-> VibeVoice-BitNet 实测无 who/when、只有纯文本，不能接说话人；
+> VibeVoice-BitNet 实测无 who/when；用户决定删除说话人，资产已清理；
 > Mel-Band 无运行时/无 A/B。**没通过能力测试的接入 = 猜测。**
 
 ## 1. 为什么需要总图
 
 `tech-route-2026.md` 里不止 Qwen3-ASR/FA：还有 FireRedVAD/AED、Silero/TEN-VAD、
-VibeVoice、WhisperX/MMS FA、pyannote/3D-Speaker、Demucs/RoFormer、Qwen-MT、
+WhisperX/MMS FA、Demucs/RoFormer、Qwen-MT、
 云 ASR（MAI/Scribe/Gemini/gpt-4o）、OP/ED 指纹、切片重对齐、chunk 45/60/90、
 双引擎一致性、glossary-first、LLM 可读性等。前面几轮只把 ASR/FA 接进了旧流程，
 其余技术没有接入位，导致：
 
 1. 每接一个新模型都要改编排/修流程；
-2. 已经做出的修复可能被后来接入的 AED/说话人/双引擎方案推翻；
-3. 评测只看边界，不看 review 比例、成本、说话人收益，无法判断该不该接。
+2. 已经做出的修复可能被后来接入的 AED/双引擎方案推翻；
+3. 评测只看边界，不看 review 比例、成本，无法判断该不该接。
 
 ## 2. 统一架构（层 + 接缝 + null 实现）
 
@@ -50,9 +50,8 @@ Ingest
   audio_extract ── Separator（null | demucs | RoFormer）──► wav
 AudioEvents（可选，全部 null 默认）
   VAD/AED（null | FireRedVAD | Silero | TEN）──► AudioHints(speech/music/singing)
-  Diarizer（null | VibeVoice | pyannote | 3D-Speaker）──► AudioHints(speakers)
 Audio Understanding
-  ASR Router（registry: qwen3_1.7b | qwen3_0.6b | whisper | vibevoice；云 ASR ⛔ 排除）
+  ASR Router（registry: qwen3_1.7b | qwen3_0.6b | whisper；云 ASR ⛔ 排除）
     └─ context/hotwords、chunk_sec、diarize、ensemble 都是 ASRConfig.options
   Aligner Router（registry: qwen3_fa | whisperx | mms_fa）
   Ensemble（null | second local engine only for medium-confidence cues）
@@ -80,7 +79,7 @@ Evaluation
 
 - 新 ASR/对齐模型：只写 `lib/asr/adapters/<name>.py`（`KIND='asr'|'aligner'`），
   router/CLI/修复管线不改；
-- 新音频事件源（VAD/AED/分离/说话人）：实现 `lib/audio/base.py` 的 provider 契约；
+- 新音频事件源（VAD/AED/分离）：实现 `lib/audio/base.py` 的 provider 契约；
 - 新翻译模型：实现 `TranslationBackend`（LLM/Qwen-MT 都是 backend）；
 - 核心层（mapper/planner/review）只读契约，不 import 模型。
 
@@ -90,15 +89,13 @@ Evaluation
 
 | 契约 | 关键字段 | 谁消费 |
 |---|---|---|
-| `AudioHints` | `speech[]`、`music[]`、`singing[]`、`speakers[]`、`source`、`confidence` | OP/ED 判定、空洞诊断、翻译场景、review 证据 |
-| `SpeakerSpan` | `start`、`end`、`speaker_id`、`confidence` | 翻译人称/敬称、cue 归属、专名绑定 |
+| `AudioHints` | `speech[]`、`music[]`、`singing[]`、`source`、`confidence` | OP/ED 判定、空洞诊断、翻译场景、review 证据 |
 | `Evidence` | `similarity`、`char_coverage`、`boundary_*`、`repeat`、`lang`、`cross_engine`、`audio_quality`、`aligner_quality`、`sources` | Review 阶梯、gate |
 | `ReviewItem` | `cue`、`action`、`evidence`、`decision`、`replacement`、`new_time`、`source` | L1/L2 工作单、apply |
-| `TranslationRequest` | `cues`、`glossary`、`context_window`、`speakers`、`target_lang`、`max_chars/cps`、`draft_model` | LLM/Qwen-MT 翻译 |
+| `TranslationRequest` | `cues`、`glossary`、`context_window`、`target_lang`、`max_chars/cps`、`draft_model` | LLM/Qwen-MT 翻译 |
 | `ASRConfig.options` | `chunk_sec`、`context/hotwords`、`diarize`、`ensemble`、`model_role`（default/draft/fallback） | router/worker/评测 |
 
-`Token.speaker` / `Segment.speaker` 字段已存在但无生产者；接 diarization 时只填字段，
-不改对齐/修复代码。
+说话人（diarization）已由用户删除（2026-10）；不再保留生产者/接入计划。
 
 ## 4. 全量技术台账（现在差什么）
 
@@ -112,7 +109,7 @@ Evaluation
 | Qwen3-ASR-0.6B | 快速/草稿/双引擎 | 🟡 无日语独立基准；试跑 10min 未完成 EP001 | ASR adapter + `model_role=draft` | 审计：非领先；不下载/暂不接，先加 guard |
 | Whisper large-v3/turbo | fallback | ✅ 本机 whisper.cpp CUDA 已有；按用户规则**不下载、不再测试** | ASR adapter | 只保留现有资产，不投入 |
 | kotoba-v2.0 | 旧默认 | ⛔ 仅兼容 | legacy | — |
-| VibeVoice-ASR-7B | 说话人/热词 | ⛔ BitNet 60s 测试：无 who/when，只有纯文本，专名更差（见 `docs/capability-tests.md`） | ASR adapter（diarize 输出 speaker） | 不能用 BitNet 顶说话人；要 7B fp16 或专用 diarizer |
+| VibeVoice-ASR-7B | 说话人/热词 | ⛔ 已删除（用户决定：说话人无用；BitNet 也无 who/when） | — | 不再考虑 |
 | ReazonSpeech / Parakeet JA | 备选 ASR | ⛔ 2024 年模型，日语 WER 0.344/0.348，非领先 | — | 审计淘汰 |
 | 国内云 ASR（DashScope/Qwen-ASR、讯飞、腾讯） | 难例兜底 | ⬜ 允许（国内 token），未配置 | ASR adapter + 路由门 | 需要 key/成本/隐私门；不默认 |
 | 国外云 ASR（MAI/Scribe/Gemini/gpt-4o） | 难例兜底 | ⛔ 暂不配置 | — | 用户暂无配置时间 |
@@ -124,8 +121,6 @@ Evaluation
 | WebRTC VAD | 旧门控 | ⛔ 降级为 legacy | legacy | — |
 | Demucs htdemucs | 人声分离 | 🟡 2021/22 老模型；仅 Whisper 路径 | Ingest separator | 审计：降级为 fallback，不再投入 |
 | BS-RoFormer / Mel-Band | 更强分离 | ⚠️ Mel-Band 权重已下，但无运行时/无 A/B → 未测，不接 | Ingest separator | 先补运行时 + 60–120s A/B |
-| 3D-Speaker / Sortformer | 说话人 | ⬜ Sortformer v2.1 2025-10（NVIDIA 许可）；3D-Speaker 较旧 | Diarizer provider | 备选；先验翻译收益，不默认 |
-| pyannote community-1 | 说话人 | ⛔ 国外/HF token，暂不配置 | — | 用户暂无配置时间；用 3D-Speaker/本地替代 |
 | 跨集音频指纹 | OP/ED | ⬜ | AudioEvents/OPED stage | 与 AED 一起 |
 
 ### 4.2 对齐 / 修复 / 置信度
@@ -151,7 +146,6 @@ Evaluation
 | Qwen-MT 草稿 + LLM 审校 | ⬜ 国内可选，未接（当前 DeepSeek 翻译已够） | TranslationBackend（draft_model） |
 | Baidu/传统 MT | ⛔ 已删除 | — |
 | 专名 AI 分类/清洗 | ✅（旧链路） | Phase 0/3 |
-| 说话人感知翻译（人称/敬称） | ⬜ | TranslationRequest.speakers |
 | LLM 润色 | 🟡 并入翻译 prompt（不单独调用） | Phase 3 |
 | OP/ED 歌词预替换 | ✅ 旧链路 | Phase 2/3（保留） |
 
@@ -188,7 +182,7 @@ Evaluation
 10. 短窗 FA 重对齐（SpotReAlign，带音频证据，不整集平移）。
 
 **D. 可选重技术（有明确收益才开）**
-11. VibeVoice（说话人/热词）或 3D-Speaker/Sortformer：先单集验“角色归属是否改善翻译”；
+11. ~~VibeVoice/说话人~~：已删除，不再做；
 12. Demucs/RoFormer：默认关，先 A/B 原音频 vs 分离音频的 ASR 结果；
 13. WhisperX/MMS FA：只在 Qwen3-FA 不可用/无 GPU 时降级。
 
@@ -202,13 +196,11 @@ Evaluation
 | Whisper 全系（large-v3/turbo、kotoba、faster-whisper、WhisperX） | ⛔ 用户规则：只保留本机 CUDA，不下载/不再测试 | 无 |
 | Parakeet JA / ReazonSpeech v2 | ⛔ 2024 年模型，日语非领先（WER 0.344/0.348） | 无 |
 | BuzzASR Japanese | ⛔ 基于 Whisper large-v3，违反约束 | 无 |
-| Sortformer v1 | ⛔ 2024-12 + CC-BY-NC | v2.1 可作备选（NC 风险） |
 | Demucs 默认 | ⛔ 2021/22 老模型；只作 fallback | 不投入；有分离需求用 Mel-Band A/B |
 | Qwen3-ASR-0.6B 草稿 | ⛔ 无日语领先证据，当前生成异常 | 修好 guard + 有 CER 数据再评估 |
 | MFA | 不采用（动画专名/OOV） | 无 |
 | stable-ts | 不采用（非真 FA） | 无 |
 | MMS FA | 仅无 GPU 降级；NC 许可需提示 | 有用户要求无 GPU 部署 |
-| VibeVoice 默认 | 不默认；说话人模式可选（P1 实验） | 单集翻译收益验证通过 |
 | FireRedASR2-LLM | 观察名单；日语无基准 | 有日语独立评测再说 |
 | 固定 180s OP/ED | 不采用 | AED/指纹可用后替换 |
 

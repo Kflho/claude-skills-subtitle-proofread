@@ -109,7 +109,6 @@ python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json \
 | 模型 | 路径 | 调用 |
 |---|---|---|
 | FireRedVAD/AED | `models/FireRedVAD/{VAD,Stream-VAD,AED}` | `.venv-qwen` + `fireredvad`；`scripts/audio/detect_events.py` |
-| VibeVoice-ASR-BitNet | `models/VibeVoice-ASR-BitNet/*.gguf` | VibeASR.cpp（CPU，MinGW 已编译）；GGUF 1.58GB |
 | Mel-Band RoFormer | `models/MelBandRoformer/*.safetensors` | 仅权重；运行时未接线 |
 | Qwen3-ASR/FA | `models/Qwen3-ASR-*`, `models/Qwen3-ForcedAligner-0.6B` | `.venv-qwen` worker |
 
