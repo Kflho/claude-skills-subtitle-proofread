@@ -651,6 +651,10 @@ def _repair_one(source_text, current_text, reasons, api_key, model, base_url,
 
 这是**修正任务**：只修当前译文的问题，不改变原意，不要解释。
 输出严格 JSON 数组，只含 1 条修正后的中文字幕字符串。"""
+    if 'glossary_miss' in reasons:
+        system += """
+当前译文缺少指定译名，或把角色名译成了其他角色。必须使用「固定译名参考」里的
+译名；不得改成别的角色名。"""
     user = f"""原文：{source_text}
 当前译文：{current_text}
 问题：{', '.join(reasons)}
@@ -693,8 +697,8 @@ def repair_file(input_path, output_path, qa_path, glossary, api_key, model,
         new_text = _repair_one(
             str(src[idx].get('text', '')), str(out[idx].get('text', '')),
             reasons, api_key, model, base_url,
-            glossary_str=', '.join(sorted(set(glossary.values())))
-            if glossary else '',
+            glossary_str=', '.join(f'{ja}→{zh}' for ja, zh in glossary.items()
+                                    if ja and zh) if glossary else '',
             source_lang=source_lang, max_chars=max_chars, max_cps=max_cps)
         if new_text:
             out[idx]['text'] = new_text

@@ -49,6 +49,25 @@ def test_repair_only_flagged_cues(tmp_path, monkeypatch):
     assert new_report['summary']['echo'] == 0
 
 
+def test_repair_prompt_contains_ja_to_zh_mapping(tmp_path, monkeypatch):
+    src = tmp_path / 'src.srt'
+    out = tmp_path / 'out.srt'
+    qa = tmp_path / 'qa.json'
+    src.write_text(_srt('タケル'), encoding='utf-8')
+    out.write_text(_srt('タケル'), encoding='utf-8')
+    _write_qa(src, out, qa)
+    seen = {}
+
+    def fake_llm(messages, *args, **kwargs):
+        seen['text'] = messages[0]['content'] + messages[1]['content']
+        return '["阿武"]'
+
+    monkeypatch.setattr(tr, '_call_llm', fake_llm)
+    tr.repair_file(str(src), str(out), str(qa), {'タケル': '阿武'},
+                   'key', 'model', 'url')
+    assert 'タケル→阿武' in seen['text']
+
+
 def test_repair_noop_when_clean(tmp_path, monkeypatch):
     src = tmp_path / 'src.srt'
     out = tmp_path / 'out.srt'
