@@ -135,9 +135,10 @@ python scripts\eval\diagnose_timeline.py --asr-json temp\asr\digimon_ep001_main.
 4. **FA 塌缩吞掉整段对白**。EP001/02/03 有 19/7/9 个「塌缩 run + 前置空洞」，累计
    229/122/96 s 空洞、152/44/91 个字符堆在单点；EP003 另有 52.32 s 的单 token。
    这是覆盖率上不去的直接原因（EP002 的 64.4→115.8 s 空洞里 6 条 CC 对白全部无轴）。
-5. **分段重对齐（同一 FA 重跑）已被实测否定**。EP002 51 s 空洞用原文本重跑：
-   「フィシーズ」吃掉 41 s，比原结果更差；5–6 s 短窗口会被 clip 起点夹住（首 token 从 0 开始）。
-   overlong trim 也几乎无效（test rel P90 510→501 ms）；cue 级 rate trim 更差
+5. **分段重对齐（同一 FA 重跑）已被实测否定**。dev EP001 最大空洞（20.56 s、18 units/36 字）
+   重跑后 19 个 unit 里 11 个零时长，单个「門」吃到 8.8 s；EP002（test，仅诊断、未据此调参）
+   的 51 s 空洞重跑后「フィシーズ」吃掉 41 s。5–6 s 短窗口会被 clip 起点夹住（首 token
+   从 0 开始）。overlong trim 也几乎无效（test rel P90 510→501 ms）；cue 级 rate trim 更差
    （dev rel P90 424→1086 ms）。三者留作负结果，P3 必须先在音频侧切边界（VAD）。
 6. **`fix_by_asr` 整集偏移改为默认关**；`run_all --asr-global-offset` 显式开启。
    注意：开关只停整集平移，**逐 cue 的 start fix 仍按 ASR 起点走**，所以系统性起点差

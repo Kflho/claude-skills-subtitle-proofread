@@ -79,7 +79,7 @@
 | cursor 回看 | 未启用 | 实测增加 match 但 P90/±100 ms 变差 | 负结果，不采纳 |
 | `fix_by_asr` 整集偏移 | **默认关**（`ASR_GLOBAL_OFFSET=0`），`--asr-global-offset` opt-in | 同上：估计值吸收 CC 显示起点约定 | 只写进报告 `global_offset` + `global_offset_applied`，不改默认 |
 | `liberal` cue 级速率 trim（`end − rate×chars` 估起点） | **未启用** | 三集模拟：dev rel P90 424→1086 ms、test 520→850 ms | 负结果：用 end 锚点会把 display linger 带进起点 |
-| 分段重对齐（同一 FA，重跑塌缩窗口） | **未启用** | EP002 51 s 塌缩窗口实测更差（`フィシーズ` 吃到 41 s）；短窗口会被 clip 边缘夹住 | 负结果：需要 P3 VAD 边界，不能只重跑 FA |
+| 分段重对齐（同一 FA，重跑塌缩窗口） | **未启用** | dev EP001 20.56 s 空洞重跑：19 unit 中 11 个零时长、「門」吃 8.8 s；EP002 51 s 空洞（仅诊断）「フィシーズ」吃 41 s；5–6 s 短窗口被 clip 起点夹住 | 负结果：需要 P3 VAD 边界，不能只重跑 FA |
 | `lost_spans` 诊断 | gap ≥3 s 且有塌缩 run / 单 token >5 s 且 ≤3 字 | 物理定义 + 实测空洞（EP001–03：19/7/9 个） | 只进报告，不作修复依据 |
 
 ## 4. 变更流程
