@@ -108,10 +108,12 @@ scripts/
 ## 测试
 
 ```bash
-cd <skill>/tests && pytest -q    # 417 tests, ~4s, 无外部依赖（3 个既存失败见 progress §9）
+cd <skill>/tests && pytest -q    # 576 tests, ~5s, 无外部依赖
+pytest -q --cov --cov-report=term-missing   # 覆盖率 36.3%，矩阵见 docs/test-plan.md
 ```
 
 分层: Tier 1 (纯函数) → Tier 2 (tempfile) → Tier 3 (mock 外部二进制)。
+原则：真实项目只用于发现问题；修之前先抽最小 fixture test（见 `tests/README.md`）。
 
 ## 技术路线
 

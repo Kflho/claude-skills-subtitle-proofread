@@ -103,11 +103,29 @@ class TestClassifyGarbledText:
         r = classify_garbled_text("", target_lang='ja')
         assert r['type'] == 'clean'  # empty = no content to be garbled
 
-    def test_op_region_boundary(self):
-        assert OP_BOUNDARY_SEC == 95
+    def test_garbled_cue_in_op_region_is_forced_clean(self, tmp_path):
+        # Fixed OP/ED windows are only a *safety net*: a Latin-only cue inside
+        # the OP window is treated as lyrics and not flagged (see config.py).
+        path = tmp_path / 'op.srt'
+        path.write_text(
+            "1\n00:00:10,000 --> 00:00:12,000\nhello lyric\n\n"
+            "2\n00:06:40,000 --> 00:06:42,000\nhello middle\n\n"
+            "3\n00:11:40,000 --> 00:11:42,000\nこんにちは\n\n",
+            encoding='utf-8')
+        cues = parse_srt(str(path), mark_garbled=True, target_lang='ja')
+        assert cues[0]['is_garbled'] is False       # inside OP window
+        assert cues[1]['is_garbled'] is True        # body → garbled
+        assert cues[2]['is_garbled'] is False       # clean Japanese
 
-    def test_ed_region_boundary(self):
-        assert ED_BOUNDARY_SEC == 120
+    def test_garbled_cue_in_ed_region_is_forced_clean(self, tmp_path):
+        path = tmp_path / 'ed.srt'
+        path.write_text(
+            "1\n00:00:10,000 --> 00:00:12,000\n日本語です\n\n"
+            "2\n00:06:40,000 --> 00:06:42,000\n日本語です\n\n"
+            "3\n00:11:00,000 --> 00:11:02,000\nhello ending\n\n",
+            encoding='utf-8')
+        cues = parse_srt(str(path), mark_garbled=True, target_lang='ja')
+        assert cues[2]['is_garbled'] is False       # inside ED window
 
 
 class TestTextValidation:

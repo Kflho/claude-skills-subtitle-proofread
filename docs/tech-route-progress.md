@@ -76,7 +76,7 @@ P1 稳定 ASR 核心、P2 对齐层、`run_all --asr` 都已落地；用莎莉 E
 - [x] P2-5：`lib/alignment/aligner.py`：registry 对齐服务；`ALIGNER_ENGINE=none` 可整体关闭；不 import 模型
 - [x] P2-6：`fix/align_repair.py`：修复计划（`fix_time/replace_text/review/split/delete_candidate`）、时间码应用（邻居安全）、单 cue 窗口重对齐（ffmpeg + aligner）
 - [x] P2-7：`scripts/asr/align_cues.py`：端到端 CLI（SRT/ASS + ASR JSON/音频/视频；默认 dry-run；`--write`/`--fix-text`）
-- [x] P2-8：测试 91 项（`test_alignment_*`、`test_cue_*`、`test_align_repair`、`test_align_cues_cli`、`test_alignment_bench`）
+- [x] P2-8：测试 101 项（`test_alignment_*`、`test_cue_*`、`test_align_repair`、`test_align_cues_cli`、`test_alignment_bench`）
 - [x] P2-9：真实 cue 结构回归 + `scripts/eval/alignment_bench.py`（魔法使莎莉 EP001，405 cue；见 §4）
 - [x] P2-10：`docs/adr/007-cue-alignment.md`
 - [x] P2-12：`Fixer.fix_by_asr()` + `run_all --asr/--asr-python/--asr-fix-text`（默认 time-only；ASS 拒绝写回；诊断落 `temp/scans/<EP>.alignment.json`）
@@ -159,21 +159,21 @@ RTF=0.387（warmup 后，含 ASR+FA）
 
 说明：`warmup`/`load` 把模型加载排除在计时外；4s 短样本的 RTF 不代表 24 分钟整集。评测脚本、manifest、BOM 容错、报表链路均已跑通。
 
-### P2 单元测试（2026-10-18）
+### 测试基线（2026-10-18）
 
 ```text
-python -m pytest -q tests/test_alignment_base.py tests/test_alignment_timeline.py \
-  tests/test_cue_mapper.py tests/test_cue_diagnostics.py \
-  tests/test_align_repair.py tests/test_alignment_aligner.py \
-  tests/test_align_cues_cli.py tests/test_alignment_bench.py
-91 passed
+python -m pytest -q
+576 passed in ~5.1s          # 无网络、无模型、无真实项目
+coverage: 36.3% (13,570 statements)
 ```
 
-覆盖：归一化/tag 处理、token 与 segment 时间轴、重复台词、时间漂移、长段合并、重叠 cue、空文本/无时间戳、
-置信度分层、修复计划与邻居冲突、`--write`/`--fix-text`、ASS 写入拒绝、fake aligner registry、
-ffmpeg 窗口重对齐、bench 合成场景。
-
-全量：`417 passed, 3 failed` —— 3 个既存失败与 P2 无关（OP/ED 边界断言 95/120 vs 实际 180；`MockWhisperResult` 缺 `cues_to_clear`）。
+- 原先 3 个既存失败已修：OP/ED 常量断言 → 行为测试；`MockWhisperResult` 补 `cues_to_clear`。
+- 新增测试覆盖：gates、compare_srt、clean_empty_cues、apply_fixes、video_scan、llm、
+  oped_detect、ass_repair、unified_scanner、noun_checker、apply_map、fix_repeated_cues、
+  reuse/common、run_all helpers、whisper_pipeline、whisper_backends。
+- 覆盖率矩阵、P0 缺口（Whisper 链路、翻译、专名、OP/ED、编排）和渐进门槛见
+  [`docs/test-plan.md`](test-plan.md)。
+- 原则：**真实项目只用于发现问题；修之前先落最小 fixture test。**
 
 ### P2 结构回归：魔法使莎莉 EP001（2026-10-18）
 
@@ -264,7 +264,7 @@ ffmpeg 窗口重对齐、bench 合成场景。
 ## 5. 进行中 / 阻塞
 
 - ✅ 0.6B + 1.7B + aligner 已下载；两种模型 smoke test 均通过（§4）。
-- ✅ P2 对齐核心 + 修复计划 + CLI + `run_all --asr` 完成；91 项测试、真实 cue 结构回归已跑（§4）。
+- ✅ P2 对齐核心 + 修复计划 + CLI + `run_all --asr` 完成；101 项测试、真实 cue 结构回归已跑（§4）。
 - ✅ 莎莉日语视频已到位：`D:\videos\Animation\TV\[1966-1981] Toei Majokko series_…\[1966-1991] Sally…\[1966-1968] Sally…\TV`（110 集 MKV，EP001 = 1512s / AC3 stereo）。
 - ✅ P2-13 实机验证完成：发现 180s 分块塌缩，worker 已改自切 60s + 补零；RTF 0.83→0.207–0.295（§4）。
 - ⬜ 莎莉没有日语参考字幕（源字幕是俄语），CER/边界金标仍缺；只能做参考无关指标 + Whisper 交叉对比。
@@ -316,6 +316,9 @@ ffmpeg 窗口重对齐、bench 合成场景。
 | `tests/test_asr_*.py` / `test_qwen3_*.py` | ASR 测试 | ✅ |
 | `docs/adr/007-cue-alignment.md` | 对齐决策 | ✅ |
 | `docs/adr/008-qwen3-long-audio-chunking.md` | 长音频分块 + 补零决策 | ✅ |
+| `docs/test-plan.md` | 测试能力矩阵 / 覆盖率 / P0 缺口 | ✅ |
+| `tests/README.md` | 测试约定与运行方式 | ✅ |
+| `.coveragerc` | 覆盖率配置 | ✅ |
 | `scripts/lib/alignment/base.py` | 对齐契约/归一化 | ✅ |
 | `scripts/lib/alignment/timeline.py` | 字符时间轴 | ✅ |
 | `scripts/lib/alignment/cue_mapper.py` | 时间窗 + 字符匹配 | ✅ |
@@ -324,7 +327,7 @@ ffmpeg 窗口重对齐、bench 合成场景。
 | `scripts/fix/align_repair.py` | 修复计划/时间应用/重对齐 | ✅ |
 | `scripts/asr/align_cues.py` | P2 端到端 CLI | ✅ |
 | `scripts/eval/alignment_bench.py` | P2 结构回归（合成 ASR） | ✅ |
-| `tests/test_alignment_*.py` / `test_cue_*.py` / `test_align_repair.py` / `test_align_cues_cli.py` / `test_alignment_bench.py` | P2 测试（91 项） | ✅ |
+| `tests/test_alignment_*.py` / `test_cue_*.py` / `test_align_repair.py` / `test_align_cues_cli.py` / `test_alignment_bench.py` | P2 测试（101 项） | ✅ |
 | `lib/config.py` | 新配置项 | ✅ |
 | `run_all.py` / `fix_orchestrator.py` | P2 接入（默认管线） | ⬜ |
 
@@ -375,6 +378,7 @@ python scripts\eval\alignment_bench.py --srt ep.ass --scenario segment --json te
 - **长音频必须自切 60s + 补零**：`qwen_asr` 内部 180s 分块会让 27–48% token 变零时长并慢 2.8×（ADR-008）。
 - **吞吐按实测算**：1.7B 60s 分块 5.2–7.4 min/集 → 193 集约 17–24h；不要沿用方案里的 6–12h。
 - **0.6B 不默认**：热态快 1.5×，但整集反而慢、质量更差；需复测后再定草稿模式。
+- **测试优先**：576 tests / 36% 覆盖 / 0 failed；真实项目发现的问题必须先落最小 fixture test，矩阵见 [`docs/test-plan.md`](test-plan.md)。
 - **进程隔离**：主环境不 import torch/qwen-asr；worker JSON lines。
 - **Windows**：vLLM 不支持；走 Transformers 后端 + SDPA。
 - **模型下载**：HF 直连被墙；用 ModelScope（已验证 200）/ 镜像。

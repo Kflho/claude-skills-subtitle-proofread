@@ -136,6 +136,7 @@ def mock_whisper_result():
         failed: int = 0
         auto_keep_fixes: list = field(default_factory=list)
         auto_cuts: list = field(default_factory=list)
+        cues_to_clear: list = field(default_factory=list)
         ai_fragments: list = field(default_factory=list)
         new_cues: list = field(default_factory=list)
         details: list = field(default_factory=list)

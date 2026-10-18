@@ -43,6 +43,8 @@ def _extract_cues_for_boundary(srt_dir: str, sample_count: int = DEFAULT_SAMPLE_
     Returns list of dicts: [{fname, total_duration_s, head_cues, tail_cues}]
     where head_cues/tail_cues are lists of (start_s, text) tuples.
     """
+    if not os.path.isdir(srt_dir):
+        return []
     sub_files = sorted([
         f for f in os.listdir(srt_dir)
         if f.lower().endswith(('.srt', '.ass'))

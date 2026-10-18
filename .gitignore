@@ -5,3 +5,6 @@ __pycache__/
 models/
 temp/
 eval/manifest.json
+.coverage
+htmlcov/
+coverage.xml

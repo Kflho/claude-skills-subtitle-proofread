@@ -1,0 +1,13 @@
+[run]
+source = scripts
+omit =
+    */__pycache__/*
+    */temp/*
+    */models/*
+    */.venv-qwen/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
+    raise NotImplementedError
