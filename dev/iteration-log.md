@@ -8,7 +8,9 @@
 ## 2026-10-18 — 测试收尾 2（whisper_utils / episode_workflow / reuse / eval）
 
 ### 架构变更
-- 无核心架构变更；发现并标记（未删除）两处死代码：`episode_workflow._write_ai_review_json`
+- 无核心架构变更；新增 `scripts/eval/clean_cc_reference.py`：日文配信 CC → 对白参考
+  （去说话人标签、振假名、♪/音效行；不修改原文件）。素材评测的前置步骤。
+- 发现并标记（未删除）两处死代码：`episode_workflow._write_ai_review_json`
   无调用方、`--mode` 是已废除的残留 flag。
 
 ### 行为修正（接口级）
@@ -18,7 +20,7 @@
 - `fix/episode_workflow.step_diff`：删除计算后未使用的 `fixed_starts`。
 
 ### 测试
-- 1162 → **1295 passed**；覆盖 **74.0% → 78.9%**；新增 133 例。
+- 1162 → **1306 passed**；覆盖 **74.0% → 79.0%**；新增 144 例（含 CC 清洁工具 11 例）。
 - `whisper_utils` 45→100%、`episode_workflow` 36→100%、`reuse/common` 49→100%、
   `reuse/apply` 65→98%、`asr_eval` 47→99%。
 - 矩阵与剩余缺口见 `docs/test-plan.md` §0/§3。

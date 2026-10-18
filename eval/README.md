@@ -6,10 +6,11 @@
 
 - 作品：**数码宝贝（Digimon Adventure）**
 - 目录：`D:\videos\Animation\TV\数码宝贝`
-- 现状：EP01 视频已完整；01–05 有中文字幕（`.sc` / `.tc` ASS）；**日文参考字幕待用户提供**。
-- 明细与接收约定见 [`materials.md`](materials.md)；评测清单草稿见 [`manifest.digimon.json`](manifest.digimon.json)。
+- 现状：EP01 视频已完整（用户人工核对日文 CC 与视频同步）；EP02/03 `.mkv.downloading` 中；**日文 CC 已有 S01E01–S01E54（54 集）**；01–05 另有中文字幕（`.sc` / `.tc` ASS）。
+- 日文 CC 是配信闭合字幕，含说话人标签/振假名/♪，**直接算 CER 前需清洁**（`scripts/eval/clean_cc_reference.py`）；明细与规则见 [`materials.md`](materials.md)。
+- 评测清单草稿见 [`manifest.digimon.json`](manifest.digimon.json)。
 
-> 中文字幕不能当日本语 CER / cue 对齐金标；日文字幕到位前只做非金标冒烟。
+> 当前等 EP02/03 视频下载；日文字幕已够。中文字幕不能当日文 CER 金标。
 
 ## 1. 准备素材
 

@@ -20,7 +20,7 @@ python -m pytest -q tests/test_cue_mapper.py -k duplicate
 
 ## 覆盖现状与缺口
 
-当前 **1295 passed / 78.9% 覆盖**（无网络、无模型、无真实项目）。
+当前 **1306 passed / 79.0% 覆盖**（无网络、无模型、无真实项目）。
 P0/P1/P2 主链（Whisper 编排/VAD、翻译、专名、OP/ED、编排、run_all 各 step、scanner、apply、worker/CLI、whisper_utils、episode_workflow、reuse、eval）已补齐；
 剩余缺口（根脚本部分分支、`nouns` 旧入口、`whisper_backends`、`align_cues`）见
 [`docs/test-plan.md`](../docs/test-plan.md)：能力矩阵与渐进覆盖率门槛。

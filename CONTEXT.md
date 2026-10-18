@@ -108,8 +108,8 @@ scripts/
 ## 测试
 
 ```bash
-cd <skill>/tests && pytest -q    # 1295 tests, ~10s, 无外部依赖
-pytest -q --cov --cov-report=term-missing   # 覆盖率 78.9%，矩阵见 docs/test-plan.md
+cd <skill>/tests && pytest -q    # 1306 tests, ~10s, 无外部依赖
+pytest -q --cov --cov-report=term-missing   # 覆盖率 79.0%，矩阵见 docs/test-plan.md
 ```
 
 分层: Tier 1 (纯函数) → Tier 2 (tempfile) → Tier 3 (mock 外部二进制)。
@@ -126,9 +126,9 @@ ASR 架构已按「稳定核心 + 插件适配器」落地：`lib/asr/base.py`�
 
 P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 → 信号/置信度）、`fix/align_repair.py`（修复计划/时间码/整集偏移/相邻 cue 联动）、`scripts/asr/align_cues.py`（端到端 CLI，默认 dry-run）、`run_all --asr`（flag 控制）。莎莉 EP001 历史实机验证：`qwen_asr` 180s 分块会塌缩 → worker 自切 60s + 补零（ADR-008；机械/吞吐验证，不作金标）。
 
-素材现状：**验收作品定为数码宝贝（Digimon Adventure）**，目录 `D:\videos\Animation\TV\数码宝贝`。EP01 视频已完整（1386s，H264+FLAC 48k stereo，日语）；01–05 有中文字幕（`.sc`/`.tc` ASS，UTF-16LE，人工字幕组），但**不是日文参考**，只能做参考无关/翻译复用测试。**日文参考字幕待用户提供**（P2-14 唯一阻塞）。素材台账见 `eval/materials.md`，评测草稿见 `eval/manifest.digimon.json`。莎莉/阿童木历史素材只保留机制/吞吐回放，不再用于验收。
+素材现状：**验收作品定为数码宝贝（Digimon Adventure）**，目录 `D:\videos\Animation\TV\数码宝贝`。EP01 视频已完整（1386s，H264+FLAC 48k stereo，日语）；**日文参考已到位**：`日语字幕\` 下 S01E01–S01E54 共 54 集 `ja[cc].srt`（原生日语；含说话人/振假名/♪ 标签，算 CER 前需清洁；EP01 末条 22:48，可能未收 ED）。01–05 另有中文字幕（`.sc`/`.tc` ASS），只能做参考无关/翻译复用。**当前唯一阻塞是视频数量**：至少再补 2 集（凑 3 集，clean/overlap/bgm 各 1 更好），P2-14 尚未开始。素材台账 `eval/materials.md`，草稿 `eval/manifest.digimon.json`。莎莉/阿童木历史素材只保留机制/吞吐回放，不再用于验收。
 
-测试：1295 passed / 0 failed / 78.9% 覆盖；矩阵与剩余缺口见 `docs/test-plan.md`。
+测试：1306 passed / 0 failed / 79.0% 覆盖；矩阵与剩余缺口见 `docs/test-plan.md`。
 
 ## 配置
 

@@ -7,11 +7,11 @@
 
 ```text
 python -m pytest -q
-1295 passed in ~10s          # 无网络、无模型、无真实项目依赖
-coverage: 78.9% (13,626 statements)
+1306 passed in ~10s          # 无网络、无模型、无真实项目依赖
+coverage: 79.0% (13,715 statements)
 ```
 
-本轮 **+133 tests**（1162 → 1295），覆盖率 **74.0% → 78.9%**，0 failed。
+本轮 **+144 tests**（1162 → 1306），覆盖率 **74.0% → 79.0%**，0 failed。
 
 新增/扩展测试文件：
 
@@ -21,6 +21,7 @@ coverage: 78.9% (13,626 statements)
 | `test_episode_workflow.py`（扩展） | `step_translate/compare/audio/apply/diff`、`_write_ai_review_json`、`_run_pipeline` 资源组合、`main` 各分支（36% → 100%） |
 | `test_asr_eval.py`（扩展） | `_resolve_audio`、`evaluate_episode`、`_summary`、`_markdown`、`main`/limit/list-engines（47% → 99%） |
 | `test_reuse_common.py` / `test_reuse.py`（扩展） | variants/参考加载/目标对齐、`extend` 续行合并、R6 冲突、apply CLI（common 49→100%、apply 65→98%） |
+| `test_clean_cc_reference.py`（新） | 日文 CC 清洁：说话人/旁白标签、振假名、♪/音效行、整文件 CLI、report |
 
 ### 覆盖率按目录（本轮 vs 上轮）
 
@@ -34,10 +35,10 @@ coverage: 78.9% (13,626 statements)
 | `scripts/reuse` | 389 | **97.9%** | 73.8% | align 96%、apply 98%、common 100% |
 | `scripts/scan` | 372 | **94.6%** | 94.6% | scan_all/VAD/CLI 补齐 |
 | `scripts/apply` | 380 | **100.0%** | 100.0% | main/ASS/繁→简/degloss 全分支 |
-| `scripts/eval` | 339 | **93.2%** | 61.9% | asr_eval 99%；bench 84% |
+| `scripts/eval` | 428 | **94.2%** | 61.9% | asr_eval 99%；CC 清洁 98%；bench 84% |
 | `scripts/ass` | 313 | **86.3%** | 86.3% | CLI main 已测 |
 | `scripts/utils` | 285 | **80.4%** | 80.4% | — |
-| **合计** | **13,626** | **78.9%** | 74.0% | — |
+| **合计** | **13,715** | **79.0%** | 74.0% | — |
 
 ### 做得好的部分
 
@@ -46,7 +47,7 @@ coverage: 78.9% (13,626 statements)
 - **三条主链路**：Whisper 修复（VAD→Tier1→Tier2）、翻译（LLM/百度）、专名（提取→聚合→glossary）；OP/ED 的器乐/歌词/正片判定。
 - **编排与步骤**：`run_all.main()` + 各 `step_*` 96%；`episode_workflow` 100%（含 `_run_pipeline` 资源组合）。
 - **批量应用 / 复用**：`apply_fixes` 100%；`reuse/*` 97.9%。
-- **评测链路**：`asr_eval` 99%（CER/边界/音频解析/CLI）。
+- **评测链路**：`asr_eval` 99%、CC 参考清洁 98%（`clean_cc_reference`）。
 - **安全策略**：dry-run 不写盘、VAD 删条默认不写、OP/ED 只覆写歌词、只填空行——每条都有对应断言。
 
 ## 1. 测试原则
@@ -115,6 +116,7 @@ coverage: 78.9% (13,626 statements)
 - [x] `qwen3_worker` 的 chunk 分支（fake `model.transcribe`，99%）与 `qwen3_transcribe` CLI（99%）。
 - [x] `whisper_utils` 的音频/VAD 段（45% → 100%）：ASS 解析、`vad_filter_audio`、抽音频、人声分离。
 - [x] `episode_workflow`（36% → 100%）、`reuse/*`（73.8% → 97.9%）、`eval/asr_eval`（47% → 99%）。
+- [x] `scripts/eval/clean_cc_reference.py`（98%，11 项）：日文配信 CC 去标签/振假名/♪，供金标评测前置。
 - [ ] `nouns/auto_classify.py`、`nouns/auto_clean_glossary.py`（0%，旧入口，不在主链；若保留则补最小冒烟）。
 - [ ] `lib/whisper_backends.py`（59%）、`asr/align_cues.py`（78%）、`fix/whisper_pipeline.py`（81%）。
 - [ ] **待决策 / 清理**：`fix/episode_workflow._write_ai_review_json` 无调用方（死代码）；`--mode` 是已废除的残留 flag。保留则文档标注，删除则连同测试一起移除。
@@ -146,9 +148,10 @@ python -m pytest -q tests\test_run_all_step_functions.py tests\test_unified_scan
   tests\test_apply_fixes.py tests\test_qwen3_worker.py tests\test_qwen3_cli.py `
   tests\test_ass_repair.py tests\test_reuse.py
 
-# 第五轮（whisper_utils / episode_workflow / reuse / eval）
+# 第五轮（whisper_utils / episode_workflow / reuse / eval / CC 清洁）
 python -m pytest -q tests\test_whisper_utils.py tests\test_episode_workflow.py `
-  tests\test_reuse.py tests\test_reuse_common.py tests\test_asr_eval.py
+  tests\test_reuse.py tests\test_reuse_common.py tests\test_asr_eval.py `
+  tests\test_clean_cc_reference.py
 
 # 只跑 P2 相关
 python -m pytest -q tests/test_alignment_base.py tests/test_alignment_timeline.py `
@@ -169,14 +172,14 @@ python -m pytest -q tests/test_alignment_base.py tests/test_alignment_timeline.p
 
 ## 6. 覆盖率门槛（渐进）
 
-当前 **78.9%**。按缺口补，不追求一次到 85%：
+当前 **79.0%**。按缺口补，不追求一次到 85%：
 
 | 阶段 | 目标 | 重点 |
 |---|---:|---|
 | 基线 | 36% | 起点 |
 | 上上轮 | 64.0% | P0 链路 + 相邻联动 + 修复/片段/复用/专名补齐 |
 | 上轮 | 74.0% | run_all 步骤、scanner、apply、worker、ass/reuse CLI |
-| **现在** | **78.9%** | whisper_utils、episode_workflow、reuse、asr_eval |
+| **现在** | **79.0%** | whisper_utils、episode_workflow、reuse、asr_eval、CC 清洁 |
 | 下一轮 | ≥82% | 根脚本 65.7%、nouns 67.2%、whisper_backends 59%、align_cues 78% |
 
 > 覆盖率不是目的：**关键路径（扫描→修复→专名→翻译→应用→交付）每个分支至少有一条测试**，比总百分比更重要。

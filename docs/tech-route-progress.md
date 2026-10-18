@@ -1,17 +1,17 @@
 # 2026 技术路线实施进度
 
 > **用途**：跨会话续跑。新会话先读本文件，再读 [`tech-route-2026.md`](tech-route-2026.md)、[`ADR-006`](adr/006-stable-asr-core.md)、[`ADR-007`](adr/007-cue-alignment.md)、[`ADR-008`](adr/008-qwen3-long-audio-chunking.md)、[`test-plan.md`](test-plan.md)。
-> **最后更新**：2026-10-18（第五轮：测试收尾 2 + 0.6B 复测；1295 tests / 78.9%；数码宝贝 EP01 视频到位，日文参考待收）
-> **当前阶段**：P2 对齐 + `run_all --asr` + 实机验证完成；测试主链补洞完成（1295 tests / 78.9%）；默认仍走 Whisper。下一步 = **等用户日文参考字幕**，用数码宝贝做 P2-14 验收；莎莉/阿童木不再作金标。
+> **最后更新**：2026-10-18（第五轮：测试收尾 2 + 0.6B 复测；1306 tests / 79.0%；数码宝贝 EP01 视频 + 54 集日文 CC 到位，视频数量仍缺）
+> **当前阶段**：P2 对齐 + `run_all --asr` + 实机验证完成；测试主链补洞完成（1306 tests / 79.0%）；默认仍走 Whisper。下一步 = **补视频（至少 3 集）→ 清洁日文 CC → 跑 P2-14 验收**；莎莉/阿童木不再作金标。
 > **总目标**：把音频链路从 `WebRTC VAD → kotoba Whisper → 时间重叠匹配` 迁移到 `Qwen3-ASR → Qwen3-ForcedAligner → 全局文本对齐`；默认行为在 P2 验收前保持不变。
 
 ## 0. 当前一句话（clear 后从这里开始）
 
-已经完成：P1 稳定 ASR 核心、P2 对齐层、`run_all --asr` 接入、莎莉 EP001 实机验证（发现并修复 `qwen_asr` 180s 分块导致的时间戳塌缩：worker 自切 60s + 补零，RTF 0.83→0.207–0.295）、整集偏移估计、**相邻 cue 联动求解（无偏移回放自动应用 89 → 262）**；**测试收尾：1295 passed / 78.9%（上轮 1162 / 74.0%）**，补齐 run_all/scanner/apply/worker/ass/reuse/whisper_utils/episode_workflow/eval 主链，并修掉 6 个真 bug + 1 处日志误导（扫描产物坏 JSON、ASS replace_name、SRT 繁→简、单句 segments 丢标点、worker 非对象 JSON、separate_vocals 裸文件名）。
+已经完成：P1 稳定 ASR 核心、P2 对齐层、`run_all --asr` 接入、莎莉 EP001 实机验证（发现并修复 `qwen_asr` 180s 分块导致的时间戳塌缩：worker 自切 60s + 补零，RTF 0.83→0.207–0.295）、整集偏移估计、**相邻 cue 联动求解（无偏移回放自动应用 89 → 262）**；**测试收尾：1306 passed / 79.0%（上轮 1162 / 74.0%）**，补齐 run_all/scanner/apply/worker/ass/reuse/whisper_utils/episode_workflow/eval 主链，并修掉 6 个真 bug + 1 处日志误导（扫描产物坏 JSON、ASS replace_name、SRT 繁→简、单句 segments 丢标点、worker 非对象 JSON、separate_vocals 裸文件名）。
 
 **下一步按顺序：**
 
-1. **P2-14 金标验收（默认切换的唯一阻塞）**：素材目录已登记为 `D:\videos\Animation\TV\数码宝贝`（见 `eval/materials.md`）；EP01 视频与中文字幕已到位，**等用户发日文参考字幕**。到齐后按 `eval/manifest.digimon.json` 建 manifest，跑 CER / 边界 P50/P90/±100ms。**中文字幕不能当日文 CER 金标；莎莉/阿童木不再用于验收。**
+1. **P2-14 金标验收（当前阻塞：视频数量）**：素材目录 `D:\videos\Animation\TV\数码宝贝`；EP01 视频已到位，**日文 CC 已有 54 集**（`日语字幕\`，需清洁标签/振假名/♪）。至少再补 **2 集视频凑 3 集**（clean/overlap/bgm 各 1 更好）；到齐后填 `eval/manifest.digimon.json` → 清洁参考 → 跑 CER / 边界 P50/P90/±100ms。**中文字幕不能当日文 CER 金标；莎莉/阿童木不再用于验收。**
 2. **参考无关 A/B（改用用户素材）**：阿童木 A/B 已停（原任务取消）；素材到位后用同一批视频跑 Qwen3 1.7B 60s 分块 vs Whisper large-v3 q5（RTF、字数、零时长、时间轴覆盖、跨引擎一致度）。
 3. **chunk 调参**：45/60/90s 在金标上的边界误差 vs 耗时，确定默认。
 4. **0.6B 复测（不依赖金标）**：本轮已跑整集；结果与解释见 §4，待定是否保留草稿模式。
@@ -25,7 +25,7 @@
 | P0 | 评测金标清单 + 基线指标 | 🟡 代码就绪；金标待用户素材 | `eval/manifest.json` 填真实集；旧管线 CER/边界可复现 |
 | P1 | 稳定核心 + Qwen3/Whisper 适配 + 评测/CLI | 🟡 smoke 通过；A/B 等用户素材（阿童木任务已取消） | 3 集跑通；A/B 有记录；默认不变 |
 | P2 | Qwen3-FA + cue mapper + align_repair | 🟡 核心/CLI/run_all/实机验证完成；默认未切 | 边界 P50 ≤100ms / P90 ≤300ms（待金标） |
-| 测试 | 1295 tests / 78.9% 覆盖 / 0 failed | 🟡 主链补齐；剩余根脚本/nouns 旧入口/whisper_backends/align_cues | 关键路径每个分支至少一条测试 |
+| 测试 | 1306 tests / 79.0% 覆盖 / 0 failed | 🟡 主链补齐；剩余根脚本/nouns 旧入口/whisper_backends/align_cues | 关键路径每个分支至少一条测试 |
 | P3 | FireRedVAD/AED，VAD 降级为提示 | ⬜ 未开始 | speech/music/singing 时间线对比 |
 | P4 | glossary-first + 翻译 prompt，百度下线 | ⬜ 未开始 | 专名 F1 / 翻译人工评分 |
 | P5 | VibeVoice / 云兜底 | ⬜ 未开始 | 单集实验 + 成本/隐私评估 |
@@ -124,6 +124,7 @@
 - [x] T18：`fix/episode_workflow.py` 各 `step_*` / `_run_pipeline` / `main`（36 → 100%），修 `step_translate` 日志语言。
 - [x] T19：`reuse/common.py` + `reuse/apply.py`（49/65 → 100/98%）：variants/参考加载/目标对齐/续行合并/R6/CLI。
 - [x] T20：`eval/asr_eval.py`（47 → 99%）：`_resolve_audio`/`evaluate_episode`/`_summary`/`_markdown`/`main`/limit/list-engines。
+- [x] T21：新增 `eval/clean_cc_reference.py`（日文 CC → 对白参考）+ 11 项测试；数码宝贝 54 集已清洁（19,812 → 18,903 cue）。
 
 ## 4. 验证记录
 
@@ -202,20 +203,20 @@ RTF=0.387（warmup 后，含 ASR+FA）
 
 ### 本轮会话记录（2026-10-18 第五轮：主链收尾 2）
 
-- **测试**：1162 → **1295 passed**（+133）；74.0% → **78.9%**；0 failed；全量 ~10s。
-- **模块**：`whisper_utils` 45→100%、`episode_workflow` 36→100%、`reuse/common` 49→100%、`reuse/apply` 65→98%、`asr_eval` 47→99%。
+- **测试**：1162 → **1306 passed**（+144）；74.0% → **79.0%**；0 failed；全量 ~10s。
+- **模块**：`whisper_utils` 45→100%、`episode_workflow` 36→100%、`reuse/common` 49→100%、`reuse/apply` 65→98%、`asr_eval` 47→99%、`clean_cc_reference` 98%。
 - **修 1 个真 bug + 1 处日志**：`separate_vocals` 裸文件名 `os.makedirs('')` 崩溃；`step_translate` 日志硬编码 `→ ja`。
 - **0.6B 复测**：见 §4 “0.6B 复测” 小节（同机同音频、60s 分块）。
 - **待决策 / 清理**：`episode_workflow._write_ai_review_json` 无调用方（死代码）；`--mode` 是已废除的残留 flag；`auto_classify` / `auto_clean_glossary` 0 覆盖旧入口。
 - **素材**：金标仍等用户「完整字幕 + 视频」；A/B、chunk 调参继续等素材。
 - **基线提交**：`7a82f60`（代码/测试/文档）；本记录为随后的文档提交。
 
-### 第五轮测试基线（2026-10-18：1295 tests / 78.9%）
+### 第五轮测试基线（2026-10-18：1306 tests / 79.0%）
 
 ```text
 python -m pytest -q
-1295 passed in ~10s          # 无网络、无模型、无真实项目
-coverage: 78.9% (13,626 statements)     # 上轮 1162 / 74.0%
+1306 passed in ~10s          # 无网络、无模型、无真实项目
+coverage: 79.0% (13,715 statements)     # 上轮 1162 / 74.0%
 ```
 
 覆盖变化（按目录）：
@@ -230,10 +231,10 @@ coverage: 78.9% (13,626 statements)     # 上轮 1162 / 74.0%
 | `reuse` | 389 | **97.9%** | 73.8% | common 100%、apply 98% |
 | `scan` | 372 | **94.6%** | 94.6% | — |
 | `apply` | 380 | **100.0%** | 100.0% | — |
-| `eval` | 339 | **93.2%** | 61.9% | asr_eval 99% |
+| `eval` | 428 | **94.2%** | 61.9% | asr_eval 99%；CC 清洁 98% |
 | `ass` | 313 | **86.3%** | 86.3% | — |
 | `utils` | 285 | **80.4%** | 80.4% | — |
-| **合计** | **13,626** | **78.9%** | 74.0% | — |
+| **合计** | **13,715** | **79.0%** | 74.0% | — |
 
 **本轮修掉的真 bug**（各配回归测试）：
 
@@ -259,6 +260,32 @@ coverage: 78.9% (13,626 statements)     # 上轮 1162 / 74.0%
 2. **0.6B 仍不应做快模型**：同热态下 1.7B 237s vs 0.6B 453s（0.6B 慢 1.9×）；文本更短（4842 vs 5034），时间轴更差（联合覆盖 54.2% vs 59.6%，cue 覆盖 0.725 vs 0.792，OP 0.373 vs 0.718）。草稿模式不启用。
 3. 旧 0.6B 的 28.8% 零时长来自旧 worker 未补零；本轮 10.2% 与 1.7B 的 8.4% 同量级，补零生效。
 4. 1.7B 本轮输出与旧终版逐字/逐 token 一致（5034 chars、2609 tokens、370 segments、指标完全相同）→ 结果可复现，差异只在耗时（237 vs 313s），属机器负载/温度差异。
+
+### 数码宝贝 EP01 首轮冒烟（2026-10-18，非验收）
+
+素材：EP01 视频（1386s，日语 FLAC）+ 清洁后的日文 CC（286 cue）；用户已人工核对 **CC 与视频对得上**。
+Qwen3-ASR 1.7B + FA，60s 分块。
+
+```text
+转写：2427 chars / 1188 tokens / 253 segments / 1386.3s
+耗时：105.2s / RTF 0.076
+P0 全文件 CER=0.4522；boundary MAE=4810ms（长 segment 下 P0 指标无意义）
+P2 align：match 55/286，garbled 115，missing_asr 74，no_speech 40
+         （55 条匹配：P50 140ms / P90 2380ms / ±100ms 45.5%）
+```
+
+诊断：
+
+1. **token 时间轴在 OP/音乐段塌缩**：95 个零时长 token；全文件旁白 ASR 落 75.5s，CC 在 99.5s。
+   只跑正片（95–1240s）后首段恢复（旁白 0.9s vs 参考 4.47s），但 cue 覆盖仍约 0.50。
+2. **CC 与 ASR 的对白范围不同**：CC 含角色名字幕卡/语气词（`あ…`/`うわー`），Qwen3 常省略；
+   按 cue 算大量 unmatched，不能直接当“ASR 错”。
+3. **全文件 CER 不可用**：ASR 还转写 OP/ED 歌词与预告（CC 主故事只到 20:33，ED 20:39→，预告→22:48）。
+4. CC 写法（ケータイ/片假名名）与 ASR（携帯/汉字名）不同，也会抬高 CER。
+
+**结论**：首轮数字只作冒烟。三集评测改用 **主故事窗口 95–1233s**（三集同结构），
+参考先过滤字幕卡/非对白，并单独统计 ASR 漏掉的短语气词；token 时间轴需单独修（或分段重对齐）。
+当前 EP02/03 视频仍在 `.downloading`，等完整后开跑。
 
 ### 本轮会话记录（2026-10-18 第四轮：测试收尾）
 
@@ -470,8 +497,8 @@ coverage: 64.0% (13,607 statements)     # 上轮 576 / 36.3%
 - ✅ P2 对齐核心 + 修复计划 + CLI + `run_all --asr` 完成；P2 专项 101 项测试、真实 cue 结构回归已跑（§4）。
 - ✅ 莎莉日语视频已到位（110 集 MKV）：`D:\videos\Animation\TV\[1966-1981] Toei Majokko series_東映魔女大系(東映魔女っ子シリーズ)_TV\[1966-1991] Sally_小仙女莎莉(魔法使いサリー)_TV\[1966-1968] Sally_小仙女莎莉 第1作(魔法使いサリー)_TV`。**仅历史/机制回归用途；字幕质量差，按用户要求不再作测试/验收素材。**
 - ✅ P2-13 实机验证完成：180s 分块塌缩 → 自切 60s + 补零；RTF 0.83→0.207–0.295，零时长 48%→8.4%（§4）。
-- ✅ 测试基线：全量 **1295 passed / 0 failed / 78.9%**（上轮 1162 / 74.0%）；第五轮补齐 `whisper_utils`、`episode_workflow`、`reuse/*`、`asr_eval`；1 个真 bug + 1 处日志修正，均配回归测试。
-- ⬜ 验收金标素材：**数码宝贝目录已登记**（`D:\videos\Animation\TV\数码宝贝`，见 `eval/materials.md`）；EP01 视频完整、01–05 有中文字幕；**日文参考字幕待用户发**。中文字幕只能做非金标冒烟，P2-14 未开始。
+- ✅ 测试基线：全量 **1306 passed / 0 failed / 79.0%**（上轮 1162 / 74.0%）；第五轮补齐 `whisper_utils`、`episode_workflow`、`reuse/*`、`asr_eval`；1 个真 bug + 1 处日志修正，均配回归测试。
+- ⬜ 验收金标素材：**数码宝贝**（`D:\videos\Animation\TV\数码宝贝`，见 `eval/materials.md`）；EP01 视频完整、用户已人工核对日文 CC 与视频同步；**EP02/03 视频下载中**（`.mkv.downloading` 0 B）；日文 CC 54 集已到位。P2-14 未开始，三集计划用 95–1233s 主故事窗口。
 - ✅ P1/P2 主链补测完成：`scan` / `apply` 主流程、`run_all` 各 `step_*`、worker chunk、`whisper_utils`、`episode_workflow`、`reuse`、`eval` 已补（见 `test-plan.md` §3）。
 - ⬜ 剩余补测（不阻塞验收）：根脚本部分分支（65.7%）、`nouns` 旧入口（67.2%）、`whisper_backends`（59%）、`align_cues`（78%）；确认 `auto_classify` / `auto_clean_glossary` / `_write_ai_review_json` / `--mode` 去留。
 - ✅ 整集 0.6B（880s）与热态 RTF 0.122 反常：本轮复测 **453.1s / RTF 0.300**，同态 1.7B **237.0s / RTF 0.157**；880s 未复现，0.6B 仍慢 1.9× → 草稿模式不启用（见 §4 “0.6B 复测”）。
@@ -528,6 +555,8 @@ coverage: 64.0% (13,607 statements)     # 上轮 576 / 36.3%
 | `eval/manifest.example.json` / `README.md` | 金标模板 | ✅ |
 | `eval/materials.md` | 金标素材台账（数码宝贝目录/现状/接收约定） | ✅ |
 | `eval/manifest.digimon.json` | 数码宝贝评测清单草稿（待日文字幕填 reference_srt） | 🟡 |
+| `scripts/eval/clean_cc_reference.py` | 日文 CC → 对白参考（去标签/振假名/♪） | ✅ |
+| `tests/test_clean_cc_reference.py` | CC 清洁 11 项（含 CLI/report） | ✅ |
 | `templates/asr_adapter.py` | 新 ASR 骨架 | ✅ |
 | `templates/aligner_adapter.py` | 新对齐器骨架 | ✅ |
 | `tests/test_asr_*.py` / `test_qwen3_*.py` | ASR 测试 | ✅ |
@@ -665,7 +694,7 @@ python scripts\run_all.py --lang ja --target-dir temp\proj_asr --input-dir subs 
 - **长音频必须自切 60s + 补零**：`qwen_asr` 内部 180s 分块会让 27–48% token 变零时长并慢 2.8×（ADR-008）。
 - **吞吐按实测算**：1.7B 60s 分块 5.2–7.4 min/集 → 193 集约 17–24h；不要沿用方案里的 6–12h。
 - **0.6B 不默认**：本轮同态复测 1.7B 237s vs 0.6B 453s（0.6B 慢 1.9×），且文本更短、时间轴更差；旧 880s 未复现（更像散热/负载/旧 worker）。
-- **测试优先（第五轮）**：1295 tests / 78.9% 覆盖 / 0 failed；P0/P1/P2 主链每条安全策略都有断言（dry-run 不写、VAD 默认不删、OP/ED 只改歌词、只填空行）；真实项目发现的问题必须先落最小 fixture test，矩阵见 [`docs/test-plan.md`](test-plan.md)。
+- **测试优先（第五轮）**：1306 tests / 79.0% 覆盖 / 0 failed；P0/P1/P2 主链每条安全策略都有断言（dry-run 不写、VAD 默认不删、OP/ED 只改歌词、只填空行）；真实项目发现的问题必须先落最小 fixture test，矩阵见 [`docs/test-plan.md`](test-plan.md)。
 - **扫描产物 JSON 宽松读取**：`lib.project_utils.load_json` 保持严格（坏 JSON 抛异常，便于发现损坏）；只有 `run_all` 批量枚举的 `*_nouns.json` / `ai_fragments_*.json` 用 `_load_json_lenient`，跳过并告警，不能让一个截断文件打死整轮。
 - **glossary 表格解析规则**：只有「日语\|中文」两列才当译名映射；`build_glossary` 的「日语\|出现次数\|拼写变体」表不产生映射（踩坑 #17：否则数字会被预替换进正文）。
 - **日志路径用 `display_path`**：Windows 跨盘 `os.path.relpath` 抛 `ValueError`，不能出现在主流程里（temp 在 C:、项目在 D: 就会触发）。
@@ -675,7 +704,7 @@ python scripts\run_all.py --lang ja --target-dir temp\proj_asr --input-dir subs 
 - **单句 segments 用 ASR 原文**：Qwen3-ASR 的句内标点/空格不在 aligner token 里，单段时直接沿用原文；多段才按 token 分配。
 - **`dirname()` 可能为空**：`separate_vocals` 等“默认同输入目录”的函数要写 `dirname(...) or '.'`；否则裸相对文件名会触发 `os.makedirs('')`。
 - **旧入口/死代码先标记不删**：`auto_classify`、`auto_clean_glossary`、`_write_ai_review_json`、`--mode` 已确认不在主链，删除属产品决策；本轮只在 test-plan 记录，不顺手改行为。
-- **金标来源规则**：机翻 / ASR / LLM 润色后的字幕都不能当参考。**验收作品：数码宝贝**（`D:\videos\Animation\TV\数码宝贝`，见 `eval/materials.md`）；EP01 视频已到位、日文参考待发。中文字幕只能做非金标冒烟；莎莉/阿童木只保留机制回放。
+- **金标来源规则**：机翻 / ASR / LLM 润色后的字幕都不能当参考。**验收作品：数码宝贝**（`D:\videos\Animation\TV\数码宝贝`，见 `eval/materials.md`）；日文 CC 54 集已到位（配信闭合字幕，需清洁标签/振假名/♪），视频仅 EP01，**还缺至少 2 集视频**。中文字幕只能做非金标冒烟；莎莉/阿童木只保留机制回放。
 - **进程隔离**：主环境不 import torch/qwen-asr；worker JSON lines。
 - **Windows**：vLLM 不支持；走 Transformers 后端 + SDPA。
 - **模型下载**：HF 直连被墙；用 ModelScope（已验证 200）/ 镜像。

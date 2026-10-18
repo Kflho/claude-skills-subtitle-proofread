@@ -6,9 +6,10 @@
       "id": "EP001",
       "category": "TODO(clean|overlap|bgm)",
       "video": "D:/videos/Animation/TV/数码宝贝/01、漂流？冒険の島！.mkv",
-      "reference_srt": "D:/videos/Animation/TV/数码宝贝/01、漂流？冒険の島！.ja.srt",
+      "reference_srt": "D:/videos/Animation/TV/数码宝贝/日语字幕/デジモンアドベンチャー.S01E01.WEBRip.ja[cc].srt",
       "context": "",
-      "timestamps": true
+      "timestamps": true,
+      "_note": "raw CC: strip speaker tags/furigana/music before CER"
     }
   ]
 }
