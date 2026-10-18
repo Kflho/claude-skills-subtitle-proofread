@@ -6,7 +6,9 @@
 > **VibeVoice-ASR** 是唯一值得做单集实验的可选领先模型（13–17 GB，重）；
 > 其余（Parakeet JA、ReazonSpeech、BuzzASR、WhisperX、pyannote、Sortformer v1、Demucs）
 > 要么旧、要么不是日语领先、要么被许可/环境挡住。**Whisper 系按你的要求不下、不测。**
-> 下载**尚未开始**，等你确认。
+> **2026-10-19 更新**：P0 FireRedVAD 已下载、实测并接入 `AudioHints` provider/CLI；
+> P1 VibeVoice-ASR-BitNet 只下 GGUF（1.58GB）并编译好 `asr_infer.exe`（单集未测）；
+> P2 Mel-Band 权重已下（运行时未接）。Whisper 一个没下；加载/调用见 `docs/model-assets.md`。
 
 ## 1. 判定标准
 
@@ -112,9 +114,9 @@
 - **可选**：VibeVoice（说话人/热词）、Mel-Band RoFormer（分离），都必须先单集 A/B。
 - **观察**：FireRedASR2-LLM（2026-02，中文强；日语无基准）、Voxtral Mini 4B（更新但更差）。
 
-## 6. 下一步
+## 6. 状态与下一步
 
-1. 你确认后，先下 **P0 FireRedVAD**（权重 + 代码 + `.venv-audio`），跑 EP001 验证。
-2. 若同意，再下 **P1 VibeVoice-BitNet** 做单集“角色归属是否改善翻译”实验。
-3. 分离（P2）暂缓：等 ASR/翻译主链路稳定，再决定是否值得。
-4. 下载完成后更新 `ADR-011` 台账与 `docs/tech-route-progress.md`，把“已下载/已验证/已淘汰”分开记。
+1. ✅ P0 FireRedVAD：权重 + 代码已下；EP001 实测；`lib/audio` provider/CLI 已接入。
+2. ✅ P1 VibeVoice-BitNet：GGUF 1.58GB 已下；VibeASR.cpp 已用 MinGW 编译；**单集测试待跑**。
+3. ✅ P2 Mel-Band：fp16/fp32 权重已下；运行时未接，分离 A/B 暂缓。
+4. 下一步：主流程消费 `AudioHints`（OP/ED、空洞诊断）；VibeVoice 单集“角色归属是否改善翻译”；Review 自动分级 + gate 计数。
