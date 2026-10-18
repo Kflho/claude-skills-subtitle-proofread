@@ -12,11 +12,15 @@ python -m pytest -q tests/test_cue_mapper.py -k duplicate
 
 ## 约定
 
-- 不联网、不下载模型、不读真实项目；外部边界（ffmpeg / whisper-cli / LLM / worker）只在 seam mock。
+- 不联网、不下载模型、不读真实项目；外部边界（ffmpeg / whisper-cli / LLM / worker / janome / jieba / jamdict）只在 seam mock。
 - 文件系统用 `tmp_path`；时间/随机固定。
 - 断言行为（状态、文本、时间码），不断言常量或私有实现。
 - Tier 1 纯函数 → Tier 2 tmp_path → Tier 3 mock 外部二进制。
+- 源文件一律 UTF-8；不要用 PowerShell `Get-Content | Set-Content` 往返修改（中文会变 mojibake）。
 
 ## 覆盖现状与缺口
 
-见 [`docs/test-plan.md`](../docs/test-plan.md)：能力矩阵、P0 缺口（Whisper 链路、翻译、专名、OP/ED、编排）、渐进覆盖率门槛。
+当前 **858 passed / 56.2% 覆盖**（无网络、无模型、无真实项目）。
+P0 链路（Whisper 编排/VAD、翻译、专名、OP/ED、编排）已补齐；
+剩余 P1 缺口（whisper_fixer、find_suspect 聚类、reuse、run_all 各 step）见
+[`docs/test-plan.md`](../docs/test-plan.md)：能力矩阵与渐进覆盖率门槛。

@@ -90,6 +90,19 @@ export LLM_BASE_URL='https://api.deepseek.com/v1'
 会混入。已自动跳过 `_` 前缀键；**说明文字写进 CLAUDE.md，不要留在 JSON 里**
 （`apply_map.py --merge-existing` 等消费方未必过滤）。
 
+### `--glossary` 表格解析（legacy 路径）
+
+`load_glossary` 读 markdown 表格时有两个坑（2026-10 修复，见 `tests/test_translate_srt.py`）：
+
+1. `line.split('|')` 首尾各多一个空串。直接取 `cells[1]`/`cells[2]` 会把表头
+   `| 日语 | 中文 |` 当成一条 **日语→中文** 映射，并把「中文」「出现次数」塞进 prompt。
+   先滤掉空单元格再取列。
+2. `build_glossary.py` 产出的表是 `| 日语 | 出现次数 | 拼写变体 |`，**没有中文列**。
+   硬当 ja→zh 映射会把「96」当译名，随后 `apply_noun_pre_replace` 把数字替换进正文。
+   现在只接受第二列含汉字的行，其余跳过。
+
+首选仍是 `--mappings noun_mappings.json`（结构化、无解析歧义）。
+
 ## 5. 百度翻译（legacy）
 
 旧 `scripts/fix/translate_srt.py` 调百度 API：
