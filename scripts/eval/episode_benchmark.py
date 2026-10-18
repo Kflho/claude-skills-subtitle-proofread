@@ -177,10 +177,12 @@ def _quality(result: ASRResult) -> dict:
 # It is read-only diagnosis, never a repair input.
 #
 # ``signed_start_stats`` exposes the systematic part: against Japanese CC
-# the ASR start is consistently ~0.4 s earlier on EP02/03 (display-onset
-# convention, see ADR-009).  Absolute P50/P90 alone hide that, so the sign
-# and the early share are reported next to them.  Neither is subtracted
-# from the output — the raw numbers stay the gate.
+# (the boundary test standard, user decision) the ASR start is consistently
+# ~0.4 s earlier on EP02/03 — an alignment defect, not reference noise.
+# Absolute P50/P90 alone hide that, so the sign and the early share are
+# reported next to them.  Nothing is subtracted from the output: an offset
+# estimated from the same cues would be self-confirming, and raw stays the
+# gate.
 
 def _pct(values: list[float], p: float) -> float:
     values = sorted(values)
@@ -285,8 +287,9 @@ def signed_start_stats(alignments: list) -> dict:
     """Signed start-error distribution — separates bias from spread.
 
     ``signed`` keeps the direction (negative = ASR starts before the cue).
-    A tight distribution centred on −0.4 s is a display-onset convention,
-    not a per-cue error; the absolute P50/P90 cannot tell the two apart.
+    Against the CC test standard a tight distribution centred on −0.4 s is
+    a systematic alignment defect, not per-cue noise; the absolute P50/P90
+    alone cannot tell the two apart.
     """
     values = [al.start_error for al in alignments
               if al.status == 'match' and al.start_error is not None]
@@ -597,8 +600,8 @@ def render_markdown(rows: list[dict], agg: dict, manifest: dict) -> str:
         '',
         f"- project: {manifest.get('project', '')}",
         f"- language: {manifest.get('language', 'Japanese')}",
-        '- note: reference Japanese CC is a benchmark, not a tuning input '
-        '(see eval/protocol.md).',
+        '- note: reference Japanese CC is the boundary test standard (user '
+        'decision) and a benchmark, not a tuning input (see eval/protocol.md).',
         '',
         '| split | id | CER | ref chars | cues | match | '
         'P50 起 (ms) | P90 起 (ms) | ±100ms | ±300ms | rel | rel P90 | '
@@ -704,10 +707,11 @@ def render_markdown(rows: list[dict], agg: dict, manifest: dict) -> str:
                    and (r['alignment'].get('signed_start') or {}).get('n')]
     if signed_rows:
         lines += ['', '## Signed start error (bias vs spread)', '',
-                  'Signed = ASR start − cue start. A tight distribution '
-                  'centred away from 0 is the reference\'s display-onset '
-                  'convention (ADR-009); it is reported, never subtracted '
-                  '(raw stays the gate).',
+                  'Signed = ASR start − cue start. The Japanese CC is the '
+                  'boundary test standard (user decision), so a distribution '
+                  'centred away from 0 is a systematic alignment defect. It is '
+                  'reported, never corrected by an offset estimated from the '
+                  'same cues (raw stays the gate).',
                   '',
                   '| split | id | n | early | P10 (ms) | P50 (ms) | P90 (ms) | '
                   'P90−P10 (ms) | |err| P50 | |err| P90 |',

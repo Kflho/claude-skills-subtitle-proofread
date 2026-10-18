@@ -37,10 +37,10 @@ ASR_REQUEST_TIMEOUT = float(os.environ.get('ASR_REQUEST_TIMEOUT', '') or 1800)
 ASR_CONTEXT_FILE    = os.environ.get('ASR_CONTEXT_FILE', '')
 ASR_FALLBACK        = os.environ.get('ASR_FALLBACK', 'whisper').strip().lower()
 # Whole-file offset (different cut / frame rate) — OFF by default.  The
-# Digimon reference was hand-checked: the estimated -0.37/-0.40 s is the
-# ASR speech onset vs CC display onset convention, not a real drift, and
-# shifting every cue forward would damage correctly timed subtitles.  Opt in
-# per run (`--asr-global-offset`) only with independent evidence.
+# Japanese CC is the boundary test standard (user decision, 2026-10-18):
+# the measured 0.37–0.40 s onset gap is an alignment start defect, and a
+# shift estimated from the same cues would be self-confirming.  Opt in per
+# run (`--asr-global-offset`) only with independent evidence.
 ASR_GLOBAL_OFFSET   = (os.environ.get('ASR_GLOBAL_OFFSET', '').strip().lower()
                        in {'1', 'true', 'yes', 'on'})
 

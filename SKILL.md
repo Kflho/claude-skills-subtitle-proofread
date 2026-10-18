@@ -153,8 +153,9 @@ python "<scripts-dir>/run_all.py" \
 > **VAD 删条默认不写盘**（分级 L1）：先看清单，确认无误再 `--vad-clean-apply`。
 > `--asr qwen3` 用 2026 路线替代 Phase 2 的 Whisper：**默认只改时间码**，文本不动、不删条；
 > 需要文本替换再加 `--asr-fix-text`。诊断明细写到 `temp/scans/<EP>.alignment.json`。
-> 整集偏移**默认不应用**（参考侧 0.4 s 是 CC 显示起点约定，不是真实漂移）；只有拿到
-> 独立证据（换剪辑/帧率）才加 `--asr-global-offset`，估计值始终写进 alignment.json。
+> 整集偏移**默认不应用**（按 CC 标准，0.37–0.40 s 是当前对齐的起点缺陷，不是参考偏移；
+> 用参考自估偏移平移输出属于自证）；只有拿到独立证据（换剪辑/帧率）才加
+> `--asr-global-offset`，估计值始终写进 alignment.json。
 > ASS 的 `--asr` 写回暂不支持（只出报告，不静默改文件）。
 
 ### 模块化调用

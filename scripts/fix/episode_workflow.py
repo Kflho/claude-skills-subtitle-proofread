@@ -152,7 +152,9 @@ def step_audio(project_dir, episode, scan_result, dry_run=False, video_dir=None,
     ``asr_engine`` switches to the 2026 ASR alignment route
     (``Fixer.fix_by_asr``) instead of Whisper; it fixes cue times and never
     deletes cues.  ``asr_global_offset`` opts into the whole-file drift
-    correction (off by default: it absorbs the CC display-onset convention).
+    correction (off by default: by the CC test standard the 0.37–0.40 s
+    onset gap is an alignment defect, and a reference-estimated shift would
+    be self-confirming).
 
     ``vad_clean_apply`` 默认 False（分级 L1）：VAD 删条只出清单不写盘。
     """

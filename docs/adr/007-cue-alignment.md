@@ -59,7 +59,10 @@
 - ⚠️ ASS 写回目前只更新文本、不更新时间码，`align_cues.py --write` 对 `.ass` 直接拒绝（退出码 4），避免「成功但什么都没改」。
 - ✅ **三集 held-out 基准已建立**（2026-10-18）：EP01=dev，EP02/03=test；只读评测器 `scripts/eval/episode_benchmark.py`，协议 `eval/protocol.md`。raw test：CER micro 0.2633、起点 P50 400 ms、可靠匹配 P90 510 ms、±100 ms 5.1%。
 - ⚠️ **P90 远未达标**：可靠匹配 510 ms > 300 ms；剩余误差来自短语气词/重复台词歧义和 FA 零时长，需要 P3 VAD/分段重对齐，不能靠调阈值。
-- ⚠️ **整集偏移是伪修正**：用户人工确认视频/CC 无偏移；`estimate_global_offset` 的 -0.37/-0.40 s 是 ASR 起点 vs CC 显示起点的系统差。`align_cues` 已改为 opt-in；不要把 offset-corrected 数字当验收。
+- ⚠️ **整集偏移是伪修正**：`estimate_global_offset` 的 -0.37/-0.40 s 不能拿来平移输出。
+  （2026-10-18 用户决定：日语 CC 边界即测试标准，所以该值是**当前对齐的起点缺陷**，
+  不是参考噪声；raw P50/P90 直接判定，当前未达标。自估偏移与打分同源，平移输出属自证。）
+  `align_cues` 保持 opt-in。
 - ✅ **Whisper A/B 已跑**（large-v3 q5）：文本更好（test CER 0.204 vs Qwen3 0.263，match 195 vs 153），打轴更差（P50 757 vs 400 ms，可靠 P90 1325 vs 510 ms）。Whisper 只有 segment 时间戳。
 - ⚠️ **两个负结果**：segment-start overlong trim 只在 EP01 dev 提升、EP02/03 test 中性，保持 opt-in；cursor 回看增加 match 但 P90 变差，不采纳。
 

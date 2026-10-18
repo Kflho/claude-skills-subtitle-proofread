@@ -1144,8 +1144,9 @@ Examples:
                              '(default: timecodes only)')
     parser.add_argument('--asr-global-offset', action='store_true',
                         help='apply the estimated whole-file offset to every '
-                             'cue (default OFF: the estimate absorbs the CC '
-                             'display-onset convention; see ADR-009)')
+                             'cue (default OFF: by the CC test standard the '
+                             'offset is an alignment start defect, and a '
+                             'reference-estimated shift is self-confirming)')
     args = parser.parse_args()
 
     project_dir = args.target_dir or os.getcwd()

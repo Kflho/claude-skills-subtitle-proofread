@@ -390,11 +390,12 @@ class Fixer:
         no cue is ever deleted.  ``asr_result`` is injectable for tests.
 
         ``global_offset`` controls the whole-file drift correction.  It is
-        **off by default** (config ``ASR_GLOBAL_OFFSET``): on the Digimon
-        reference the estimate absorbs the CC display-onset convention, not
-        a real cut/frame-rate drift, and applying it would shift correctly
-        timed cues.  The estimate is still written to the alignment report
-        as diagnostics; pass ``global_offset=True`` to apply it.
+        **off by default** (config ``ASR_GLOBAL_OFFSET``).  By the CC test
+        standard the measured 0.37–0.40 s onset gap is an alignment defect,
+        and a shift estimated from the very cues being scored would be
+        self-confirming; the estimate is still written to the alignment
+        report as diagnostics.  Pass ``global_offset=True`` only for a real
+        cut/frame-rate change.
 
         The full diagnosis is written to ``temp/scans/<EP>.alignment.json``;
         review candidates are appended to report layer 2 as ⬜.
