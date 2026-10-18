@@ -123,7 +123,11 @@ pytest -q --cov --cov-report=term-missing   # 覆盖率 36.3%，矩阵见 docs/t
 
 ASR 架构已按「稳定核心 + 插件适配器」落地：`lib/asr/base.py`（契约）、`registry.py`（自动发现）、`router.py`（路由），新模型只写 `lib/asr/adapters/<name>.py`，不改 core。P1 进度见 `docs/tech-route-progress.md`。
 
-P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 → 信号/置信度）、`fix/align_repair.py`（修复计划/时间码）、`scripts/asr/align_cues.py`（端到端 CLI，默认 dry-run）。未接 `run_all` 默认管线；真实日语 A/B 待素材。
+P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 → 信号/置信度）、`fix/align_repair.py`（修复计划/时间码/整集偏移）、`scripts/asr/align_cues.py`（端到端 CLI，默认 dry-run）、`run_all --asr`（flag 控制）。莎莉 EP001 实机验证完成：`qwen_asr` 180s 分块会塌缩 → worker 自切 60s + 补零（ADR-008）。
+
+素材现状：莎莉 110 集、阿童木 193 集视频都在本地；**两者都没有可信日语参考字幕**（莎莉源字幕是俄语；阿童木 sidecar SRT 是机翻中文、2s 粗轴，不能当金标）。因此 CER/边界验收仍需人工听校；参考无关 A/B 可直接用视频跑。
+
+测试：576 passed / 0 failed / 36.3% 覆盖；矩阵与 P0 缺口见 `docs/test-plan.md`。
 
 ## 配置
 
