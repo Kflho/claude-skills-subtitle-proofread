@@ -7,12 +7,12 @@
 
 ```text
 python -m pytest -q
-1386 passed in ~9s           # 无网络、无模型、无真实项目依赖
-coverage: 79.7% (14,673 statements)
+1389 passed in ~9s           # 无网络、无模型、无真实项目依赖
+coverage: 79.7% (14,700 statements)
 ```
 
-本轮 **+9 tests**（1377 → 1386）：+3 ASR review 工作单/`set_time`/AI review 列表，
-+6 AudioHints 契约 + FireRedVAD provider（worker 用 fake runner，不加载模型）。
+本轮 **+12 tests**（1377 → 1389）：+3 ASR review 工作单/`set_time`/AI review 列表，
++6 AudioHints 契约 + FireRedVAD provider（worker 用 fake runner，不加载模型）；+3 `--audio-hints` 主流程接线（fix_by_asr / step_audio / run_all）。
 覆盖率 79.6% → 79.7%，0 failed。
 
 新增/扩展测试文件：
@@ -27,8 +27,9 @@ coverage: 79.7% (14,673 statements)
 | `test_project_utils.py` / `test_subtitle_session.py`（扩展） | 未补零视频名解析（`01、Title.mkv` → EP001）、201/1080p 反例、SubtitleSession 视频解析 |
 | `test_whisper_fixer.py`（改造） | 替换翻译改走 LLM：有 key 翻译、无 key 保留原文、失败批次保留原文；删除百度 mock |
 | `test_config.py`（改造） | 断言 `BAIDU_*` 配置已不存在（ADR-010） |
-| `test_apply_fixes.py` / `test_fix_by_asr.py` / `test_run_all_step_functions.py`（扩展） | ASR review 工作单（`<EP>.asr_review.json`）、`set_time` 改动时间码/秒值/非法区间、AI review 步列出工作单 |
+| `test_apply_fixes.py` / `test_fix_by_asr.py` / `test_run_all_step_functions.py`（扩展） | ASR review 工作单（`<EP>.asr_review.json`）、`set_time` 改动时间码/秒值/非法区间、AI review 步列出工作单；`audio_hints` 证据写入/失败降级 |
 | `test_audio_hints.py`（新） | `AudioEvent`/`AudioHints` 契约往返、summary 比例；FireRedVAD provider 解析 worker JSON、失败/错误 JSON/缺失模型 |
+| `test_episode_workflow.py`（扩展） | `--audio-hints` 从 `step_audio` 透传到 `fix_by_asr`（默认关） |
 
 ### 覆盖率按目录（本轮 vs 上轮）
 
@@ -45,7 +46,7 @@ coverage: 79.7% (14,673 statements)
 | `scripts/eval` | 1,074 | **90.0%** | 90.3% | 新增 release gate；benchmark 新指标 |
 | `scripts/ass` | 313 | **86.3%** | 86.3% | CLI main 已测 |
 | `scripts/utils` | 285 | **80.4%** | 80.4% | — |
-| **合计** | **14,673** | **79.7%** | 79.7% | — |
+| **合计** | **14,700** | **79.7%** | 79.7% | — |
 
 ### 做得好的部分
 

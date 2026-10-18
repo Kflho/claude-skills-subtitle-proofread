@@ -136,7 +136,7 @@ scripts/
 ## 测试
 
 ```bash
-cd <skill>/tests && pytest -q    # 1386 tests, ~9s, 无外部依赖
+cd <skill>/tests && pytest -q    # 1389 tests, ~9s, 无外部依赖
 cd <skill> && pytest -q tests --cov --cov-report=term-missing   # 覆盖率 79.7%，矩阵见 docs/test-plan.md
 ```
 
@@ -175,7 +175,9 @@ ASR 架构已按「稳定核心 + 插件适配器」落地：`lib/asr/base.py`�
 `lib/audio/fireredvad.py`（主环境 subprocess 调 `.venv-qwen` worker，不 import torch）、
 `scripts/audio/detect_events.py`（16k mono wav → `<EP>.audio_hints.json`）。
 FireRedVAD/AED 已下载并实测，EP001 生成 442 个事件（speech 48.8% / singing 8.9% / music 78.1%）；
-**主流程尚未消费 hints**。能力测试（`docs/capability-tests.md`）：三集 53 个空洞里
+**主流程已接 `run_all --audio-hints`**：在 ASR 抽出的音频上跑 provider，写
+`<EP>.audio_hints.json`；失败只警告，不影响修复。**决策尚未消费 hints**（OP/ED/空洞是下一步）。
+能力测试（`docs/capability-tests.md`）：三集 53 个空洞里
 只有 12 个（23%）是 speech 主导，其余多为音乐/混合 → hints 只能做证据过滤，不能做门控；
 整集 OP/ED 实验：singing 在 OP 56% / ED 50–51% vs 正文 8–9%，是可用的候选信号；
 三集 OP 段几乎逐秒一致。候选规则尚未接主流程。说话人/VibeVoice 已删除（用户决定），不再保留计划。
@@ -184,7 +186,7 @@ P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 
 
 素材现状：**验收作品定为数码宝贝（Digimon Adventure）**，目录 `D:\videos\Animation\TV\数码宝贝`。**EP01/02/03 视频完整（各约 1386s）**；用户人工复核三集视频/CC 均无真实偏移。日文参考：`日语字幕\` 下 S01E01–S01E54 共 54 集 `ja[cc].srt`，已清洁；主故事窗口 `[95,1240]`。01–05 另有中文字幕，只能做参考无关/翻译复用。素材台账 `eval/materials.md`，清单 `eval/manifest.digimon.json`（Qwen3）与 `eval/manifest.digimon.whisper.json`（A/B）。莎莉/阿童木历史素材只保留机制/吞吐回放。
 
-测试：1386 passed / 0 failed / 79.7% 覆盖；矩阵与剩余缺口见 `docs/test-plan.md`。
+测试：1389 passed / 0 failed / 79.7% 覆盖；矩阵与剩余缺口见 `docs/test-plan.md`。
 
 ## 配置
 

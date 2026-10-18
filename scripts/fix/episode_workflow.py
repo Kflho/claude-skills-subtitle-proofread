@@ -143,7 +143,7 @@ def step_compare(project_dir, episode, scan_result, translated_path, dry_run=Fal
 def step_audio(project_dir, episode, scan_result, dry_run=False, video_dir=None,
                target_lang='ja', vad_clean_apply=False,
                asr_engine='', asr_python='', asr_fix_text=False,
-               asr_global_offset=False):
+               asr_global_offset=False, audio_hints=False):
     """Audio mode: dispatch garbled cues + missing subtitles to unified VAD+Whisper fix.
 
     v5.3: Single fix_by_whisper() call covers garbled, partial overlap,
@@ -170,7 +170,8 @@ def step_audio(project_dir, episode, scan_result, dry_run=False, video_dir=None,
             return FixReport(source='asr')
         print(f'[audio] ASR route: {asr_engine}')
         report = fixer.fix_by_asr(write_text=asr_fix_text,
-                                  global_offset=asr_global_offset)
+                                  global_offset=asr_global_offset,
+                                  audio_hints=audio_hints)
         print(f'[audio] ASR done: {report.applied} fixed, '
               f'{report.ai_review} review')
         if not report.applied and not report.ai_review:
@@ -479,7 +480,8 @@ def _run_pipeline(project_dir, episode, resources, args):
                                asr_python=getattr(args, 'asr_python', ''),
                                asr_fix_text=getattr(args, 'asr_fix_text', False),
                                asr_global_offset=getattr(
-                                   args, 'asr_global_offset', False))
+                                   args, 'asr_global_offset', False),
+                               audio_hints=getattr(args, 'audio_hints', False))
 
         elif step == 'translate':
             translated_path = step_translate(project_dir, episode, scan_result,

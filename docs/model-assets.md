@@ -86,9 +86,17 @@ print(v.detect('temp/firered_ep001.wav')[0])"
 - `scripts/audio/detect_events.py`：CLI，输入 16k mono wav，写 `<EP>.audio_hints.json`。
 
 ```powershell
+# 独立跑
 python scripts/audio/detect_events.py --wav temp/firered_ep001.wav `
   --out temp/scans/EP001.audio_hints.json --mode aed
+
+# 主流程跑（ASR 路由 + hints）
+python scripts/run_all.py --asr qwen3 --audio-hints
 ```
+
+- `Fixer.fix_by_asr(..., audio_hints=True)` 会在 ASR 抽出的音频上调用 provider，
+  写 `<EP>.audio_hints.json`；失败只警告、不影响 ASR 修复。
+- `--audio-hints` 默认关；目前只写证据，**还没有用 hints 改修复/OP/ED 决策**。
 
 已生成 EP001 hints：442 个事件，`speech 48.8% / singing 8.9% / music 78.1%`
 （AED 的 speech 与 VAD 的 666.7s 不同，前者更严格；两条都保留作证据）。

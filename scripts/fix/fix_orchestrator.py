@@ -74,6 +74,33 @@ class FixReport:
 
 
 # ═══════════════════════════════════════════════════════════════
+# Audio hints (FireRedVAD/AED) — optional evidence, never a gate
+# ═══════════════════════════════════════════════════════════════
+
+def attach_audio_hints(wav: str, out_dir: str, episode: str,
+                       provider=None):
+    """Run FireRedVAD on the episode wav and write ``<EP>.audio_hints.json``.
+
+    The provider is injectable for tests.  Hints are advisory evidence; a
+    failure here must not fail the ASR route (caller catches it).
+    """
+    from lib.audio.fireredvad import FireRedVadProvider
+
+    provider = provider or FireRedVadProvider()
+    hints = provider.detect(wav, mode='aed')
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, f'{episode}.audio_hints.json')
+    with open(path, 'w', encoding='utf-8') as handle:
+        json.dump(hints.to_dict(), handle, ensure_ascii=False, indent=2)
+    summary = hints.summary()
+    print(f'[asr] audio hints: speech {summary["speech"]["ratio"]:.1%}, '
+          f'singing {summary["singing"]["ratio"]:.1%}, '
+          f'music {summary["music"]["ratio"]:.1%} -> {path}',
+          file=sys.stderr)
+    return hints, path
+
+
+# ═══════════════════════════════════════════════════════════════
 # ASR review worklist (Review ladder L1/L2 hand-off)
 # ═══════════════════════════════════════════════════════════════
 
@@ -446,7 +473,7 @@ class Fixer:
 
     def fix_by_asr(self, *, engine: str = None, asr_result=None,
                    write_text: bool = False, global_offset: bool | None = None,
-                   config=None) -> FixReport:
+                   audio_hints: bool = False, config=None) -> FixReport:
         """Align cue times against the 2026 ASR route (Qwen3 + FA).
 
         Default behaviour is time-only: text is never replaced unless
@@ -500,6 +527,24 @@ class Fixer:
             return FixReport(
                 source='asr',
                 details=['ASR transcription failed — see the [asr] log above'])
+
+        hint_detail = ''
+        if audio_hints:
+            wav = getattr(self, '_last_asr_audio', '')
+            if wav and os.path.exists(wav):
+                try:
+                    hints, hint_path = attach_audio_hints(
+                        wav, self._temp_dir, self.episode)
+                    s = hints.summary()
+                    hint_detail = (f'audio hints: speech {s["speech"]["ratio"]:.0%}, '
+                                   f'singing {s["singing"]["ratio"]:.0%}, '
+                                   f'music {s["music"]["ratio"]:.0%} ({hint_path})')
+                except Exception as exc:
+                    # Optional evidence must never fail the fix.
+                    print(f'[asr] audio hints skipped: {exc}', file=sys.stderr)
+            else:
+                print('[asr] audio hints requested but no extracted audio; '
+                      'skipped', file=sys.stderr)
 
         aligned = map_report(cues, result, config=cfg,
                              language=self.target_lang)
@@ -589,9 +634,12 @@ class Fixer:
 
         print(f'[asr] {applied} fixes from {stats["auto"]} auto candidates, '
               f'{len(review)} review', file=sys.stderr)
+        details = [f'{p.action}: {p.old_text[:40]}' for p in plan[:20]]
+        if hint_detail:
+            details.insert(0, hint_detail)
         return FixReport(
             source='asr', applied=applied, ai_review=len(review),
-            details=[f'{p.action}: {p.old_text[:40]}' for p in plan[:20]])
+            details=details)
 
     def _transcribe_for_alignment(self, engine: str = None):
         """Extract audio and run the configured ASR route (None on failure)."""
@@ -609,6 +657,7 @@ class Fixer:
         except Exception as exc:
             print(f'[asr] audio extraction failed: {exc}', file=sys.stderr)
             return None
+        self._last_asr_audio = audio
 
         from lib.asr.router import ASRRouter
         from lib.config import ASR_FALLBACK

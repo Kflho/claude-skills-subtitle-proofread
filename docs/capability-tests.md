@@ -9,7 +9,7 @@
 | 模型 | 声称能力 | 已做测试 | 结论 | 允许接入 |
 |---|---|---|---|---|
 | Qwen3-ASR-1.7B + FA | 日语 ASR + 字符级对齐 | 3 集 CC 基准、端到端、signed/空洞 | **有强证据**，日语媒体第一梯队 | ✅ 主 ASR/对齐 |
-| FireRedVAD + AED | VAD + speech/singing/music | README 样例、EP001–003 整集、空洞归因、OP/ED 窗口 | 能分事件；singing 在 OP/ED 是正文 ~6 倍（三集一致）；**空洞只 12/53 为 speech 主导，只支持过滤** | 🟡 证据可用，主流程未接 |
+| FireRedVAD + AED | VAD + speech/singing/music | README 样例、EP001–003 整集、空洞归因、OP/ED 窗口 | 能分事件；singing 在 OP/ED 是正文 ~6 倍（三集一致）；**空洞只 12/53 为 speech 主导，只支持过滤** | 🟡 已接 `--audio-hints` 写证据；决策未接 |
 | VibeVoice-ASR-BitNet | 60min Who/When/What + 热词 | 60s 日语动画片段（text/json 两种 prompt） | **没有 who/when；专名更差；用户决定删除说话人** | ⛔ 已删资产，不接 |
 | Mel-Band RoFormer | 人声分离 | 无（只有权重，运行时未接） | 未测 | ⛔ 暂不接 |
 | LLM 翻译（DeepSeek） | 日→中翻译 | 1 句短句 API 验证 | 能调用；**无成集质量证据** | 🟡 只做 20 cue pilot |

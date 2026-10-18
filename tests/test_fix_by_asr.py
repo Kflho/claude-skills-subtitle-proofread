@@ -58,6 +58,52 @@ def test_fix_by_asr_applies_time_fix_only(project):
     assert payload['plan']['auto'] == 1
 
 
+def test_fix_by_asr_audio_hints_are_optional_evidence(project, monkeypatch):
+    from lib.audio.base import AudioEvent, AudioHints
+
+    fixer = Fixer('EP001', str(project), srt_dir=str(project))
+    wav = project / 'episode.wav'
+    wav.write_bytes(b'fake')
+    fixer._last_asr_audio = str(wav)
+    result = make_result([
+        ('おはよう', 1.0, 2.0),
+        ('お前何してんだよ', 5.3, 6.4),
+    ])
+    hints = AudioHints(
+        events=[AudioEvent('speech', 0, 10), AudioEvent('music', 0, 20)],
+        source='fake', duration=20.0)
+
+    def fake_attach(wav_path, out_dir, episode, provider=None):
+        return hints, str(Path(out_dir) / f'{episode}.audio_hints.json')
+
+    monkeypatch.setattr('fix.fix_orchestrator.attach_audio_hints', fake_attach)
+    report = fixer.fix_by_asr(asr_result=result, audio_hints=True)
+
+    assert report.applied == 1
+    assert report.details[0].startswith('audio hints:')
+    assert 'speech 50%' in report.details[0]
+
+
+def test_fix_by_asr_audio_hint_failure_does_not_fail_fix(project, monkeypatch):
+    fixer = Fixer('EP001', str(project), srt_dir=str(project))
+    wav = project / 'episode.wav'
+    wav.write_bytes(b'fake')
+    fixer._last_asr_audio = str(wav)
+    result = make_result([
+        ('おはよう', 1.0, 2.0),
+        ('お前何してんだよ', 5.3, 6.4),
+    ])
+
+    def boom(*args, **kwargs):
+        raise RuntimeError('worker crashed')
+
+    monkeypatch.setattr('fix.fix_orchestrator.attach_audio_hints', boom)
+    report = fixer.fix_by_asr(asr_result=result, audio_hints=True)
+
+    assert report.applied == 1
+    assert not any('audio hints:' in d for d in report.details)
+
+
 def test_fix_by_asr_does_not_delete_or_rewrite_clean_cues(project):
     fixer = Fixer('EP001', str(project), srt_dir=str(project))
     result = make_result([

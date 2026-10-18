@@ -116,7 +116,7 @@ Evaluation
 | Qwen3-FA-0.6B | 默认对齐 | ✅ | Aligner adapter | — |
 | WhisperX / MMS FA | 对齐备选/降级 | ⬜ | Aligner adapter | WhisperX 仅无 Qwen3-FA；MMS 仅无 GPU 且文本转假名（NC 许可） |
 | MFA / stable-ts | — | ⛔ 不采用 | — | 动画专名/OOV、非真 FA |
-| FireRedVAD + AED | VAD/AED 提示 | ✅ provider/CLI；空洞仅 12/53 speech 主导；3 集 singing OP 56% / ED 50–51% vs 正文 8–9% | `lib/audio` provider → `AudioHints` | 先写 OP/ED 候选规则并 3 集验 precision，再谈接主流程；不做门控 |
+| FireRedVAD + AED | VAD/AED 提示 | ✅ provider/CLI + `run_all --audio-hints`；空洞仅 12/53 speech 主导；3 集 singing OP 56% / ED 50–51% vs 正文 8–9% | `lib/audio` provider → `AudioHints` | 已接“写证据”，**尚未用 hints 改修复/OP/ED 决策** |
 | Silero-VAD / TEN-VAD | VAD fallback | ⬜ | 同上 | FireRed 不可用/对比 |
 | WebRTC VAD | 旧门控 | ⛔ 降级为 legacy | legacy | — |
 | Demucs htdemucs | 人声分离 | 🟡 2021/22 老模型；仅 Whisper 路径 | Ingest separator | 审计：降级为 fallback，不再投入 |

@@ -37,7 +37,7 @@ def _patch_steps(monkeypatch, calls, report=None):
     def step_audio(project_dir, episode, scan_result, dry_run=False,
                    video_dir=None, target_lang='ja', vad_clean_apply=False,
                    asr_engine='', asr_python='', asr_fix_text=False,
-                   asr_global_offset=False):
+                   asr_global_offset=False, audio_hints=False):
         calls.append(('audio', {'scan_result': scan_result,
                                 'dry_run': dry_run,
                                 'target_lang': target_lang,
@@ -220,9 +220,11 @@ def _install_fake_fixer(monkeypatch):
             return FixReport(source='whisper', applied=3, ai_review=1,
                              failed=2)
 
-        def fix_by_asr(self, write_text=False, global_offset=None):
+        def fix_by_asr(self, write_text=False, global_offset=None,
+                       audio_hints=False):
             self.asr_calls.append({'write_text': write_text,
-                                   'global_offset': global_offset})
+                                   'global_offset': global_offset,
+                                   'audio_hints': audio_hints})
             return FixReport(source='asr', applied=5)
 
     monkeypatch.setattr(fx, 'Fixer', FakeFixer)
@@ -269,7 +271,8 @@ def test_step_audio_asr_route_calls_fix_by_asr(monkeypatch):
 
     assert report.applied == 5
     assert created[0].asr_calls == [{'write_text': True,
-                                     'global_offset': False}]
+                                     'global_offset': False,
+                                     'audio_hints': False}]
 
 
 def test_step_audio_asr_route_threads_global_offset(monkeypatch):
@@ -279,7 +282,19 @@ def test_step_audio_asr_route_threads_global_offset(monkeypatch):
                   asr_global_offset=True)
 
     assert created[0].asr_calls == [{'write_text': False,
-                                     'global_offset': True}]
+                                     'global_offset': True,
+                                     'audio_hints': False}]
+
+
+def test_step_audio_asr_route_threads_audio_hints(monkeypatch):
+    created = _install_fake_fixer(monkeypatch)
+
+    ew.step_audio('/proj', 'EP001', None, asr_engine='qwen3',
+                  audio_hints=True)
+
+    assert created[0].asr_calls == [{'write_text': False,
+                                     'global_offset': False,
+                                     'audio_hints': True}]
 
 
 def test_step_audio_asr_route_surfaces_early_exit_reason(monkeypatch,

@@ -116,6 +116,9 @@ python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json \
 # FireRedVAD/AED → AudioHints JSON（16k mono wav）
 python scripts/audio/detect_events.py --wav temp/firered_ep001.wav `
   --out temp/scans/EP001.audio_hints.json --mode aed
+
+# 主流程：ASR 路由 + hints（默认关；失败不影响修复）
+python scripts/run_all.py --asr qwen3 --audio-hints
 ```
 
 > Whisper 系按用户规则**不下载、不再测试**；本机只保留 whisper.cpp CUDA（路径由 `WHISPER_CLI` 指定）。

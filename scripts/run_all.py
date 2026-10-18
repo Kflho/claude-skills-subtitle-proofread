@@ -220,7 +220,7 @@ def step_fix_episodes(project_dir, lang, resources,
                       skip_whisper=False, episodes=None, limit=0, start_from=None,
                       skip_if_clean=True, target_dir=None, vad_clean_apply=False,
                       asr_engine='', asr_python='', asr_fix_text=False,
-                      asr_global_offset=False):
+                      asr_global_offset=False, audio_hints=False):
     """Phase 2: Unified error-fix via Fixer (reference → Whisper → AI fragments).
 
     Each episode goes through the cascading priority:
@@ -328,6 +328,7 @@ def step_fix_episodes(project_dir, lang, resources,
         args.asr_python = asr_python
         args.asr_fix_text = asr_fix_text
         args.asr_global_offset = asr_global_offset
+        args.audio_hints = audio_hints
         print(f'[fix] {ep} ({i+1}/{len(selected)})', file=sys.stderr)
         try:
             _run_pipeline(project_dir, ep, resources, args)
@@ -1174,6 +1175,10 @@ Examples:
                              'cue (default OFF: by the CC test standard the '
                              'offset is an alignment start defect, and a '
                              'reference-estimated shift is self-confirming)')
+    parser.add_argument('--audio-hints', action='store_true',
+                        help='run FireRedVAD/AED on the extracted audio and write '
+                             'temp/scans/<EP>.audio_hints.json (advisory only; '
+                             'never used as a gate)')
     args = parser.parse_args()
 
     project_dir = args.target_dir or os.getcwd()
@@ -1315,7 +1320,8 @@ Examples:
                                       asr_engine=args.asr,
                                       asr_python=args.asr_python,
                                       asr_fix_text=args.asr_fix_text,
-                                      asr_global_offset=args.asr_global_offset)
+                                      asr_global_offset=args.asr_global_offset,
+                                      audio_hints=args.audio_hints)
 
         step_ai_review(project_dir, resolved_lang, target_dir=target_dir)
     else:
