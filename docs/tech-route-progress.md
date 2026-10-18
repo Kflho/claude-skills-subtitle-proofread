@@ -1,8 +1,8 @@
 # 2026 技术路线实施进度
 
 > **用途**：跨会话续跑。新会话先读本文件，再读 [`tech-route-2026.md`](tech-route-2026.md)、[`ADR-006`](adr/006-stable-asr-core.md)、[`ADR-007`](adr/007-cue-alignment.md)、[`ADR-008`](adr/008-qwen3-long-audio-chunking.md)、[`test-plan.md`](test-plan.md)。
-> **最后更新**：2026-10-18（第五轮：测试收尾 2 + 0.6B 复测；1295 tests / 78.9%；金标素材待接收）
-> **当前阶段**：P2 对齐 + `run_all --asr` + 实机验证完成；测试主链补洞完成（1295 tests / 78.9%）；默认仍走 Whisper。下一步 = **等用户金标素材做 P2-14 验收**（莎莉/阿童木字幕质量差，不再作金标）；0.6B 复测本轮执行，剩余补测见 test-plan。
+> **最后更新**：2026-10-18（第五轮：测试收尾 2 + 0.6B 复测；1295 tests / 78.9%；数码宝贝 EP01 视频到位，日文参考待收）
+> **当前阶段**：P2 对齐 + `run_all --asr` + 实机验证完成；测试主链补洞完成（1295 tests / 78.9%）；默认仍走 Whisper。下一步 = **等用户日文参考字幕**，用数码宝贝做 P2-14 验收；莎莉/阿童木不再作金标。
 > **总目标**：把音频链路从 `WebRTC VAD → kotoba Whisper → 时间重叠匹配` 迁移到 `Qwen3-ASR → Qwen3-ForcedAligner → 全局文本对齐`；默认行为在 P2 验收前保持不变。
 
 ## 0. 当前一句话（clear 后从这里开始）
@@ -11,7 +11,7 @@
 
 **下一步按顺序：**
 
-1. **P2-14 金标验收（默认切换的唯一阻塞）**：**等用户提供「完整字幕 + 动画视频」文件夹**；登记为 `eval/manifest.json` 金标（参考字幕必须可信），跑 CER / 边界 P50/P90/±100ms。**莎莉/阿童木字幕质量差，只保留历史与结构回归用途。**
+1. **P2-14 金标验收（默认切换的唯一阻塞）**：素材目录已登记为 `D:\videos\Animation\TV\数码宝贝`（见 `eval/materials.md`）；EP01 视频与中文字幕已到位，**等用户发日文参考字幕**。到齐后按 `eval/manifest.digimon.json` 建 manifest，跑 CER / 边界 P50/P90/±100ms。**中文字幕不能当日文 CER 金标；莎莉/阿童木不再用于验收。**
 2. **参考无关 A/B（改用用户素材）**：阿童木 A/B 已停（原任务取消）；素材到位后用同一批视频跑 Qwen3 1.7B 60s 分块 vs Whisper large-v3 q5（RTF、字数、零时长、时间轴覆盖、跨引擎一致度）。
 3. **chunk 调参**：45/60/90s 在金标上的边界误差 vs 耗时，确定默认。
 4. **0.6B 复测（不依赖金标）**：本轮已跑整集；结果与解释见 §4，待定是否保留草稿模式。
@@ -471,7 +471,7 @@ coverage: 64.0% (13,607 statements)     # 上轮 576 / 36.3%
 - ✅ 莎莉日语视频已到位（110 集 MKV）：`D:\videos\Animation\TV\[1966-1981] Toei Majokko series_東映魔女大系(東映魔女っ子シリーズ)_TV\[1966-1991] Sally_小仙女莎莉(魔法使いサリー)_TV\[1966-1968] Sally_小仙女莎莉 第1作(魔法使いサリー)_TV`。**仅历史/机制回归用途；字幕质量差，按用户要求不再作测试/验收素材。**
 - ✅ P2-13 实机验证完成：180s 分块塌缩 → 自切 60s + 补零；RTF 0.83→0.207–0.295，零时长 48%→8.4%（§4）。
 - ✅ 测试基线：全量 **1295 passed / 0 failed / 78.9%**（上轮 1162 / 74.0%）；第五轮补齐 `whisper_utils`、`episode_workflow`、`reuse/*`、`asr_eval`；1 个真 bug + 1 处日志修正，均配回归测试。
-- ⬜ 验收金标素材：**等用户提供「完整字幕 + 动画视频」文件夹**；莎莉字幕是俄语、阿童木是机翻中文，均不作金标（P2-14）。
+- ⬜ 验收金标素材：**数码宝贝目录已登记**（`D:\videos\Animation\TV\数码宝贝`，见 `eval/materials.md`）；EP01 视频完整、01–05 有中文字幕；**日文参考字幕待用户发**。中文字幕只能做非金标冒烟，P2-14 未开始。
 - ✅ P1/P2 主链补测完成：`scan` / `apply` 主流程、`run_all` 各 `step_*`、worker chunk、`whisper_utils`、`episode_workflow`、`reuse`、`eval` 已补（见 `test-plan.md` §3）。
 - ⬜ 剩余补测（不阻塞验收）：根脚本部分分支（65.7%）、`nouns` 旧入口（67.2%）、`whisper_backends`（59%）、`align_cues`（78%）；确认 `auto_classify` / `auto_clean_glossary` / `_write_ai_review_json` / `--mode` 去留。
 - ✅ 整集 0.6B（880s）与热态 RTF 0.122 反常：本轮复测 **453.1s / RTF 0.300**，同态 1.7B **237.0s / RTF 0.157**；880s 未复现，0.6B 仍慢 1.9× → 草稿模式不启用（见 §4 “0.6B 复测”）。
@@ -526,6 +526,8 @@ coverage: 64.0% (13,607 statements)     # 上轮 576 / 36.3%
 | `scripts/asr/README.md` | 运行说明 | ✅ |
 | `scripts/eval/asr_eval.py` | 评测 | ✅ |
 | `eval/manifest.example.json` / `README.md` | 金标模板 | ✅ |
+| `eval/materials.md` | 金标素材台账（数码宝贝目录/现状/接收约定） | ✅ |
+| `eval/manifest.digimon.json` | 数码宝贝评测清单草稿（待日文字幕填 reference_srt） | 🟡 |
 | `templates/asr_adapter.py` | 新 ASR 骨架 | ✅ |
 | `templates/aligner_adapter.py` | 新对齐器骨架 | ✅ |
 | `tests/test_asr_*.py` / `test_qwen3_*.py` | ASR 测试 | ✅ |
@@ -673,7 +675,7 @@ python scripts\run_all.py --lang ja --target-dir temp\proj_asr --input-dir subs 
 - **单句 segments 用 ASR 原文**：Qwen3-ASR 的句内标点/空格不在 aligner token 里，单段时直接沿用原文；多段才按 token 分配。
 - **`dirname()` 可能为空**：`separate_vocals` 等“默认同输入目录”的函数要写 `dirname(...) or '.'`；否则裸相对文件名会触发 `os.makedirs('')`。
 - **旧入口/死代码先标记不删**：`auto_classify`、`auto_clean_glossary`、`_write_ai_review_json`、`--mode` 已确认不在主链，删除属产品决策；本轮只在 test-plan 记录，不顺手改行为。
-- **金标来源规则**：机翻 / ASR / LLM 润色后的字幕都不能当参考。**验收素材由用户提供（完整字幕 + 视频）；莎莉/阿童木字幕质量差，不得再作测试/验收素材**，其历史数据只用于机制回放（规则写进 `eval/README.md`）。
+- **金标来源规则**：机翻 / ASR / LLM 润色后的字幕都不能当参考。**验收作品：数码宝贝**（`D:\videos\Animation\TV\数码宝贝`，见 `eval/materials.md`）；EP01 视频已到位、日文参考待发。中文字幕只能做非金标冒烟；莎莉/阿童木只保留机制回放。
 - **进程隔离**：主环境不 import torch/qwen-asr；worker JSON lines。
 - **Windows**：vLLM 不支持；走 Transformers 后端 + SDPA。
 - **模型下载**：HF 直连被墙；用 ModelScope（已验证 200）/ 镜像。

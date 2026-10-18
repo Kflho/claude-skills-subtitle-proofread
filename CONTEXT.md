@@ -126,7 +126,7 @@ ASR 架构已按「稳定核心 + 插件适配器」落地：`lib/asr/base.py`�
 
 P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 → 信号/置信度）、`fix/align_repair.py`（修复计划/时间码/整集偏移/相邻 cue 联动）、`scripts/asr/align_cues.py`（端到端 CLI，默认 dry-run）、`run_all --asr`（flag 控制）。莎莉 EP001 历史实机验证：`qwen_asr` 180s 分块会塌缩 → worker 自切 60s + 补零（ADR-008；机械/吞吐验证，不作金标）。
 
-素材现状：**验收/测试素材改由用户提供**（完整字幕 + 动画视频文件夹，待接收）。莎莉 110 集、阿童木 193 集视频虽在本地，但**字幕质量差**（莎莉源字幕是俄语；阿童木 sidecar SRT 是机翻中文、2s 粗轴），按用户要求**不再用于测试/验收**；其历史数据只保留机制回放用途（ADR-007/008）。
+素材现状：**验收作品定为数码宝贝（Digimon Adventure）**，目录 `D:\videos\Animation\TV\数码宝贝`。EP01 视频已完整（1386s，H264+FLAC 48k stereo，日语）；01–05 有中文字幕（`.sc`/`.tc` ASS，UTF-16LE，人工字幕组），但**不是日文参考**，只能做参考无关/翻译复用测试。**日文参考字幕待用户提供**（P2-14 唯一阻塞）。素材台账见 `eval/materials.md`，评测草稿见 `eval/manifest.digimon.json`。莎莉/阿童木历史素材只保留机制/吞吐回放，不再用于验收。
 
 测试：1295 passed / 0 failed / 78.9% 覆盖；矩阵与剩余缺口见 `docs/test-plan.md`。
 

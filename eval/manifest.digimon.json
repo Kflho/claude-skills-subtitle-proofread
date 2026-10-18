@@ -1,0 +1,14 @@
+{
+  "project": "digimon-adventure",
+  "language": "Japanese",
+  "episodes": [
+    {
+      "id": "EP001",
+      "category": "TODO(clean|overlap|bgm)",
+      "video": "D:/videos/Animation/TV/数码宝贝/01、漂流？冒険の島！.mkv",
+      "reference_srt": "D:/videos/Animation/TV/数码宝贝/01、漂流？冒険の島！.ja.srt",
+      "context": "",
+      "timestamps": true
+    }
+  ]
+}

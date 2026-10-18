@@ -2,6 +2,15 @@
 
 > 目标：同一批 12 集，分别跑旧管线（Whisper）与新管线（Qwen3-ASR + FA），比较 CER、边界误差、人工审查条数、耗时。
 
+## 0. 当前登记素材（2026-10-18）
+
+- 作品：**数码宝贝（Digimon Adventure）**
+- 目录：`D:\videos\Animation\TV\数码宝贝`
+- 现状：EP01 视频已完整；01–05 有中文字幕（`.sc` / `.tc` ASS）；**日文参考字幕待用户提供**。
+- 明细与接收约定见 [`materials.md`](materials.md)；评测清单草稿见 [`manifest.digimon.json`](manifest.digimon.json)。
+
+> 中文字幕不能当日本语 CER / cue 对齐金标；日文字幕到位前只做非金标冒烟。
+
 ## 1. 准备素材
 
 每集需要：
