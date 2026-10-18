@@ -105,7 +105,7 @@ def attach_audio_hints(wav: str, out_dir: str, episode: str,
 # ═══════════════════════════════════════════════════════════════
 
 def build_asr_review_worklist(episode: str, cues: list, alignments: list,
-                              review: list) -> dict:
+                              review: list, srt_path: str = '') -> dict:
     """Turn non-auto repairs into a machine-readable AI review worklist.
 
     The agent (or an LLM) fills ``decision`` per item and writes the result
@@ -152,6 +152,7 @@ def build_asr_review_worklist(episode: str, cues: list, alignments: list,
     return {
         'schema_version': 1,
         'episode': episode,
+        'srt': srt_path,
         'instructions': (
             'Fill decision per item: keep / fix_time / replace_text / delete / '
             'split. fix_time needs new_start+new_end (seconds or SRT timecode); '
@@ -610,7 +611,8 @@ class Fixer:
                                    f'{self.episode}.asr_review.json')
         try:
             payload = build_asr_review_worklist(
-                self.episode, cues, aligned.alignments, review)
+                self.episode, cues, aligned.alignments, review,
+                srt_path=self._srt_path)
             with open(review_path, 'w', encoding='utf-8') as handle:
                 json.dump(payload, handle, ensure_ascii=False, indent=2)
             if review:

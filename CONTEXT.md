@@ -125,6 +125,9 @@ scripts/
    L3 人工残留（目标 ≤5%，附片段/理由）。复用 `ai_fragments_<EP>.json`、
    `ai_review_fixes.json`、`auto_classify`，不新造人工队列；不把 review
    从一个文件挪到另一个文件冒充优化。
+   ASR 工作单 `<EP>.asr_review.json`（含 `srt` 路径）由
+   `scripts/apply/asr_review_to_fixes.py` 转成 `ai_review_fixes.json`；
+   split 不自动应用。自动分级与 gate 三档计数仍未做。
 
 9. **翻译全部 LLM（唯一确定使用 LLM 的阶段）**: 无传统 MT/百度 fallback（已移除）。
    翻译用用户已配置的**国内** LLM（`~/.claude/settings.json` 的 DeepSeek，
@@ -140,7 +143,7 @@ scripts/
 ## 测试
 
 ```bash
-cd <skill>/tests && pytest -q    # 1408 tests, ~9s, 无外部依赖
+cd <skill>/tests && pytest -q    # 1412 tests, ~9s, 无外部依赖
 cd <skill> && pytest -q tests --cov --cov-report=term-missing   # 覆盖率 79.9%，矩阵见 docs/test-plan.md
 ```
 
@@ -156,7 +159,7 @@ P0 链路（Whisper 编排/VAD、翻译、专名、OP/ED、编排）已补齐；
 ASR/FA registry、Ensemble、Alignment/Repair、Evidence/Review、Glossary/Translation、Evaluation。
 当前**未接入**：FireRedVAD/AED（仅 provider/CLI）、Silero/TEN、RoFormer、云 ASR、
 跨引擎一致性、LLM 可读性、OP/ED 指纹、切片重对齐、chunk 选择、glossary→ASR context、
-Review 阶梯、auto/AI/human 指标。可选能力默认 null，新增不改流程。
+Review 自动分级/auto-AI-human 计数。可选能力默认 null，新增不改流程。
 **说话人/VibeVoice 已由用户删除（2026-10）**，不再保留接缝或计划。
 
 **翻译链路**（`docs/translation-architecture.md`）：`translate_srt.py`（批处理/术语）
@@ -197,7 +200,7 @@ P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 
 
 素材现状：**验收作品定为数码宝贝（Digimon Adventure）**，目录 `D:\videos\Animation\TV\数码宝贝`。**EP01/02/03 视频完整（各约 1386s）**；用户人工复核三集视频/CC 均无真实偏移。日文参考：`日语字幕\` 下 S01E01–S01E54 共 54 集 `ja[cc].srt`，已清洁；主故事窗口 `[95,1240]`。01–05 另有中文字幕，只能做参考无关/翻译复用。素材台账 `eval/materials.md`，清单 `eval/manifest.digimon.json`（Qwen3）与 `eval/manifest.digimon.whisper.json`（A/B）。莎莉/阿童木历史素材只保留机制/吞吐回放。
 
-测试：1408 passed / 0 failed / 79.9% 覆盖；矩阵与剩余缺口见 `docs/test-plan.md`。
+测试：1412 passed / 0 failed / 79.9% 覆盖；矩阵与剩余缺口见 `docs/test-plan.md`。
 
 ## 配置
 

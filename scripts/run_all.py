@@ -871,8 +871,9 @@ def step_ai_review(project_dir, lang, target_dir=None):
         for ep, count, path in asr_pending:
             print(f'  {ep}: {count} pending → {path}', file=sys.stderr)
         print('  Claude: fill "decision" per item (keep/fix_time/replace_text/'
-              'delete), then write fixes to temp/scans/ai_review_fixes.json '
-              '(set_time/replace_text/delete_line) and rerun --resume.',
+              'delete), then run: python scripts/apply/asr_review_to_fixes.py '
+              '--scans-dir temp/scans', file=sys.stderr)
+        print('  It writes temp/scans/ai_review_fixes.json; then rerun --resume.',
               file=sys.stderr)
 
     if total_entries == 0 and not asr_pending:

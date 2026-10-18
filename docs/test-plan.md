@@ -7,12 +7,12 @@
 
 ```text
 python -m pytest -q
-1408 passed in ~9s           # 无网络、无模型、无真实项目依赖
-coverage: 79.9% (15,012 statements)
+1412 passed in ~9s           # 无网络、无模型、无真实项目依赖
+coverage: 79.9% (15,105 statements)
 ```
 
-本轮 **+31 tests**（1377 → 1408）：+3 ASR review 工作单/`set_time`/AI review 列表，
-+6 AudioHints 契约 + FireRedVAD provider（worker 用 fake runner，不加载模型）；+3 `--audio-hints` 主流程接线；+8 翻译 QA/阶段；+7 翻译 repair；+2 chrF/时间轴 guardrail。
+本轮 **+35 tests**（1377 → 1412）：ASR review 工作单/`set_time`/AI review 列表、
+AudioHints 契约与主流程接线、翻译 QA/阶段/repair/chrF/时间轴、review 转换器。
 覆盖率 79.7% → 79.9%，0 failed。
 
 新增/扩展测试文件：
@@ -34,23 +34,24 @@ coverage: 79.9% (15,012 statements)
 | `test_translation_stage.py`（新） | 源 SRT/glossary 发现、命令契约、成功/失败/缺源、dry-run |
 | `test_translation_repair.py`（新） | 只修 QA 标出的条；无违规时不调用 LLM |
 | `test_translate_srt.py`（扩展） | 硬约束 prompt、`write_qa_report` 落盘 |
+| `test_asr_review_to_fixes.py`（新） | decision→apply_fixes 转换（set_time/replace_text/delete）、校验错误、split 跳过、dedupe、CLI 写盘 |
 
 ### 覆盖率按目录（本轮 vs 上轮）
 
 | 目录 | 语句 | 覆盖 | 上轮 | 说明 |
 |---|---:|---:|---:|---|
 | `scripts/lib`（含子目录） | 3,804 | **86.3%** | 85.8% | 翻译 QA/chrF/时间轴；AudioHints 契约/provider |
-| `scripts/fix` | 3,080 | **77.3%** | 78.0% | 删除百度翻译模块；SubtitleSession 视频解析 + 早退提示；whisper_pipeline 81% |
+| `scripts/fix` | 3,216 | **77.5%** | 78.0% | 翻译阶段/repair + AudioHints provider；whisper_pipeline 81% |
 | `scripts/nouns` | 2,424 | **67.2%** | 67.2% | `auto_classify` / `auto_clean_glossary` 仍 0%（旧入口） |
-| `scripts` 根 | 2,013 | **65.8%** | 65.7% | run_all 96%、translate_srt 85%、polish_zh 99% |
+| `scripts` 根 | 2,121 | **66.6%** | 65.7% | run_all 96%、translate_srt 85%、polish_zh 99% |
 | `scripts/asr` | 603 | **95.0%** | 95.0% | worker 99%、CLI 99% |
 | `scripts/reuse` | 389 | **97.9%** | 97.9% | align 96%、apply 98%、common 100% |
 | `scripts/scan` | 372 | **94.6%** | 94.6% | scan_all/VAD/CLI 补齐 |
-| `scripts/apply` | 380 | **100.0%** | 100.0% | main/ASS/繁→简/degloss 全分支 |
+| `scripts/apply` | 504 | **96.4%** | 100.0% | main/ASS/繁→简 + ASR review 转换器 |
 | `scripts/eval` | 1,074 | **90.0%** | 90.3% | 新增 release gate；benchmark 新指标 |
 | `scripts/ass` | 313 | **86.3%** | 86.3% | CLI main 已测 |
 | `scripts/utils` | 285 | **80.4%** | 80.4% | — |
-| **合计** | **15,012** | **79.9%** | 79.8% | — |
+| **合计** | **15,105** | **79.9%** | 79.8% | — |
 
 ### 做得好的部分
 
