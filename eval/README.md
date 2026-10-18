@@ -81,6 +81,18 @@ python scripts/eval/episode_benchmark.py --manifest eval/manifest.digimon.whispe
 > 2026-10-18 用户人工复核：视频/CC 无真实偏移；`--global-offset` 不是默认项，
 > offset-corrected 数字不能当验收。
 
+### 3.2 一条命令判定（release gate）
+
+```powershell
+python scripts\eval\release_gate.py `
+  --manifests eval\manifest.digimon.json eval\manifest.digimon.whisper.json `
+  --baseline eval\gate.baseline.json --out-dir temp\reports
+```
+
+- test split 目标：起点 P50 ≤100 ms、可靠 P90 ≤300 ms；不达标即 FAIL；
+- 与冻结基线比：P50 +20 ms、可靠 P90 +50 ms、CER +0.01、字符覆盖 −0.02 以内算正常；
+- 退出码 0/1 可直接接 CI；`--update-baseline` 是显式的基线冻结动作。
+
 对比时只看同一 split、同一 ASR 缓存；dev 看方向，test 冻结后跑一次。
 
 报告第八轮起还带三块测量有效性信息（读法见 `eval/protocol.md` §2.1）：

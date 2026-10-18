@@ -95,6 +95,22 @@
 5. 把 before/after 原样写进 `docs/tech-route-progress.md`，注明 split；
 6. 若 test 退化，回退并在文档里保留失败记录。
 
+### 4.1 release gate（一条命令判定）
+
+```powershell
+python scripts\eval\release_gate.py `
+  --manifests eval\manifest.digimon.json eval\manifest.digimon.whisper.json `
+  --baseline eval\gate.baseline.json --out-dir temp\reports
+```
+
+- 跑完两个 manifest 的只读基准，按 test split 判定：**起点 P50 ≤100 ms、可靠 P90 ≤300 ms**；
+- 与 `eval/gate.baseline.json` 比对，回归容差：P50 +20 ms、可靠 P90 +50 ms、CER +0.01、
+  字符覆盖 −0.02；超出即 FAIL；
+- 退出码 0 = 全部通过，1 = 有 FAIL；报告写到 `temp/reports/gate_*.{json,md}`；
+- **冻结新基线是显式动作**：确认当前数字是新的起点后，才加 `--update-baseline` 并提交
+  `eval/gate.baseline.json` 的变更；不要在测试中途随手更新。
+- dev split 不参与目标判定（只看方向）；需要时加 `--allow-dev` 才把 dev 也纳入目标检查。
+
 ## 5. 防过拟合硬约束
 
 - 禁止按集特判（`if episode == 'EP002'`）；

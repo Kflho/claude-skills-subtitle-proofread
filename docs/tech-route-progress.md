@@ -1,22 +1,27 @@
 # 2026 技术路线实施进度
 
 > **用途**：跨会话续跑。新会话先读本文件，再读 [`tech-route-2026.md`](tech-route-2026.md)、[`ADR-006`](adr/006-stable-asr-core.md)、[`ADR-007`](adr/007-cue-alignment.md)、[`ADR-008`](adr/008-qwen3-long-audio-chunking.md)、[`test-plan.md`](test-plan.md)。
-> **最后更新**：2026-10-18（第八轮：测量有效性 + signed 偏差/覆盖分解 + 时间轴空洞诊断；1378 tests / 79.7%；提交 8c7615b）
+> **最后更新**：2026-10-18（第九轮：CC 边界测试标准 + release gate；1387 tests / 79.8%）
 > **当前阶段**：EP01–03 视频/日文 CC 齐备；只读基准 + 防过拟合协议落地；**用户确认视频/CC 无真实偏移，并明确日语 CC 边界即测试标准**（不再另建人工金标）。第八轮把“P90 为什么下不去”拆开：test 集 90% 的 matched cue 起点系统性早 −0.37/−0.40 s（同段音频重转写复现，是当前对齐的起点缺陷，不是缓存/参考问题；EP001 仅 −55 ms），且 P90 只覆盖 42–45% 的 CC 字符；FA 塌缩吞掉成段对白（累计空洞 122–229 s）。`fix_by_asr` 整集偏移改为**默认关**，分段重对齐实测更差、留 P3。
 > **总目标**：把音频链路从 `WebRTC VAD → kotoba Whisper → 时间重叠匹配` 迁移到 `Qwen3-ASR → Qwen3-ForcedAligner → 全局文本对齐`；默认行为在 P2 验收前保持不变。
 
 ## 0. 当前一句话（clear 后从这里开始）
 
-已经完成：P1 稳定 ASR 核心、P2 对齐层、`run_all --asr` 接入、实机验证、held-out 三集基准；**第八轮**新增 signed 偏差/离散、文本覆盖分解（matched-span CER）、P90 归因、`lost_spans` 空洞诊断，并把 `fix_by_asr` 的整集偏移降级为显式 opt-in。**用户已确认日语 CC 边界可作测试标准**，所以 raw 数字就是验收结果：test P50 400 ms / P90 1196 ms（可靠 P90 510 ms），P2-14 未达标；0.4 s 的主因是当前对齐起点系统性偏早（重转写复现，EP002/03 −371/−397 ms，EP001 −55 ms），P90 只描述 42–45% 被匹配的 CC 字符；FA 在音乐/重叠段把成段对白压成一个时刻，是覆盖率上不去的直接原因。**测试 1378 passed / 79.7% / 0 failed。**
+已经完成：P1 稳定 ASR 核心、P2 对齐层、`run_all --asr` 接入、实机验证、held-out 三集基准；第八轮补齐 signed 偏差/覆盖分解/P90 归因/空洞诊断；**第九轮**按用户定位重排主次，并把测试标准收成一条 gate 命令（`release_gate.py` + `eval/gate.baseline.json`）。**用户已确认日语 CC 边界即测试标准**，所以 raw 数字就是验收结果：test P50 400 ms / P90 1196 ms（可靠 P90 510 ms），P2-14 未达标。**测试 1387 passed / 79.8% / 0 failed。**
 
-**下一步按顺序：**
+**主次（用户定位：先应用新技术 + 建立测试标准，再慢慢改精度）：**
 
-1. **修起点系统偏差（P2-14 的主矛盾）**：按 CC 标准，test 集对齐起点普遍早 0.37–0.40 s；要在音频侧（VAD/能量起点）或对齐侧定位并修正，不能用参考自估偏移平移输出。EP001 偏差小，要求按集/按段解释，不能用一个全局常数。
-2. **P3 VAD 修空洞**：用 FireRedVAD/能量边界切开 `lost_spans` 报出的窗口，再回填 FA 时间；不要用 CC 时间当窗口，也不要在同一 FA 上盲目重跑。
-3. **覆盖率归因**：区分“CC 本来无对白”与“FA 吞掉对白”；前者应从 CER/P90 分母剔除（需音频证据），后者才是修复对象。
-4. **文本路线决策**：Whisper 文本仍更好（matched-span CER 0.0707 vs 0.0790，覆盖 0.486 vs 0.435），打轴更差（rel P90 1325 vs 510 ms）；混合前先解决“文本喂 FA”的接口与空洞。
-5. **chunk 调参**：只用无参考内部指标（零时长率、RTF）在 dev 上选 45/60/90；test 只验证一次。
-6. **P4 翻译/润色**：prompt 用原文 + glossary + 场景，不把参考字幕当答案；默认切换等 P2-14 达标。
+- **主 1｜新技术落地**：让 Qwen3 链路在真实工作流里可用——`run_all --asr qwen3` 端到端跑通一集、
+  失败回退、报告/备份、ASS 策略、默认切换的开关与回滚。**先证明“能换上去用”，不追精度。**
+- **主 2｜测试标准闭环**：✅ 一条命令已落地
+  `python scripts\eval\release_gate.py --manifests ... --baseline eval\gate.baseline.json`；
+  按 CC 标准判 test 的 P50≤100 / 可靠 P90≤300，并与冻结基线比回归，退出码 0/1。
+  剩余：把它接进日常流程（改完必跑），基线只在确认新起点时用 `--update-baseline` 冻结。
+- **次｜精度迭代**：起点 −0.4 s、FA 塌缩/空洞、覆盖率、chunk、Whisper 文本混合——
+  等主 1/2 稳定后按证据逐个改，一次只动一个变量。
+
+> 细则（怎么读 P50/P90、signed 偏差、空洞统计）都写在 `eval/protocol.md`；
+> 不再用分析替代交付，也不在 test 集上反复取证。
 
 ## 0.5 clear 后恢复清单
 
@@ -166,19 +171,37 @@ python scripts\eval\diagnose_timeline.py --asr-json temp\asr\digimon_ep002_main.
 关键文件：`eval/protocol.md`（§2.1 新指标读法）、`docs/adr/009-reference-as-benchmark.md`、
 `temp/reports/digimon_qwen3_r8.*`、`temp/reports/digimon_whisper_r8.*`。
 
-### 下一步（按优先级）
+### 下一步（按主次）
 
-1. **修起点系统偏差（P2-14 主矛盾）**：按 CC 标准，test 集对齐起点普遍早 0.37–0.40 s，
-   且重转写复现；要在音频侧（VAD/能量起点）或对齐侧定位并修正。禁止用参考自估偏移
-   平移输出（自证循环）；EP001 偏差小，要求按集/按段解释。
-2. **P3 VAD**：按报告 “Timeline holes” 的窗口切音频（FireRedVAD/能量），再回填 FA 时间；
-   不要用 CC 时间当窗口，也不要在同一 FA 上原样重跑（结论 5）。
-3. **覆盖率归因**：区分“CC 本来无对白”和“FA 吞掉对白”；只有后者值得修，前者应从
-   CER/P90 分母剔除。二者都需要音频证据，不能按相似度自证。
-4. **文本路线**：Whisper 文本更好、打轴更差；混合前先解决“Whisper 文本喂 Qwen3-FA”
-   的接口，以及空洞/批次边界问题。
-5. **chunk 45/60/90**：只用零时长率/RTF 在 dev 选，test 只验证一次。
-6. **P4**：翻译/润色 prompt 证据化；默认切换等 P2-14 达标。
+- **主 1｜新技术落地**：`run_all --asr qwen3` 在真实字幕目录跑通一集（含失败回退、报告/备份、
+  ASS 策略），验证默认切换所需的开关和回滚；先保证“换上去能用”。
+- **主 2｜测试标准闭环**：把三集基准收成一条 gate 命令：`CC 边界标准 → P50/P90/±100ms/
+  CER/覆盖率`，读基线、给通过/回退判定；test 只在 release candidate 跑一次。
+- **次｜精度迭代**：起点偏差（0.37–0.40 s）、FA 空洞/塌缩、覆盖率、chunk 45/60/90、
+  Whisper 文本 + Qwen3-FA 混合——主 1/2 稳定后按证据逐个做，一次只动一个变量。
+- 细则与负结果保留在 `eval/protocol.md` §2.1/§3.1，不再在会话里反复取证。
+
+## 0.8 第九轮交接（2026-10-18，主次重排 + release gate）
+
+**用户定位**：先应用新技术、建立测试标准，再慢慢改精度；不要陷进单点技术细节。
+**提交**：`d40ce74`（CC 即边界测试标准）+ 本轮 gate 提交（见 git log 顶部）。
+**测试**：1387 passed / 79.8% / 0 failed。
+
+已完成：
+
+1. **CC 即边界测试标准**：协议/素材/ADR/报告口径统一，删除“人工金标”计划；
+   raw P50/P90 直接判定，当前 P2-14 未达标。
+2. **release gate 落地**：`scripts/eval/release_gate.py` 一条命令跑两个 manifest，
+   test 目标 P50 ≤100 ms / 可靠 P90 ≤300 ms，并对 `eval/gate.baseline.json` 做回归
+   （P50 +20 ms、可靠 P90 +50 ms、CER +0.01、字符覆盖 −0.02），退出码 0/1。
+   当前判定：Qwen3 与 Whisper 均 FAIL（P50 400 / 756 ms，可靠 P90 510 / 1325 ms）。
+3. **测试**：+9（gate 判定、基线往返、覆盖率回归），总计 1387 / 79.8%。
+
+下一步（按主次）：
+
+1. **主 1**：`run_all --asr qwen3` 用真实字幕目录端到端跑一集（失败回退、报告/备份、ASS 策略）。
+2. **主 2**：把 gate 接进日常流程——改完必跑；基线只在确认新起点时 `--update-baseline` 冻结。
+3. **次**：起点偏差、FA 空洞/塌缩、覆盖率等，按 gate 数字逐个迭代，一次只动一个变量。
 
 ## 1. 状态总览
 
@@ -187,7 +210,7 @@ python scripts\eval\diagnose_timeline.py --asr-json temp\asr\digimon_ep002_main.
 | P0 | 边界测试标准 + 基线指标 | ✅ 用户确认日语 CC 边界即测试标准；三集基准 + 测量有效性（signed/覆盖/空洞）已落地 | `episode_benchmark` 新报告字段；CER/边界/偏差可复现 |
 | P1 | 稳定核心 + Qwen3/Whisper 适配 + 评测/CLI | ✅ 3 集跑通；Qwen3 vs Whisper large-v3 A/B 已记录；默认不变 | 契约/registry/router/CLI 稳定；A/B 有 raw + matched-span 数据 |
 | P2 | Qwen3-FA + cue mapper + align_repair | 🟡 核心/CLI/`run_all --asr` 完成；**P2-14 按 CC 标准未达标** | raw test P50 400 ms / 可靠 P90 510 ms；signed P50 −384 ms（起点缺陷） |
-| 测试 | 1378 tests / 79.7% 覆盖 / 0 failed | 🟡 主链补齐；剩余根脚本/nouns 旧入口/whisper_backends/align_cues | 关键路径每个分支至少一条测试 |
+| 测试 | 1387 tests / 79.8% 覆盖 / 0 failed | 🟡 主链补齐；剩余根脚本/nouns 旧入口/whisper_backends/align_cues | 关键路径每个分支至少一条测试 |
 | P3 | FireRedVAD/AED，VAD 降级为提示 | ⬜ 未开始 | speech/music/singing 时间线对比 |
 | P4 | glossary-first + 翻译 prompt，百度下线 | ⬜ 未开始 | 专名 F1 / 翻译人工评分 |
 | P5 | VibeVoice / 云兜底 | ⬜ 未开始 | 单集实验 + 成本/隐私评估 |

@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-10-18T23:48:51",
+  "standard": "Japanese CC boundary standard (user decision, 2026-10-18); raw, no offset correction",
+  "metrics": {
+    "manifest.digimon": {
+      "dev": {
+        "p50_start_ms": 129.0,
+        "p90_reliable_ms": 424.2,
+        "micro_cer": 0.3643,
+        "char_coverage": 0.422,
+        "matched_cue_ratio": 0.178
+      },
+      "test": {
+        "p50_start_ms": 400.0,
+        "p90_reliable_ms": 510.2,
+        "micro_cer": 0.2633,
+        "char_coverage": 0.435,
+        "matched_cue_ratio": 0.223
+      }
+    },
+    "manifest.digimon.whisper": {
+      "dev": {
+        "p50_start_ms": 559.5,
+        "p90_reliable_ms": 1135.0,
+        "micro_cer": 0.3069,
+        "char_coverage": 0.473,
+        "matched_cue_ratio": 0.188
+      },
+      "test": {
+        "p50_start_ms": 756.5,
+        "p90_reliable_ms": 1325.3,
+        "micro_cer": 0.2041,
+        "char_coverage": 0.486,
+        "matched_cue_ratio": 0.284
+      }
+    }
+  }
+}
