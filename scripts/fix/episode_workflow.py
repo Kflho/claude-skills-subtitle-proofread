@@ -141,17 +141,34 @@ def step_compare(project_dir, episode, scan_result, translated_path, dry_run=Fal
 # ═══════════════════════════════════════════════════════════════
 
 def step_audio(project_dir, episode, scan_result, dry_run=False, video_dir=None,
-               target_lang='ja', vad_clean_apply=False):
+               target_lang='ja', vad_clean_apply=False,
+               asr_engine='', asr_python='', asr_fix_text=False):
     """Audio mode: dispatch garbled cues + missing subtitles to unified VAD+Whisper fix.
 
     v5.3: Single fix_by_whisper() call covers garbled, partial overlap,
     and missing subtitle fill — all driven by VAD speech segments.
 
+    ``asr_engine`` switches to the 2026 ASR alignment route
+    (``Fixer.fix_by_asr``) instead of Whisper; it fixes cue times and never
+    deletes cues.
+
     ``vad_clean_apply`` 默认 False（分级 L1）：VAD 删条只出清单不写盘。
     """
     from fix.fix_orchestrator import Fixer, FixReport
 
-    fixer = Fixer(episode, project_dir, target_lang=target_lang, video_dir=video_dir)
+    fixer = Fixer(episode, project_dir, target_lang=target_lang,
+                  video_dir=video_dir, asr_engine=asr_engine,
+                  asr_python=asr_python)
+
+    if asr_engine:
+        if dry_run:
+            print(f'[audio] DRY RUN — ASR alignment via {asr_engine}')
+            return FixReport(source='asr')
+        print(f'[audio] ASR route: {asr_engine}')
+        report = fixer.fix_by_asr(write_text=asr_fix_text)
+        print(f'[audio] ASR done: {report.applied} fixed, '
+              f'{report.ai_review} review')
+        return report
 
     all_issues = scan_result.get('issues', []) if scan_result else []
     garbled_issues = [i for i in all_issues if i.get('type') != 'missing_subtitle']
@@ -418,9 +435,13 @@ def _run_pipeline(project_dir, episode, resources, args):
     """
     # ── Dynamic step list based on available resources ──
     target_lang = getattr(args, 'target_lang', 'ja')
+    asr_engine = (getattr(args, 'asr_engine', '') or '').strip().lower()
     if args.step is None:
         steps = []
-        if can_use_whisper(resources, skip_whisper=getattr(args, 'skip_whisper', False)):
+        if asr_engine and resources.get('has_video'):
+            # 2026 route replaces Whisper for this run; needs video only.
+            steps.append('audio')
+        elif can_use_whisper(resources, skip_whisper=getattr(args, 'skip_whisper', False)):
             steps.append('audio')
             if target_lang != 'ja':
                 steps.append('translate')
@@ -446,7 +467,10 @@ def _run_pipeline(project_dir, episode, resources, args):
             fixes = step_audio(project_dir, episode, scan_result,
                                dry_run=args.dry_run, video_dir=args.video_dir,
                                target_lang=target_lang,
-                               vad_clean_apply=getattr(args, 'vad_clean_apply', False))
+                               vad_clean_apply=getattr(args, 'vad_clean_apply', False),
+                               asr_engine=asr_engine,
+                               asr_python=getattr(args, 'asr_python', ''),
+                               asr_fix_text=getattr(args, 'asr_fix_text', False))
 
         elif step == 'translate':
             translated_path = step_translate(project_dir, episode, scan_result,

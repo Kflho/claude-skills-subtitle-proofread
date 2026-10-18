@@ -59,7 +59,7 @@
 
 ## Follow-up
 
-- 接 `run_all --asr qwen3` / `fix_orchestrator.fix_by_asr()`（P2 尾项，需真实金标）。
+- ✅ 已接 `run_all --asr qwen3` / `fix_orchestrator.fix_by_asr()`（默认仍 Whisper）。
 - 整集偏移估计：先粗估 median(cue→ASR) 偏移，再逐 cue 精对齐。
 - P3 FireRedVAD 的 speech 时间线替换 `speech_coverage` 的 ASR 近似。
-- 用真实日语视频（阿童木 193 集）跑 §9 的 A/B，填 progress §4。
+- 用真实日语视频（莎莉 EP001 已到位；阿童木 193 集待视频）跑 §9 的 A/B，填 progress §4。

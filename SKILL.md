@@ -138,12 +138,22 @@ python "<scripts-dir>/run_all.py" \
   --input-dir "<SUBTITLE_DIR>" \
   --video-dir "<VIDEO_DIR>" \
   --limit 5
+
+# 2026 ASR 路线（P2）：Qwen3-ASR + ForcedAligner 对齐时间轴
+python "<scripts-dir>/run_all.py" \
+  --input-dir "<SUBTITLE_DIR>" \
+  --video-dir "<VIDEO_DIR>" \
+  --asr qwen3 \
+  --asr-python "<venv>/Scripts/python.exe"
 ```
 
 > `--input-dir` 指定字幕子目录（默认 `AI审查后`）。`--lang` 自动检测。
 > `--video-dir` 启用 VAD 语音检测 + Whisper 统一修复（乱码、部分重叠、缺字幕一次处理）。无视频时加 `--skip-whisper` 残血运行。
 > `--limit` 只限 Phase 2 修复集数，扫描覆盖全部文件。
 > **VAD 删条默认不写盘**（分级 L1）：先看清单，确认无误再 `--vad-clean-apply`。
+> `--asr qwen3` 用 2026 路线替代 Phase 2 的 Whisper：**默认只改时间码**，文本不动、不删条；
+> 需要文本替换再加 `--asr-fix-text`。诊断明细写到 `temp/scans/<EP>.alignment.json`。
+> ASS 的 `--asr` 写回暂不支持（只出报告，不静默改文件）。
 
 ### 模块化调用
 

@@ -94,7 +94,9 @@ class Fixer:
                  whisper_cli: str = None,
                  model: str = None,
                  retry_model: str = None,
-                 srt_dir: str = None):
+                 srt_dir: str = None,
+                 asr_engine: str = None,
+                 asr_python: str = None):
         """Create a fix session for one episode.
 
         Args:
@@ -141,6 +143,10 @@ class Fixer:
         self._whisper_cli = self._session.whisper_cli
         self._model = self._session.model
         self._retry_model = self._session.retry_model
+
+        # 2026 ASR route (P2, opt-in — empty = keep legacy behaviour)
+        self._asr_engine = asr_engine or ''
+        self._asr_python = asr_python or ''
 
     # ── Detection (delegated) ──
 
@@ -369,6 +375,128 @@ class Fixer:
             traceback.print_exc(file=sys.stderr)
 
         return report
+
+    # ═══════════════════════════════════════════════════════════
+    # Source 2b: 2026 ASR alignment (P2, opt-in)
+    # ═══════════════════════════════════════════════════════════
+
+    def fix_by_asr(self, *, engine: str = None, asr_result=None,
+                   write_text: bool = False, config=None) -> FixReport:
+        """Align cue times against the 2026 ASR route (Qwen3 + FA).
+
+        Default behaviour is time-only: text is never replaced unless
+        ``write_text=True`` and the cue is garbled with plausible ASR text;
+        no cue is ever deleted.  ``asr_result`` is injectable for tests.
+
+        The full diagnosis is written to ``temp/scans/<EP>.alignment.json``;
+        review candidates are appended to report layer 2 as ⬜.
+        """
+        from lib.alignment import AlignmentConfig, map_report
+        from fix.align_repair import apply_repairs, plan_repairs, summarize_plan
+
+        if not self._srt_path or not os.path.exists(self._srt_path):
+            return FixReport(source='asr', details=['No subtitle file'])
+        if self._srt_path.lower().endswith('.ass'):
+            return FixReport(
+                source='asr',
+                details=['ASS in-place time fixes are not supported'])
+
+        cfg = config or AlignmentConfig(allow_text_replace=write_text)
+        cues = parse_srt(self._srt_path, mark_garbled=False,
+                         target_lang=self.target_lang)
+        if not cues:
+            return FixReport(source='asr', details=['No cues parsed'])
+
+        result = asr_result
+        if result is None:
+            result = self._transcribe_for_alignment(engine)
+        if result is None:
+            return FixReport(source='asr',
+                             details=['No video/audio for ASR'])
+
+        aligned = map_report(cues, result, config=cfg,
+                             language=self.target_lang)
+        plan = plan_repairs(cues, aligned.alignments, config=cfg)
+        stats = summarize_plan(plan)
+
+        os.makedirs(self._temp_dir, exist_ok=True)
+        align_path = os.path.join(self._temp_dir,
+                                  f'{self.episode}.alignment.json')
+        try:
+            with open(align_path, 'w', encoding='utf-8') as handle:
+                json.dump({
+                    'schema_version': 1,
+                    'episode': self.episode,
+                    'engine': aligned.engine,
+                    'model': aligned.model,
+                    'summary': aligned.summary(),
+                    'plan': stats,
+                    'cues': [a.to_dict() for a in aligned.alignments],
+                    'repairs': [p.to_dict() for p in plan],
+                }, handle, ensure_ascii=False, indent=2)
+        except OSError as exc:
+            print(f'[asr] alignment report write failed: {exc}',
+                  file=sys.stderr)
+
+        applied = 0
+        if stats['auto']:
+            new_cues, apply_stats = apply_repairs(cues, plan, config=cfg)
+            applied = apply_stats['fix_time'] + apply_stats['replace_text']
+            if applied:
+                from lib.project_utils import backup_file
+                backup_file(self._srt_path)
+                write_srt(self._srt_path, new_cues)
+
+        review = [p for p in plan if not p.auto]
+        try:
+            if review:
+                upsert_entries(self._report_path, step='2', entries=[
+                    {'ep': self.episode,
+                     'time': format_tc(p.cue_start),
+                     'original': p.old_text[:120],
+                     'corrected': f'（P2 {p.action}：{p.confidence}）',
+                     'status': '⬜'}
+                    for p in review
+                ])
+        except Exception as exc:
+            print(f'[asr] report write failed: {exc}', file=sys.stderr)
+
+        print(f'[asr] {applied} fixes from {stats["auto"]} auto candidates, '
+              f'{len(review)} review', file=sys.stderr)
+        return FixReport(
+            source='asr', applied=applied, ai_review=len(review),
+            details=[f'{p.action}: {p.old_text[:40]}' for p in plan[:20]])
+
+    def _transcribe_for_alignment(self, engine: str = None):
+        """Extract audio and run the configured ASR route (None on failure)."""
+        video = self._video_path
+        if not video or not os.path.exists(video):
+            return None
+
+        from lib.whisper_utils import extract_audio_wav
+        audio = os.path.join(self._temp_dir, f'{self.episode}.asr.wav')
+        os.makedirs(self._temp_dir, exist_ok=True)
+        try:
+            if (not os.path.exists(audio)
+                    or os.path.getmtime(audio) < os.path.getmtime(video)):
+                extract_audio_wav(video, audio, prefer_lang=self.target_lang)
+        except Exception as exc:
+            print(f'[asr] audio extraction failed: {exc}', file=sys.stderr)
+            return None
+
+        from lib.asr.router import ASRRouter
+        from lib.config import ASR_FALLBACK
+        router = ASRRouter(engine=engine or self._asr_engine or None,
+                           fallback=ASR_FALLBACK or None,
+                           qwen_python=self._asr_python or None)
+        try:
+            return router.transcribe(audio, language=self.target_lang,
+                                     timestamps=True)
+        except Exception as exc:
+            print(f'[asr] transcription failed: {exc}', file=sys.stderr)
+            return None
+        finally:
+            router.close()
 
     # ═══════════════════════════════════════════════════════════
     # Cascading auto-fix

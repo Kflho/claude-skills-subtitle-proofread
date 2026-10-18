@@ -115,6 +115,19 @@ python scripts\asr\align_cues.py --srt ep.srt --asr-json temp\asr\EP001.json --w
 
 状态与置信度规则见 [`docs/adr/007-cue-alignment.md`](../../docs/adr/007-cue-alignment.md)。
 
+### 接到 run_all（flag 控制）
+
+```powershell
+python scripts\run_all.py --lang ja `
+  --input-dir "<SUBS>" --video-dir "<VIDEO>" `
+  --asr qwen3 --asr-python .venv-qwen\Scripts\python.exe
+```
+
+- 默认只改时间码；加 `--asr-fix-text` 才允许高置信文本替换；永不删条。
+- `--asr` 会绕过 `--skip-if-clean`（时间对齐对「文本干净但轴漂」也有效）。
+- 每集诊断写到 `temp/scans/<EP>.alignment.json`；审查候选进报告 Layer 2 ⬜。
+- ASS 写回仍不支持（`fix_by_asr` 直接返回说明，不改文件）。
+
 ## 6. Worker 协议
 
 主进程不会 import torch；它通过 `scripts/asr/qwen3_worker.py` 的 JSON lines 通信：

@@ -202,7 +202,8 @@ def _filter_by_start(episodes, start_from):
 
 def step_fix_episodes(project_dir, lang, resources,
                       skip_whisper=False, episodes=None, limit=0, start_from=None,
-                      skip_if_clean=True, target_dir=None, vad_clean_apply=False):
+                      skip_if_clean=True, target_dir=None, vad_clean_apply=False,
+                      asr_engine='', asr_python='', asr_fix_text=False):
     """Phase 2: Unified error-fix via Fixer (reference → Whisper → AI fragments).
 
     Each episode goes through the cascading priority:
@@ -248,7 +249,9 @@ def step_fix_episodes(project_dir, lang, resources,
         print(f'[fix] First: {selected[0]}, Last: {selected[-1]}', file=sys.stderr)
 
     # --skip-if-clean: fast pre-check (Fixer.is_clean() is cheap — no audio/ffmpeg)
-    if skip_if_clean:
+    # The 2026 ASR route *repairs timing* even when text is clean, so it must
+    # not skip clean episodes.
+    if skip_if_clean and not asr_engine:
         from fix.fix_orchestrator import Fixer
         clean_eps = []
         for ep in selected:
@@ -272,12 +275,17 @@ def step_fix_episodes(project_dir, lang, resources,
     class _Args:
         step = None
         dry_run = False
-        # 分级 L1：默认不按 VAD 删条（只出清单）。要真删走 --vad-clean-apply。
-        vad_clean_apply = vad_clean_apply
 
     can_whisper = can_use_whisper(resources, skip_whisper=skip_whisper)
-    if skip_whisper:
+    asr_engine = (asr_engine or '').strip().lower()
+    if asr_engine and resources['has_video']:
+        # The 2026 ASR route only needs video; it replaces Whisper this run.
+        can_whisper = True
+        print(f'[fix] ASR route: {asr_engine} (time alignment)', file=sys.stderr)
+    if skip_whisper and not asr_engine:
         print('[fix] --skip-whisper: Whisper disabled by user', file=sys.stderr)
+    elif asr_engine:
+        pass
     elif not resources['has_video']:
         print('[fix] No video files — skipping Whisper audio fix', file=sys.stderr)
     elif not resources['has_whisper']:
@@ -297,6 +305,11 @@ def step_fix_episodes(project_dir, lang, resources,
         args.video_dir = resources.get('video_dir')
         args.no_backup = False
         args.target_lang = lang
+        # 分级 L1：默认不按 VAD 删条（只出清单）。要真删走 --vad-clean-apply。
+        args.vad_clean_apply = vad_clean_apply
+        args.asr_engine = asr_engine
+        args.asr_python = asr_python
+        args.asr_fix_text = asr_fix_text
         print(f'[fix] {ep} ({i+1}/{len(selected)})', file=sys.stderr)
         try:
             _run_pipeline(project_dir, ep, resources, args)
@@ -1101,6 +1114,15 @@ Examples:
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--vad-clean-apply', action='store_true',
                         help='真正按 VAD 删「无人声」条（默认只出清单，见 lib/gates.py）')
+    parser.add_argument('--asr', default='',
+                        help='2026 ASR route for Phase 2 time alignment '
+                             '(e.g. qwen3). Default: legacy Whisper.')
+    parser.add_argument('--asr-python', default='',
+                        help='isolated venv python for the ASR worker '
+                             '(default: QWEN_PYTHON env)')
+    parser.add_argument('--asr-fix-text', action='store_true',
+                        help='also apply high-confidence ASR text replacements '
+                             '(default: timecodes only)')
     args = parser.parse_args()
 
     project_dir = args.target_dir or os.getcwd()
@@ -1160,7 +1182,7 @@ Examples:
     missing = []
     if not resources['has_video']:
         missing.append('视频')
-    if not resources['has_whisper']:
+    if not resources['has_whisper'] and not args.asr:
         missing.append('Whisper')
     if missing:
         print(f'  [WARN] 缺少 {"+".join(missing)} — 残血运行（跳过音频修复，仍可扫描+专名统一）',
@@ -1238,7 +1260,10 @@ Examples:
                                       episodes=episodes, limit=args.limit,
                                       start_from=args.start_from,
                                       skip_if_clean=not args.no_skip_if_clean,
-                                      vad_clean_apply=args.vad_clean_apply)
+                                      vad_clean_apply=args.vad_clean_apply,
+                                      asr_engine=args.asr,
+                                      asr_python=args.asr_python,
+                                      asr_fix_text=args.asr_fix_text)
 
         step_ai_review(project_dir, resolved_lang, target_dir=target_dir)
     else:

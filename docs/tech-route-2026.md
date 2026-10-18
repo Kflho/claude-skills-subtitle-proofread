@@ -815,11 +815,11 @@ scripts/
 | `fix/align_repair.py` | 修复计划 + 时间应用 + 窗口重对齐 | ✅ P2 |
 | `scripts/asr/align_cues.py` | P2 端到端 CLI（默认 dry-run） | ✅ P2 |
 | `scripts/eval/alignment_bench.py` | P2 结构回归（合成 ASR，无需音频） | ✅ P2 |
-| `fix/fix_orchestrator.py` | `fix_by_asr()`；按引擎路由 | ⬜ P2 尾项 |
+| `fix/fix_orchestrator.py` | `fix_by_asr()`；按引擎路由 | ✅ P2（flag 控制） |
 | `fix/whisper_pipeline.py` | `match_whisper_to_cues` / `align_and_fix` 标记 legacy | ⬜ P2 尾项 |
 | `scan/unified_scanner.py` | VAD 切到 `lib/audio/vad.py` | ⬜ P3 |
 | `translate_srt.py` | 百度路径标记 deprecated；默认 LLM | ⬜ P4 |
-| `run_all.py` | `--asr` / `--aligner` / `--vad-engine` / `--hotwords` | ⬜ P2 尾项 |
+| `run_all.py` | `--asr` / `--asr-python` / `--asr-fix-text`（`--aligner`/`--vad-engine`/`--hotwords` 待 P3/P4） | ✅ P2（flag 控制） |
 | `SKILL.md` / `README.md` | 更新技术栈、安装向导、后端说明 | 🟡 文档已拆分；技术栈更新待 P6 |
 
 ### 7.3 配置与 CLI

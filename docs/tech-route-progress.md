@@ -2,12 +2,12 @@
 
 > **用途**：跨会话续跑。新会话先读本文件，再读 [`tech-route-2026.md`](tech-route-2026.md) 与 [`ADR-006`](adr/006-stable-asr-core.md)、[`ADR-007`](adr/007-cue-alignment.md)。
 > **最后更新**：2026-10-18
-> **当前阶段**：P2 对齐核心落地（mapper + repair + CLI），待真实日语素材做 A/B 与默认管线接入
+> **当前阶段**：P2 对齐核心 + CLI + `run_all --asr` 接入完成；真实日语视频验证进行中，默认仍走 Whisper
 > **总目标**：把音频链路从 `WebRTC VAD → kotoba Whisper → 时间重叠匹配` 迁移到 `Qwen3-ASR → Qwen3-ForcedAligner → 全局文本对齐`；默认行为在 P2 验收前保持不变。
 
 ## 0. 当前一句话
 
-P1 的稳定 ASR 核心（契约/注册器/路由/评测/CLI）已落地并 smoke 通过；本轮把 **P2 对齐层** 做成可运行切片：字符时间轴 → 时间窗内字符匹配 → 状态/置信度 → 修复计划/时间码应用，外加独立 CLI `scripts/asr/align_cues.py`（默认 dry-run）。默认管线未改；下一步是用真实日语视频跑 A/B，再接 `run_all --asr`。
+P1 的稳定 ASR 核心（契约/注册器/路由/评测/CLI）已落地并 smoke 通过；P2 对齐层已做成可运行切片：字符时间轴 → 时间窗内字符匹配 → 状态/置信度 → 修复计划/时间码应用，并接入 `run_all --asr`（默认仍 Whisper）。真实日语视频（莎莉 EP001）已到位，正在跑 Qwen3-ASR 做端到端验证。
 
 ## 1. 状态总览
 
@@ -15,7 +15,7 @@ P1 的稳定 ASR 核心（契约/注册器/路由/评测/CLI）已落地并 smok
 |---|---|---|---|
 | P0 | 评测金标清单 + 基线指标 | 🟡 代码就绪，待真实素材 | `eval/manifest.json` 填 12 集；旧管线 CER/边界可复现 |
 | P1 | 稳定核心 + Qwen3/Whisper 适配 + 评测/CLI | 🟡 smoke 通过，待 3 集 A/B | 3 集跑通；与旧管线 A/B 有记录；默认不变 |
-| P2 | Qwen3-FA + cue mapper + align_repair | 🟡 核心 + CLI 完成；未接默认管线 | 边界 P50 ≤100ms / P90 ≤300ms（真实金标待测） |
+| P2 | Qwen3-FA + cue mapper + align_repair | 🟡 核心 + CLI + run_all 接入（flag）；默认未切 | 边界 P50 ≤100ms / P90 ≤300ms（真实金标待测） |
 | P3 | FireRedVAD/AED，VAD 降级为提示 | ⬜ 未开始 | speech/music/singing 时间线对比 |
 | P4 | glossary-first + 翻译 prompt，百度下线 | ⬜ 未开始 | 专名 F1 / 翻译人工评分 |
 | P5 | VibeVoice / 云兜底 | ⬜ 未开始 | 单集实验 + 成本/隐私评估 |
@@ -79,8 +79,9 @@ P1 的稳定 ASR 核心（契约/注册器/路由/评测/CLI）已落地并 smok
 - [x] P2-8：测试 91 项（`test_alignment_*`、`test_cue_*`、`test_align_repair`、`test_align_cues_cli`、`test_alignment_bench`）
 - [x] P2-9：真实 cue 结构回归 + `scripts/eval/alignment_bench.py`（魔法使莎莉 EP001，405 cue；见 §4）
 - [x] P2-10：`docs/adr/007-cue-alignment.md`
-- [ ] P2-11：真实日语素材 A/B（阿童木 193 集；视频目录当前不在盘上，待素材）
-- [ ] P2-12：`run_all --asr qwen3` / `fix_orchestrator.fix_by_asr()` 接入（P2-11 通过后再改默认路径）
+- [x] P2-12：`Fixer.fix_by_asr()` + `run_all --asr/--asr-python/--asr-fix-text`（默认 time-only；ASS 拒绝写回；诊断落 `temp/scans/<EP>.alignment.json`）
+- [ ] P2-13：真实日语视频端到端验证（莎莉 EP001；Qwen3-ASR + FA 全片转写与对齐，进行中）
+- [ ] P2-11：真实日语素材 A/B（阿童木 193 集；视频目录当前不在盘上）
 
 ## 4. 验证记录
 
@@ -215,11 +216,12 @@ ffmpeg 窗口重对齐、bench 合成场景。
 ## 5. 进行中 / 阻塞
 
 - ✅ 0.6B + 1.7B + aligner 已下载；两种模型 smoke test 均通过（§4）。
-- ✅ P2 对齐核心 + 修复计划 + CLI 完成；91 项测试、真实 cue 结构回归已跑（§4）。
-- ⬜ 真实日语素材 A/B：`阿童木` 有 193 集日文字幕，但视频目录
-  `D:\videos\Animation\TV\[Anonymoose] 鉄腕アトム (DVD, 10bit)` 当前不在盘上。
-- ⬜ `魔法使莎莉` 是 ru→zh、无音轨，只用于 cue 结构回归，不能做 ASR A/B。
-- ⛔ 无硬阻塞；P2-12（默认管线接入）等 P2-11 的真实 A/B 结果再动。
+- ✅ P2 对齐核心 + 修复计划 + CLI + `run_all --asr` 完成；91 项测试、真实 cue 结构回归已跑（§4）。
+- ✅ 莎莉日语视频已到位：`D:\videos\Animation\TV\[1966-1981] Toei Majokko series_…\[1966-1991] Sally…\[1966-1968] Sally…\TV`（110 集 MKV，EP001 = 1512s / AC3 stereo）。
+- 🟡 真实验证：EP001 全片 Qwen3-ASR-1.7B + FA 转写/对齐进行中（P2-13）。
+- ⬜ 莎莉没有日语参考字幕（源字幕是俄语），CER/边界金标仍缺；只能用参考无关指标 + Whisper 交叉对比。
+- ⬜ 阿童木 193 集视频目录不在盘上（`D:\videos\Animation\TV\[Anonymoose] 鉄腕アトム (DVD, 10bit)`）。
+- ⛔ 无硬阻塞；默认切换等真实验证结论。
 
 ## 6. 下一步（按顺序）
 
