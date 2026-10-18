@@ -13,7 +13,7 @@
 
 1. **P2-14 验收**：三集已跑（§4.6）。当前 test split：CER micro 0.2633、起点 P50 57.5 ms、全匹配 P90 1151 ms、可靠匹配 P90 385 ms、±100 ms 68.3%。**P90 仍 >300 ms，未达标**；剩余误差来自短语气词/重复台词的歧义匹配和 FA 零时长，不能靠调阈值。
 2. **机制修复（不是调参）**：P3 FireRedVAD 或分段重对齐，处理 FA 在音乐/重叠段的零时长；短 cue 的歧义匹配按 ADR-007 的置信度规则进 review，不计入自动修复。
-3. **P0 A/B**：同一批三集跑 Qwen3 1.7B 60s vs Whisper large-v3 q5，记录 CER、RTF、零时长、时间轴覆盖；dev/test 分开。
+3. **P0 A/B**：同一批三集跑 Qwen3 1.7B 60s vs Whisper large-v3 q5，记录 CER、RTF、零时长、时间轴覆盖；dev/test 分开。**当前本机没有 `whisper-cli` / faster-whisper / Whisper 模型，需先安装或提供模型**；否则只能做 Qwen3 0.6B vs 1.7B 的参考无关 A/B。
 4. **chunk 调参**：只用无参考内部指标（零时长率、RTF）在 dev 上选 45/60/90；test 只验证一次。
 5. **P4 翻译/润色**：prompt 用原文 + glossary + 场景，不把参考字幕当答案；沿用 ADR-009 的证据规则。
 6. **默认切换**：P2-14 达标前不切 `ASR_ENGINE`。
@@ -47,7 +47,17 @@ ASR：temp/asr/digimon_ep00X_main.qwen3.json（1.7B + FA，60s chunk）
 基准：temp/reports/digimon_benchmark_final.{json,md}（dev/test 分组）
 协议：eval/protocol.md；ADR-009（参考=考卷）
 测试：1362 passed / 79.6% / 0 failed
+提交：b5a3052（基准 + 报告补充）
 ```
+
+### D. 第七轮待办（按优先级）
+
+1. **用户确认 EP02/03 日文 CC 与视频同步**：当前 -0.37/-0.40 s 是估计偏移；若 CC 本身不齐，test 基准要重算。EP01 已确认。
+2. **测量有效性**：加 dialogue-covered CER（只统计有语音覆盖的 cue）和 P90 outlier 报告；不改参数，先让数字能解释。
+3. **P90 机制修复**：在 dev 上试分段重对齐（FA 对短窗口更稳），处理零时长/坍缩；有效再进 test，不靠调阈值。
+4. **P0 A/B**：Whisper 未安装/无模型（`whisper-cli`、faster-whisper 都不可用），需先装 faster-whisper + large-v3 或提供 CLI；否则只能做 Qwen3 0.6B vs 1.7B 的参考无关 A/B。
+5. **chunk 45/60/90**：只用零时长率/RTF 在 dev 选，test 验证一次。
+6. **P4 翻译/润色**：prompt 用原文 + glossary + 场景；参考字幕不回流。
 
 ## 1. 状态总览
 
