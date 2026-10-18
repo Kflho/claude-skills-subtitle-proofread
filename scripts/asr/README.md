@@ -68,6 +68,14 @@ python scripts\asr\qwen3_transcribe.py --video ep.mkv `
   --python .venv-qwen\Scripts\python.exe --srt temp\asr\EP001.srt
 ```
 
+> **长音频分块（重要）**：worker 默认 `--chunk-sec 60`，自己按低能量边界切块，
+> 逐块转写+对齐后加 offset 合并，并把连续零时长 token 在前后的已知时间之间补齐。
+> `qwen_asr` 内部的 180s 分块在动画素材上会让 27–48% 的 token 变成零时长（实测），
+> 见 [`docs/adr/008-qwen3-long-audio-chunking.md`](../../docs/adr/008-qwen3-long-audio-chunking.md)。
+>
+> 莎莉 EP001（25.2 min，3080 Ti Laptop）实测：内部 180s 分块 RTF 0.829、零时长 48.2%；
+> 自切 60s RTF **0.207–0.295**、零时长 27.1%、补零后 **8.4%**。Whisper large-v3 q5 对照 RTF 0.184。
+
 ## 4. 与 Whisper A/B
 
 ```powershell
@@ -151,6 +159,8 @@ python scripts\run_all.py --lang ja `
 | `model not found` / 下载失败 | 用 ModelScope 下载，或把 `ASR_MODEL` / `ALIGNER_MODEL` 指向本地目录 |
 | `transformers` 版本冲突 | 不要在主管线环境装 qwen-asr；用隔离 venv |
 | 3 分钟边界抖动 | P1 只输出时间戳；P2 的 cue mapper 会处理边界连续性 |
+| 长音频时间戳塌缩（大段 0s） | worker 已默认 60s 自切 + 补零；不要用 `--chunk-sec 0`（ADR-008） |
+| 整集太慢（RTF 0.21–0.30，193 集约 17–24h） | 笔记本散热/功耗限制；按最差估时；0.6B 需复测，不能直接假设更快 |
 | 显存不足 | 用 0.6B ASR（`--asr Qwen/Qwen3-ASR-0.6B`），或先跑 3 分钟片段 |
 
 ## 8. 当前边界

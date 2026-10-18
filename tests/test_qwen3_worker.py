@@ -120,3 +120,45 @@ def test_once_unknown_command(tmp_path):
     payload = json.loads(proc.stdout.strip().splitlines()[-1])
     assert payload['ok'] is False
     assert 'unknown cmd' in payload['error']
+
+
+# ═══════════════════════════════════════════════════════════════
+# Zero-duration token fill (long-audio FA workaround)
+# ═══════════════════════════════════════════════════════════════
+
+def test_fill_zero_durations_interpolates_short_run():
+    worker = _load_worker()
+    tokens = [
+        worker.Token('あ', 0.0, 1.0),
+        worker.Token('い', 1.0, 1.0),
+        worker.Token('う', 1.0, 1.0),
+        worker.Token('え', 3.0, 4.0),
+    ]
+    assert worker._fill_zero_durations(tokens) == 2
+    assert (tokens[1].start, tokens[1].end) == (1.0, 2.0)
+    assert (tokens[2].start, tokens[2].end) == (2.0, 3.0)
+
+
+def test_fill_zero_durations_leaves_long_gaps_alone():
+    worker = _load_worker()
+    tokens = [
+        worker.Token('あ', 0.0, 1.0),
+        worker.Token('い', 1.0, 1.0),
+        worker.Token('う', 60.0, 61.0),
+    ]
+    assert worker._fill_zero_durations(tokens) == 0
+    assert tokens[1].start == tokens[1].end == 1.0
+
+
+def test_fill_zero_durations_leading_and_trailing_runs():
+    worker = _load_worker()
+    leading = [worker.Token('あ', 0.0, 0.0),
+               worker.Token('い', 0.0, 0.0),
+               worker.Token('う', 0.5, 1.0)]
+    assert worker._fill_zero_durations(leading) == 2
+    assert (leading[0].start, leading[1].end) == (0.0, 0.5)
+
+    trailing = [worker.Token('あ', 0.0, 1.0),
+                worker.Token('い', 1.0, 1.0)]
+    assert worker._fill_zero_durations(trailing) == 0
+    assert trailing[1].start == trailing[1].end == 1.0

@@ -42,7 +42,7 @@
 | cue 边界误差 | 时间重叠匹配，误差可达 0.5–3s | P50 **≤100ms**，P90 **≤300ms** | 需要 FA + 文本对齐新模块 |
 | 人工审查条数 | 每集数十条 | 相对下降 **≥25%** | 需要更细的诊断/置信度 |
 | 幻觉/重复 cue | Whisper 在音乐/噪声段高发 | 相对下降 **≥50%** | Qwen3 也会「空耳」，需上下文/双引擎 |
-| 吞吐 | kotoba q5 约 36× 实时 | 1.7B 约 7–12× 实时；193 集约 6–12h | 可夜间批处理；0.6B 可提速 |
+| 吞吐 | kotoba q5 约 36× 实时 | ~~1.7B 约 7–12× 实时~~ **实测 3.4–4.8× 实时（RTF 0.207–0.295）**；193 集约 **17–24h** | 比预估慢约 2×；0.6B 热态快 1.5×，整集数据反常（见 ADR-008） |
 | 显存 | <2GB | 1.7B ASR + 0.6B 对齐约 5–6GB | 16GB 卡够用；VibeVoice 7B 另算 |
 | 云成本 | 百度免费额度 | 兜底 $8–24 / 77h | 仅难例，默认本地 |
 
@@ -342,7 +342,9 @@ for item in result[0]:
 
 - 不返回置信度/概率；只能从时间单调性、每字符时长、与 ASR 文本的一致性做启发式质量判断。
 - 文本语言要与 `language` 参数一致；如果文本里混入大量拉丁乱码，对齐质量会下降。修复流程应先用 ASR 文本作为对齐输入，而不是直接对齐乱码文本。
-- 单次 3 分钟分块；长集要处理边界连续性。
+- 单次 3 分钟分块；长集要处理边界连续性。**实测输入 >60s 时大量 token 塌缩为零时长**
+  （60s 17.6% → 90s 34.7% → 120s 54.6%），所以 worker 自切 60s 再按 offset 合并，
+  见 [ADR-008](adr/008-qwen3-long-audio-chunking.md)。
 
 ### 4.3 MMS FA：为什么不适合日语字幕
 
@@ -706,15 +708,20 @@ Qwen3-ASR 不暴露 logprob，所以用「多信号投票」：
 
 ### 6.7 性能与成本估算
 
+> **2026-10-18 实测修正**（莎莉 EP001，25.2 分钟，3080 Ti Laptop 16GB；详见 [ADR-008](adr/008-qwen3-long-audio-chunking.md)）：
+> 内部 180s 分块 RTF 0.83 且时间戳塌缩；自切 60s 后 RTF **0.207–0.295**、零时长 token 27%（补零后 8.4%），
+> cue 覆盖均值 0.717。下表为方案估计，带 *实测* 的行以实测为准。
+
 | 项 | 估算 | 说明 |
 |---|---|---|
-| Qwen3-ASR-1.7B RTF | 0.08–0.15（3080 Ti Laptop 估计） | 公开数据 A100 0.10–0.17；5090 0.036；笔记本更慢 |
-| 单集 24min ASR | 2–4 分钟 | 含模型已加载 |
-| 193 集 ASR | 6–12 小时 | 可夜间批处理 |
-| Qwen3-FA | <0.05 RTF 量级（估计） | 0.6B NAR；相对 ASR 可忽略 |
-| 显存 | 5–6GB（1.7B ASR + 0.6B 对齐） | 16GB 充足 |
+| Qwen3-ASR-1.7B RTF | ~~0.08–0.15~~ **实测 0.207–0.295（整集）/ 0.183（热态 120s）** | 公开数据 A100 0.10–0.17；5090 0.036；笔记本更慢，且受散热影响 |
+| 单集 24min ASR | ~~2–4 分钟~~ **实测 5.2–7.4 分钟**（60s 分块；含加载） | 内部 180s 分块需 20.9 分钟 |
+| 193 集 ASR | ~~6–12 小时~~ **按时测 ≈ 17–24 小时** | 可夜间批处理，但需按热降频留余量 |
+| Qwen3-FA | 含在 ASR 耗时内 | 60s chunk 后对齐开销可接受 |
+| 显存 | 实测 4.9–10.2GB（1.7B + 对齐） | 16GB 充足；Whisper large-v3 q5 另约 3GB |
 | 云兜底 | $8–24 / 77h | MAI/Scribe/Gemini |
 | 磁盘 | 模型约 5GB + 缓存 | 每集 ASR JSON 约 1–5MB |
+| Whisper large-v3 q5（对照） | 实测 RTF 0.184；193 集约 15h | 段级时间戳，不能直接定 cue 轴 |
 
 ---
 
@@ -856,8 +863,12 @@ python run_all.py --lang ja --asr qwen3 --aligner qwen3 --vad-engine firered --h
 **启动**：
 
 ```powershell
-.venv-qwen\Scripts\python.exe scripts\asr\qwen3_worker.py --asr Qwen/Qwen3-ASR-1.7B --aligner Qwen/Qwen3-ForcedAligner-0.6B --device cuda:0 --dtype bfloat16
+.venv-qwen\Scripts\python.exe scripts\asr\qwen3_worker.py --asr Qwen/Qwen3-ASR-1.7B --aligner Qwen/Qwen3-ForcedAligner-0.6B --device cuda:0 --dtype bfloat16 --chunk-sec 60
 ```
+
+> `--chunk-sec`（默认 60；0 = 交给 qwen_asr 内部 180s 分块）：worker 按低能量边界自切，
+> 逐块转写+对齐后加 offset 合并；合并后把连续零时长的 token 在前后的已知时间之间补齐
+> （仅限 ≤3s 或 0.6s/token 的间隔）。原因和实测见 [ADR-008](adr/008-qwen3-long-audio-chunking.md)。
 
 **协议**（JSON lines）：
 
@@ -1018,6 +1029,8 @@ cache/
 |---|---|---|---|
 | Qwen3 对俚语/专名「空耳」 | 中高 | 高 | glossary context；双引擎；保留原文；只在高置信时替换 |
 | 3 分钟对齐分块边界抖动 | 中 | 中 | 5s 重叠/边界连续性检查；按停顿切；跨块单调性校验 |
+| 长音频 FA 时间戳塌缩（>60s chunk） | **高（已实测）** | 高 | worker 自切 60s 低能量边界 + 补零时长；见 [ADR-008](adr/008-qwen3-long-audio-chunking.md) |
+| 整季吞吐低估（实测 24h 而非 6–12h） | 高 | 中 | 按最差 RTF 排夜间批；0.6B 需复测；必要时云兜底/换卡 |
 | Windows 依赖冲突 | 中 | 高 | 独立 venv + worker；pin 版本；fallback Whisper |
 | 16GB 显存不够（VibeVoice） | 中 | 中 | 量化/分段/云；默认不启用 |
 | 云 API 隐私/成本 | 中 | 中 | 默认本地；显式 opt-in；脱敏；成本上限 |
@@ -1037,6 +1050,7 @@ cache/
 | Qwen3-ForcedAligner-0.6B 默认 | ✅ Adopt | 日语 AAS 42.2ms；任意文本；同包 |
 | FireRedVAD 默认 | ✅ Adopt（仅提示） | F1 97.57；AED 对 OP/ED/BGM 有用；Apache |
 | 全局文本对齐替代时间重叠 | ✅ Adopt | 解决长 cue/错配/边界 |
+| 长音频自切 60s + 补零时长 | ✅ Adopt（实测后新增） | 内部 180s 分块会塌缩；RTF 0.83→0.295，零时长 48%→8.9% |
 | VibeVoice-ASR-7B | 🟡 Trial | 说话人/热词很强；7B 部署需验证 |
 | MAI-Transcribe-2 | 🟡 Trial（云兜底） | 日语细节好；预览/隐私/成本 |
 | Scribe v2 / Gemini 3.5 | 🟡 Trial（云兜底） | 可用；不是默认 |

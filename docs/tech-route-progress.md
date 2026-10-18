@@ -2,12 +2,12 @@
 
 > **用途**：跨会话续跑。新会话先读本文件，再读 [`tech-route-2026.md`](tech-route-2026.md) 与 [`ADR-006`](adr/006-stable-asr-core.md)、[`ADR-007`](adr/007-cue-alignment.md)。
 > **最后更新**：2026-10-18
-> **当前阶段**：P2 对齐核心 + CLI + `run_all --asr` 接入完成；真实日语视频验证进行中，默认仍走 Whisper
+> **当前阶段**：P2 对齐 + `run_all --asr` 接入完成；莎莉 EP001 实机验证完成（发现并修复长音频时间戳塌缩），默认仍走 Whisper，待人工金标验收
 > **总目标**：把音频链路从 `WebRTC VAD → kotoba Whisper → 时间重叠匹配` 迁移到 `Qwen3-ASR → Qwen3-ForcedAligner → 全局文本对齐`；默认行为在 P2 验收前保持不变。
 
 ## 0. 当前一句话
 
-P1 的稳定 ASR 核心（契约/注册器/路由/评测/CLI）已落地并 smoke 通过；P2 对齐层已做成可运行切片：字符时间轴 → 时间窗内字符匹配 → 状态/置信度 → 修复计划/时间码应用，并接入 `run_all --asr`（默认仍 Whisper）。真实日语视频（莎莉 EP001）已到位，正在跑 Qwen3-ASR 做端到端验证。
+P1 稳定 ASR 核心、P2 对齐层、`run_all --asr` 都已落地；用莎莉 EP001 真实日语视频验证时发现 `qwen_asr` 内部 180s 分块会让时间戳大面积塌缩，已在 worker 里改为自切 60s + 补零时长（RTF 0.83→0.207–0.295，零时长 48%→8.4%）。目前缺日语金标：P50/P90 边界验收和默认切换都要等人工听校。
 
 ## 1. 状态总览
 
@@ -15,7 +15,7 @@ P1 的稳定 ASR 核心（契约/注册器/路由/评测/CLI）已落地并 smok
 |---|---|---|---|
 | P0 | 评测金标清单 + 基线指标 | 🟡 代码就绪，待真实素材 | `eval/manifest.json` 填 12 集；旧管线 CER/边界可复现 |
 | P1 | 稳定核心 + Qwen3/Whisper 适配 + 评测/CLI | 🟡 smoke 通过，待 3 集 A/B | 3 集跑通；与旧管线 A/B 有记录；默认不变 |
-| P2 | Qwen3-FA + cue mapper + align_repair | 🟡 核心 + CLI + run_all 接入（flag）；默认未切 | 边界 P50 ≤100ms / P90 ≤300ms（真实金标待测） |
+| P2 | Qwen3-FA + cue mapper + align_repair | 🟡 核心 + CLI + run_all + 实机验证完成；默认未切 | 边界 P50 ≤100ms / P90 ≤300ms（待人工金标） |
 | P3 | FireRedVAD/AED，VAD 降级为提示 | ⬜ 未开始 | speech/music/singing 时间线对比 |
 | P4 | glossary-first + 翻译 prompt，百度下线 | ⬜ 未开始 | 专名 F1 / 翻译人工评分 |
 | P5 | VibeVoice / 云兜底 | ⬜ 未开始 | 单集实验 + 成本/隐私评估 |
@@ -80,8 +80,9 @@ P1 的稳定 ASR 核心（契约/注册器/路由/评测/CLI）已落地并 smok
 - [x] P2-9：真实 cue 结构回归 + `scripts/eval/alignment_bench.py`（魔法使莎莉 EP001，405 cue；见 §4）
 - [x] P2-10：`docs/adr/007-cue-alignment.md`
 - [x] P2-12：`Fixer.fix_by_asr()` + `run_all --asr/--asr-python/--asr-fix-text`（默认 time-only；ASS 拒绝写回；诊断落 `temp/scans/<EP>.alignment.json`）
-- [ ] P2-13：真实日语视频端到端验证（莎莉 EP001；Qwen3-ASR + FA 全片转写与对齐，进行中）
-- [ ] P2-11：真实日语素材 A/B（阿童木 193 集；视频目录当前不在盘上）
+- [x] P2-13：真实日语视频实机验证（莎莉 EP001；发现 180s 分块塌缩 → worker 自切 60s + 补零；见 §4）
+- [ ] P2-14：人工金标（100 条 cue 边界）+ P50/P90 验收
+- [ ] P2-11：阿童木 193 集 A/B（视频目录仍不在盘上）
 
 ## 4. 验证记录
 
@@ -172,7 +173,7 @@ python -m pytest -q tests/test_alignment_base.py tests/test_alignment_timeline.p
 置信度分层、修复计划与邻居冲突、`--write`/`--fix-text`、ASS 写入拒绝、fake aligner registry、
 ffmpeg 窗口重对齐、bench 合成场景。
 
-全量：`408 passed, 3 failed` —— 3 个既存失败与 P2 无关（OP/ED 边界断言 95/120 vs 实际 180；`MockWhisperResult` 缺 `cues_to_clear`）。
+全量：`417 passed, 3 failed` —— 3 个既存失败与 P2 无关（OP/ED 边界断言 95/120 vs 实际 180；`MockWhisperResult` 缺 `cues_to_clear`）。
 
 ### P2 结构回归：魔法使莎莉 EP001（2026-10-18）
 
@@ -198,6 +199,48 @@ ffmpeg 窗口重对齐、bench 合成场景。
 3. C 的 80% 还原率是重建；丢弃/破坏的 cue 本来就不该被还原。
 4. 性能：405 cue 约 **0.23s/集**（纯 stdlib），193 集约 45s。
 
+### P2 真实验证：莎莉 EP001 日语视频（2026-10-18）
+
+素材：`Mahou_Tsukai_Sally_1966_DVD_Ep001_Simu.mkv`，1512s（25.2 min），AC3 双声道
+（实测 L/R 相关 1.000 = 双单声道），转 16k mono。项目没有日语参考字幕（源字幕是俄语），
+所以**不能算 CER/边界金标**；本节只测时间轴可用性、吞吐、跨引擎一致性。
+
+| 配置 | 耗时 | RTF | 字符 | token/段 | 零时长 token | 时间轴联合覆盖 | cue 覆盖均值 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| qwen_asr 内部 180s 分块 | 1252.8s | 0.829 | 4144 | 2176 / 310 | 48.2% | — | 0.361 |
+| 自切 60s | 446.8s | 0.295 | 5034 | 2609 / 377 | 27.1% | 47.9% | 0.570 |
+| 自切 60s + 补零（终版） | **312.9s** | **0.207** | 5034 | 2609 / 370 | **8.4%** | **59.6%** | **0.717** |
+| Whisper large-v3 q5（对照） | 277.9s | 0.184 | 5361 | 0 / 369 | — | 近平铺 | 0.953* |
+
+> 终版 cue 覆盖：median 0.805，≥0.8 占 51.2%，≤0.2 仅 10.6%；OP/正片/ED 分别 0.515 / 0.720 / 0.860。
+> 两次整集运行 312.9–446.8s（RTF 0.207–0.295），差异来自笔记本散热/功耗，排期要按慢的那次算。
+
+\* Whisper 的 segment 连续平铺，cue 覆盖率天然接近 1，不能当「语音检测更准」。
+
+分长度切片（同源 300s 起，独立运行）：
+
+| 输入 | 零时长 token | token 时长中位数 | 文本 |
+|---:|---:|---:|---|
+| 60s | 17.6% | 0.107s | 通顺可读 |
+| 90s | 34.7% | 0.080s | 基本可读 |
+| 120s | 54.6% | 0.000s | 开始明显错词 |
+| 180s | 56.8% | 0.000s | 错词更多 |
+
+结论：
+
+1. **长音频必须自切 ≤60s**：内部 180s 分块既塌缩时间戳又慢（RTF 0.83 vs 0.21–0.30，
+   零时长 48% vs 8.4%）。已落地 `--chunk-sec`（默认 60）+ 零时长补充，
+   见 [ADR-008](adr/008-qwen3-long-audio-chunking.md)。
+2. **吞吐修正**：1.7B 60s 分块 5.2–7.4 min/集 → 193 集约 **17–24h**，是方案估计（6–12h）的 2 倍；
+   Whisper large-v3 q5 为 4.6 min/集 → 约 15h。
+3. **0.6B 不能直接当快模型**：热态 120s 切片 0.6B RTF 0.122 vs 1.7B 0.183（快 1.5×），
+   但整集 0.6B 880s vs 1.7B 313–447s（疑为持续满载降频）；质量也更差
+   （cue 覆盖 0.504 / OP 0.215 vs 1.7B 的 0.570 / 0.418）。需复测后再定。
+4. **跨引擎一致度只有 mean 0.505 / median 0.585**：同一段音频 Qwen3 与 Whisper 文本差异很大；
+   单引擎自动替换文本风险高，双引擎/glossary 策略必须保留。
+5. **P2 验收仍未完成**：没有日语金标，P50 ≤100ms 无法验证；下一步人工听校 100 条 cue 边界。
+6. 端到端 CLI 自检：用生成的 377 条日语 SRT 跑 `align_cues.py`，377/377 match、P50 0ms、0.7s。
+
 ### 文档整理（2026-10-18）
 
 - `references/architecture.md`（开发者架构文档）→ 合并进 `dev/technical-details.md`
@@ -218,21 +261,20 @@ ffmpeg 窗口重对齐、bench 合成场景。
 - ✅ 0.6B + 1.7B + aligner 已下载；两种模型 smoke test 均通过（§4）。
 - ✅ P2 对齐核心 + 修复计划 + CLI + `run_all --asr` 完成；91 项测试、真实 cue 结构回归已跑（§4）。
 - ✅ 莎莉日语视频已到位：`D:\videos\Animation\TV\[1966-1981] Toei Majokko series_…\[1966-1991] Sally…\[1966-1968] Sally…\TV`（110 集 MKV，EP001 = 1512s / AC3 stereo）。
-- 🟡 真实验证：EP001 全片 Qwen3-ASR-1.7B + FA 转写/对齐进行中（P2-13）。
-- ⬜ 莎莉没有日语参考字幕（源字幕是俄语），CER/边界金标仍缺；只能用参考无关指标 + Whisper 交叉对比。
+- ✅ P2-13 实机验证完成：发现 180s 分块塌缩，worker 已改自切 60s + 补零；RTF 0.83→0.207–0.295（§4）。
+- ⬜ 莎莉没有日语参考字幕（源字幕是俄语），CER/边界金标仍缺；只能做参考无关指标 + Whisper 交叉对比。
 - ⬜ 阿童木 193 集视频目录不在盘上（`D:\videos\Animation\TV\[Anonymoose] 鉄腕アトム (DVD, 10bit)`）。
-- ⛔ 无硬阻塞；默认切换等真实验证结论。
+- ⛔ 无硬阻塞；默认切换等人工金标（P2-14）。
 
 ## 6. 下一步（按顺序）
 
-1. **P2-11 真实 A/B**：拿到日语视频后，任选 3 集，先用
-   `qwen3_transcribe.py --timestamps` 生成 ASR JSON，再用
-   `align_cues.py --srt <参考字幕> --asr-json <json>` 跑 mapper，把
-   P50/P90/±100ms 与人工边界对比填进 §4；manifest 同步填 `eval/manifest.json`。
-2. **P2-12 接默认管线**：`run_all.py --asr qwen3` → `Fixer.fix_by_asr()`；
-   只在 A/B 达到 DoD 后切默认，保留 `ASR_ENGINE=whisper` 回滚开关。
-3. **P3**：`lib/audio/vad.py` + FireRedVAD；`speech_coverage` 从 ASR 近似换成真实 VAD，VAD 只作提示。
-4. **P1-10 / P4**：ASR A/B 记录与 glossary-first 仍按原计划排队。
+1. **P2-14 人工金标**：从 EP001 抽 100 条 cue，人工听校起止边界（或逐句日文），
+   跑 `alignment_bench` 的边界统计与 `asr_eval.py`，得出真实 P50/P90/±100ms。
+2. **chunk 长度复测**：45/60/90s 在 100 条金标上的边界误差 vs 处理时间，确定最终默认值。
+3. **0.6B 复测**：在散热稳定后重跑整集，解释 880s vs 313–447s 的反常，再决定是否保留草稿模式。
+4. **默认切换评估**：只有金标达标才把 `ASR_ENGINE` 切到 qwen3；保留 `ASR_ENGINE=whisper` 回滚开关。
+5. **P3**：`lib/audio/vad.py` + FireRedVAD；`speech_coverage` 从 ASR 近似换成真实 VAD，VAD 只作提示。
+6. **P1-10 / P4**：阿童木 A/B（待视频）与 glossary-first 仍按原计划排队。
 
 ## 7. 文件清单（新增/改动）
 
@@ -258,7 +300,7 @@ ffmpeg 窗口重对齐、bench 合成场景。
 | `scripts/lib/asr/adapters/qwen3_aligner.py` | Qwen3-FA 适配（KIND=aligner） | ✅ |
 | `scripts/lib/asr/adapters/whisper.py` | Whisper 适配 | ✅ |
 | `scripts/lib/asr/qwen3.py` / `whisper.py` | 兼容 shim | ✅ |
-| `scripts/asr/qwen3_worker.py` | 长驻 worker | ✅ |
+| `scripts/asr/qwen3_worker.py` | 长驻 worker（60s 自切块 + 补零时长） | ✅ |
 | `scripts/asr/qwen3_transcribe.py` | 单文件 CLI | ✅ |
 | `scripts/asr/setup_qwen3.ps1` | 隔离环境 | ✅ |
 | `scripts/asr/README.md` | 运行说明 | ✅ |
@@ -268,6 +310,7 @@ ffmpeg 窗口重对齐、bench 合成场景。
 | `templates/aligner_adapter.py` | 新对齐器骨架 | ✅ |
 | `tests/test_asr_*.py` / `test_qwen3_*.py` | ASR 测试 | ✅ |
 | `docs/adr/007-cue-alignment.md` | 对齐决策 | ✅ |
+| `docs/adr/008-qwen3-long-audio-chunking.md` | 长音频分块 + 补零决策 | ✅ |
 | `scripts/lib/alignment/base.py` | 对齐契约/归一化 | ✅ |
 | `scripts/lib/alignment/timeline.py` | 字符时间轴 | ✅ |
 | `scripts/lib/alignment/cue_mapper.py` | 时间窗 + 字符匹配 | ✅ |
@@ -318,14 +361,17 @@ python scripts\eval\alignment_bench.py --srt ep.ass --scenario segment --json te
 
 ## 9. 决策 / 风险
 
-- **默认不变**：`ASR_ENGINE=whisper`；P2 只以独立 CLI 交付，`run_all` 未接。
+- **默认不变**：`ASR_ENGINE=whisper`；P2 通过 `--asr` flag 启用，默认管线未切。
 - **不伪造置信度**：P1 只出文本/token 时间；P2 用对齐一致度 + 多信号投票（ADR-007）。
 - **对齐只在时间轴上动刀**：文本替换默认关闭（`allow_text_replace=False`）；删除永不自动。
 - **自动改时间码的硬上限**：单边 ≤2s，且不能撞上原本不重叠的 cue；超限转 review。
 - **乱序 cue 在 mapper 内排序再还原**：真实 ASS 有乱序行，不能要求输入先排序。
+- **长音频必须自切 60s + 补零**：`qwen_asr` 内部 180s 分块会让 27–48% token 变零时长并慢 2.8×（ADR-008）。
+- **吞吐按实测算**：1.7B 60s 分块 5.2–7.4 min/集 → 193 集约 17–24h；不要沿用方案里的 6–12h。
+- **0.6B 不默认**：热态快 1.5×，但整集反而慢、质量更差；需复测后再定草稿模式。
 - **进程隔离**：主环境不 import torch/qwen-asr；worker JSON lines。
 - **Windows**：vLLM 不支持；走 Transformers 后端 + SDPA。
 - **模型下载**：HF 直连被墙；用 ModelScope（已验证 200）/ 镜像。
-- **已知精度边界**：段级 ASR（无 token）P50 ≈300ms，只有 Qwen3-FA 的 token 时间轴能到 P50 ≈30ms。
+- **已知精度边界**：段级 ASR（无 token）P50 ≈300ms；Qwen3-FA 在真实动画音频上仍有 8.4% 零时长 token。
 - **已有测试**：全量 3 个既存失败（OP/ED 边界断言 95/120 vs 实际 180；`MockWhisperResult` 缺 `cues_to_clear`），与本路线无关；另开任务处理。
 - **续跑原则**：先看第 1 节状态、第 4 节验证、第 6 节下一步；不要重写核心，只加 adapter。

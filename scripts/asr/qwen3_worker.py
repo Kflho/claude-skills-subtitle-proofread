@@ -249,25 +249,35 @@ class QwenRuntime:
             _log('timestamps requested but no aligner loaded; returning text only')
             want_ts = False
 
+        chunk_sec = float(payload.get('chunk_sec', self.args.chunk_sec) or 0.0)
         _log(f'transcribe {Path(audio).name} lang={requested_language} '
-             f'ctx={len(context)}ch timestamps={want_ts}')
-        results = self.model.transcribe(
-            audio=audio,
-            context=context,
-            language=language_name(requested_language),
-            return_time_stamps=want_ts,
-        )
-        if not results:
-            raise RuntimeError('Qwen3-ASR returned no result')
+             f'ctx={len(context)}ch timestamps={want_ts} chunk={chunk_sec}s')
 
-        asr = results[0]
-        tokens = _align_items_to_tokens(getattr(asr, 'time_stamps', None))
-        duration = _audio_duration(audio)
-        segments = _segments_from_asr_text(asr.text or '', tokens, duration)
+        if chunk_sec > 0:
+            text, tokens, segments, duration, n_chunks = self._transcribe_chunked(
+                audio, requested_language=requested_language,
+                context=context, want_ts=want_ts, chunk_sec=chunk_sec)
+        else:
+            results = self.model.transcribe(
+                audio=audio,
+                context=context,
+                language=language_name(requested_language),
+                return_time_stamps=want_ts,
+            )
+            if not results:
+                raise RuntimeError('Qwen3-ASR returned no result')
+            asr = results[0]
+            text = asr.text or ''
+            tokens = _align_items_to_tokens(getattr(asr, 'time_stamps', None))
+            if tokens:
+                _fill_zero_durations(tokens)
+            duration = _audio_duration(audio)
+            segments = _segments_from_asr_text(text, tokens, duration)
+            n_chunks = 1
 
         result = ASRResult(
-            text=asr.text or '',
-            language=getattr(asr, 'language', '') or language_name(requested_language),
+            text=text,
+            language=language_name(requested_language),
             segments=segments,
             tokens=tokens,
             engine='qwen3',
@@ -279,9 +289,70 @@ class QwenRuntime:
                 'dtype': self.args.dtype,
                 'timestamps': bool(tokens),
                 'aligner': self.args.aligner or None,
+                'chunk_sec': chunk_sec,
+                'chunks': n_chunks,
             },
         )
         return result.to_dict()
+
+    def _transcribe_chunked(self, audio: str, *, requested_language: str,
+                            context: str, want_ts: bool, chunk_sec: float):
+        """Chunk long audio ourselves, then offset/merge per-chunk results.
+
+        qwen_asr's own long-audio path splits at 180 s; on this material the
+        ForcedAligner collapses most tokens to the chunk end beyond ~60 s
+        (measured: 48% zero-duration tokens, 5-minute speech gaps).  Doing
+        the split here keeps every alignment request short and gives us the
+        offsets explicitly.
+        """
+        from qwen_asr.inference.utils import (
+            SAMPLE_RATE, load_audio_any, split_audio_into_chunks,
+        )
+
+        wav, sr = load_audio_any(audio)
+        parts = split_audio_into_chunks(wav=wav, sr=sr, max_chunk_sec=chunk_sec)
+        joiner = '' if language_name(requested_language) == 'Japanese' else ' '
+
+        texts: list[str] = []
+        tokens: list[Token] = []
+        segments: list[Segment] = []
+
+        for chunk_wav, offset in parts:
+            results = self.model.transcribe(
+                audio=(chunk_wav, sr),
+                context=context,
+                language=language_name(requested_language),
+                return_time_stamps=want_ts,
+            )
+            if not results:
+                continue
+            part = results[0]
+            part_text = part.text or ''
+            texts.append(part_text)
+
+            part_tokens = _align_items_to_tokens(
+                getattr(part, 'time_stamps', None))
+            for token in part_tokens:
+                token.start = float(token.start) + offset
+                token.end = float(token.end) + offset
+            if part_tokens:
+                _fill_zero_durations(part_tokens)
+            tokens.extend(part_tokens)
+
+            part_dur = len(chunk_wav) / float(sr or SAMPLE_RATE)
+            part_segments = _segments_from_asr_text(
+                part_text, part_tokens, offset + part_dur)
+            if not part_tokens:
+                for seg in part_segments:
+                    seg.start = offset
+                    seg.end = offset + part_dur
+            segments.extend(part_segments)
+
+        duration = len(wav) / float(sr or SAMPLE_RATE)
+        if tokens:
+            _fill_zero_durations(tokens)   # cross-chunk boundary runs
+        _log(f'chunked: {len(parts)} chunks, {len(tokens)} tokens')
+        return joiner.join(texts), tokens, segments, duration, len(parts)
 
     def align(self, payload: dict) -> dict:
         self.ensure_loaded()
@@ -334,6 +405,44 @@ def _align_items_to_tokens(align_result) -> list[Token]:
     return tokens
 
 
+def _fill_zero_durations(tokens: list[Token], *, max_gap: float = 3.0,
+                         max_per_token: float = 0.6) -> int:
+    """Give zero-length aligner tokens a share of the surrounding span.
+
+    Qwen3-FA returns start == end for tokens it cannot place (27 % of tokens
+    on our 1966 material).  Left alone they contribute no time, which makes
+    the character timeline look far less covered than the audio actually is.
+    Redistribute such a run between the previous end and the next start, but
+    only when that gap is plausibly intra-utterance; a long music/silence
+    gap is left untouched rather than smeared with text.
+
+    Returns the number of tokens that received a span.
+    """
+    filled = 0
+    i = 0
+    total = len(tokens)
+    while i < total:
+        if tokens[i].end - tokens[i].start > 1e-6:
+            i += 1
+            continue
+        j = i
+        while j < total and tokens[j].end - tokens[j].start <= 1e-6:
+            j += 1
+        prev_end = tokens[i - 1].end if i > 0 else tokens[i].start
+        next_start = tokens[j].start if j < total else prev_end
+        run = j - i
+        span = next_start - prev_end
+        limit = max(max_gap, max_per_token * run)
+        if run and span > 0 and span <= limit:
+            step = span / run
+            for k, token in enumerate(tokens[i:j]):
+                token.start = prev_end + step * k
+                token.end = prev_end + step * (k + 1)
+            filled += run
+        i = j
+    return filled
+
+
 def _emit(payload: dict) -> None:
     print(json.dumps(payload, ensure_ascii=False), flush=True)
 
@@ -361,6 +470,11 @@ def main(argv: list[str] | None = None) -> int:
                         choices=['bfloat16', 'float16', 'float32'])
     parser.add_argument('--attn-implementation', default='')
     parser.add_argument('--max-new-tokens', type=int, default=1024)
+    parser.add_argument(
+        '--chunk-sec', type=float, default=60.0,
+        help='split long audio into <=N-second low-energy chunks before ASR; '
+             '0 disables (qwen_asr then uses its own 180s chunks, whose '
+             'timestamps collapse on our material)')
     parser.add_argument('--once', action='store_true',
                         help='Handle one request then exit (debug/tests)')
     args = parser.parse_args(argv)
