@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from lib.alignment.base import (
     ACTION_DELETE_CANDIDATE, ACTION_FIX_TIME, ACTION_KEEP,
     ACTION_REPLACE_TEXT, ACTION_REVIEW_AI,
-    ACTION_SPLIT_CANDIDATE, AlignmentConfig, CueAlignment,
+    ACTION_SPLIT_CANDIDATE, AlignmentConfig, CueAlignment, STATUS_MATCH,
 )
 from lib.asr.base import AlignResult, Token
 from lib.subtitle_io import format_tc
@@ -207,6 +207,53 @@ def _overlapping_cue(cues, index: int, new_start: float, new_end: float,
         if not overlapped_before:
             return i
     return None
+
+
+# ═══════════════════════════════════════════════════════════════
+# Global offset
+# ═══════════════════════════════════════════════════════════════
+
+def estimate_global_offset(alignments, *, min_matches: int = 20,
+                           min_offset: float = 0.3,
+                           max_mad: float = 0.15) -> float | None:
+    """Detect a consistent whole-file offset (different cut / frame rate).
+
+    Only strong evidence is accepted: many high-similarity matched cues and
+    a tight distribution (median absolute deviation).  A partial or song-only
+    offset must not move the whole file.
+
+    Returns seconds such that ``aligned = cue + offset``, or None.
+    """
+    import statistics
+
+    deltas = [al.start - al.cue_start for al in alignments
+              if al.status == STATUS_MATCH and al.similarity >= 0.9
+              and al.start is not None]
+    if len(deltas) < min_matches:
+        return None
+    median = statistics.median(deltas)
+    mad = statistics.median(abs(d - median) for d in deltas)
+    if abs(median) < min_offset or mad > max_mad:
+        return None
+    return median
+
+
+def shift_cues(cues, delta: float) -> list[dict]:
+    """Return a copy of ``cues`` shifted by ``delta`` seconds (0-clamped)."""
+    shifted = []
+    for cue in cues:
+        item = dict(cue)
+        start = float(item.get('start_s', 0.0) or 0.0) + delta
+        end = float(item.get('end_s', start) or start) + delta
+        if start < 0.0:
+            end -= start
+            start = 0.0
+        item['start_s'] = round(start, 3)
+        item['end_s'] = round(max(start, end), 3)
+        item['start'] = format_tc(item['start_s'])
+        item['end'] = format_tc(item['end_s'])
+        shifted.append(item)
+    return shifted
 
 
 # ═══════════════════════════════════════════════════════════════

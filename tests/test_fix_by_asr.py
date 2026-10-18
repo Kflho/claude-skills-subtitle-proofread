@@ -110,6 +110,33 @@ def test_fix_by_asr_without_subtitle(tmp_path):
     assert 'No subtitle' in report.details[0]
 
 
+def test_fix_by_asr_applies_consistent_global_offset(project):
+    from lib.subtitle_io import format_tc
+
+    blocks = []
+    tokens = []
+    for i in range(30):
+        start = 10.0 + i * 5.0
+        text = f'セリフ{i}'
+        blocks.append(
+            f"{i + 1}\n{format_tc(start + 0.5)} --> {format_tc(start + 1.5)}"
+            f"\n{text}\n")
+        tokens.append((text, start, start + 1.0))
+    srt = project / 'EP010.srt'
+    srt.write_text('\n'.join(blocks), encoding='utf-8')
+
+    fixer = Fixer('EP010', str(project), srt_dir=str(project))
+    report = fixer.fix_by_asr(asr_result=make_result(tokens))
+
+    assert report.applied == 30
+    text = srt.read_text(encoding='utf-8')
+    assert '00:00:10,000 --> 00:00:11,000' in text
+    payload = json.loads(
+        (project / 'temp' / 'scans' / 'EP010.alignment.json')
+        .read_text(encoding='utf-8'))
+    assert payload['global_offset'] == pytest.approx(-0.5)
+
+
 def test_step_fix_episodes_threads_asr_flags(monkeypatch, tmp_path):
     import run_all
 

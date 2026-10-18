@@ -43,6 +43,10 @@
 - ⚠️ 段级 ASR（无 token）的 cue 边界 P50 只有 ~300ms，达不到 100ms 目标；Qwen3-FA 的 token 时间轴是必要前提。
 - ⚠️ 全局漂移超过 `search_seconds`（默认 6s）时整集失配，只会报 `no_speech`/`missing_asr`；需要先做整集偏移估计（未实现）。
 - ⚠️ 同一时刻完全重复的 cue（OP 双行）仍可能映射到相邻的同一句，误差在 ±3s 内会被标成 review 而不是自动改。
+- ✅ **整集统一偏移已实现**：`estimate_global_offset` 只在「≥20 条高相似 match + MAD ≤150ms」时
+  认定整集漂移，然后把所有 cue 一起平移。EP001 的 +0.5s 平移测试里 367/370 恢复原位。
+- ⚠️ 没有整集偏移时，相邻 cue 的逐条时间修正仍会被「与上一条重叠」挡下（EP001 端到端只有 89/344 自动应用）；
+  需要相邻 cue 联动的求解器，见 follow-up。
 - ⚠️ 对齐依赖 cue 文本可读；纯图形/矢量（ASS `\p1`）cue 无文本，天然是 `empty_text`/`no_speech`。
 - ⚠️ ASS 写回目前只更新文本、不更新时间码，`align_cues.py --write` 对 `.ass` 直接拒绝（退出码 4），避免「成功但什么都没改」。
 
@@ -60,6 +64,7 @@
 ## Follow-up
 
 - ✅ 已接 `run_all --asr qwen3` / `fix_orchestrator.fix_by_asr()`（默认仍 Whisper）。
-- 整集偏移估计：先粗估 median(cue→ASR) 偏移，再逐 cue 精对齐。
+- ✅ 整集偏移估计已落地（`estimate_global_offset` + `shift_cues`）。
+- 相邻 cue 联动的逐条求解：当前逐条修正遇到重叠就转 review，密集字幕修不动。
 - P3 FireRedVAD 的 speech 时间线替换 `speech_coverage` 的 ASR 近似。
 - 用真实日语视频（莎莉 EP001 已到位；阿童木 193 集待视频）跑 §9 的 A/B，填 progress §4。

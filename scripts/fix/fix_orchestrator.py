@@ -392,7 +392,10 @@ class Fixer:
         review candidates are appended to report layer 2 as ⬜.
         """
         from lib.alignment import AlignmentConfig, map_report
-        from fix.align_repair import apply_repairs, plan_repairs, summarize_plan
+        from fix.align_repair import (
+            apply_repairs, estimate_global_offset, plan_repairs, shift_cues,
+            summarize_plan,
+        )
 
         if not self._srt_path or not os.path.exists(self._srt_path):
             return FixReport(source='asr', details=['No subtitle file'])
@@ -416,6 +419,17 @@ class Fixer:
 
         aligned = map_report(cues, result, config=cfg,
                              language=self.target_lang)
+        offset = estimate_global_offset(aligned.alignments)
+        if offset is not None:
+            # A whole-file drift (different cut / frame-rate) should move all
+            # cues together; per-cue fixes alone would be blocked by the
+            # neighbour-overlap guard on adjacent subtitles.
+            cues = shift_cues(cues, offset)
+            aligned = map_report(cues, result, config=cfg,
+                                 language=self.target_lang)
+            print(f'[asr] global offset {offset:+.2f}s applied to all cues',
+                  file=sys.stderr)
+
         plan = plan_repairs(cues, aligned.alignments, config=cfg)
         stats = summarize_plan(plan)
 
@@ -429,6 +443,7 @@ class Fixer:
                     'episode': self.episode,
                     'engine': aligned.engine,
                     'model': aligned.model,
+                    'global_offset': offset,
                     'summary': aligned.summary(),
                     'plan': stats,
                     'cues': [a.to_dict() for a in aligned.alignments],
@@ -439,13 +454,18 @@ class Fixer:
                   file=sys.stderr)
 
         applied = 0
+        new_cues = cues
         if stats['auto']:
             new_cues, apply_stats = apply_repairs(cues, plan, config=cfg)
             applied = apply_stats['fix_time'] + apply_stats['replace_text']
-            if applied:
-                from lib.project_utils import backup_file
-                backup_file(self._srt_path)
-                write_srt(self._srt_path, new_cues)
+        if offset is not None:
+            # A global shift moves *every* cue's timecode; count cues, not
+            # (global + per-cue) twice.
+            applied = len(cues)
+        if applied:
+            from lib.project_utils import backup_file
+            backup_file(self._srt_path)
+            write_srt(self._srt_path, new_cues)
 
         review = [p for p in plan if not p.auto]
         try:

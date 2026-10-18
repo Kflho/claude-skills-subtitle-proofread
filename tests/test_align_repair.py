@@ -3,8 +3,8 @@
 import pytest
 
 from fix.align_repair import (
-    PlannedRepair, apply_repairs, plan_repairs, realign_cue_window,
-    summarize_plan,
+    PlannedRepair, apply_repairs, estimate_global_offset, plan_repairs,
+    realign_cue_window, shift_cues, summarize_plan,
 )
 from lib.alignment.base import (
     ACTION_DELETE_CANDIDATE, ACTION_FIX_TIME,
@@ -198,3 +198,41 @@ def test_realign_cue_window_shifts_tokens_to_absolute_time(monkeypatch,
 def test_realign_cue_window_rejects_bad_window():
     with pytest.raises(ValueError):
         realign_cue_window('ep.mkv', 'はい', 5.0, 5.0, aligner=FakeAligner([]))
+
+
+# ═══════════════════════════════════════════════════════════════
+# Global offset detection
+# ═══════════════════════════════════════════════════════════════
+
+def _offset_alignments(n=30, delta=0.5, jitter=0.0):
+    return [
+        aligned(i, i * 3.0, i * 3.0 + 2.0,
+                start=i * 3.0 + delta + (jitter if i % 2 else -jitter))
+        for i in range(n)
+    ]
+
+
+def test_estimate_global_offset_detects_consistent_shift():
+    al = _offset_alignments(30, delta=0.5)
+    assert estimate_global_offset(al) == pytest.approx(0.5)
+
+
+def test_estimate_global_offset_rejects_small_or_noisy_shifts():
+    assert estimate_global_offset(_offset_alignments(30, delta=0.1)) is None
+    assert estimate_global_offset(_offset_alignments(30, delta=0.5,
+                                                     jitter=0.45)) is None
+    assert estimate_global_offset(_offset_alignments(10, delta=0.5)) is None
+
+
+def test_shift_cues_moves_timecodes_and_clamps_at_zero():
+    cues = [cue(1.0, 2.0, 'はい')]
+    shifted = shift_cues(cues, -0.5)
+    assert shifted[0]['start_s'] == 0.5
+    assert shifted[0]['end_s'] == pytest.approx(1.5)
+    assert shifted[0]['start'] == '00:00:00,500'
+    assert shifted[0]['end'] == '00:00:01,500'
+    assert cues[0]['start_s'] == 1.0          # original untouched
+
+    clamped = shift_cues(cues, -2.0)
+    assert clamped[0]['start_s'] == 0.0
+    assert clamped[0]['end_s'] == pytest.approx(1.0)
