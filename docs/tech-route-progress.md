@@ -224,7 +224,7 @@ python scripts\eval\diagnose_timeline.py --asr-json temp\asr\digimon_ep002_main.
 |---|---|---|---|---|
 | Qwen3-ASR 1.7B（P0） | ✅ adapter/worker/router | ✅ `models/` | ✅ 3 集 + 端到端 | ✅ `--asr qwen3` opt-in |
 | Qwen3-FA 0.6B（P0） | ✅ | ✅ | ✅ | ✅ |
-| Qwen3-ASR 0.6B 草稿（P0） | 🟡 只能换 model，无模式/CLI | ✅ | ❌（仅莎莉历史） | ⬜ 待测/接入 |
+| Qwen3-ASR 0.6B 草稿（P0） | 🟡 只能换 model，无模式/CLI | ✅ | 🟡 试跑 10 分钟未完成 EP001（1.7B 约 90s/集），无报告；疑似生成循环/超长，需先加 token/时间上限 | ⛔ 暂不可用 |
 | Whisper large-v3 兜底（P0） | ✅ adapter | ⚠️ 只有 HF 缓存；faster-whisper / CLI 都不可用 | ✅ 缓存 A/B | ⚠️ 运行时不可用 |
 | FireRedVAD / AED（P1） | ⬜ | ⬜（无网、无模型） | ⬜ | ⛔ 离线阻塞 |
 | 置信度 v2：跨引擎/可读性（P1） | 🟡 对齐置信度有，跨引擎/LLM 无 | ⚠️ 需 Whisper 运行时 / LLM key | ⚠️ | ⬜ |
@@ -273,6 +273,10 @@ L3 人工 ≤5%（现状 272 条全堆在报告）。
 5. 评测加 auto/AI/human 三档计数，进 gate，防止“把 review 挪个文件”冒充优化。
 
 **测试**：1377 passed / 79.6%（删除百度 15 条测试；其余不变）。
+
+**0.6B 试跑（同轮，未完成）**：三集主故事窗口用 `Qwen3-ASR-0.6B + FA` 重转，
+10 分钟没跑完 EP001（1.7B 约 90s/集），GPU 37% / 4.9GB，无报告产出，手动终止。
+作为草稿模式前要先加 max-token/单集时间上限 + 重复检测，并查 qwen3-0.6B 是否在长 chunk 上循环。
 
 ## 1. 状态总览
 
