@@ -1,23 +1,29 @@
 # 2026 技术路线实施进度
 
 > **用途**：跨会话续跑。新会话先读本文件，再读 [`tech-route-2026.md`](tech-route-2026.md)、[`ADR-006`](adr/006-stable-asr-core.md)、[`ADR-007`](adr/007-cue-alignment.md)、[`ADR-008`](adr/008-qwen3-long-audio-chunking.md)、[`test-plan.md`](test-plan.md)。
-> **最后更新**：2026-10-18（第九轮：CC 边界测试标准 + release gate；1392 tests / 79.8%）
+> **最后更新**：2026-10-18（第十轮：ASR-first 流程重设计 + LLM-only 翻译；1377 tests / 79.6%）
 > **当前阶段**：EP01–03 视频/日文 CC 齐备；只读基准 + 防过拟合协议落地；**用户确认视频/CC 无真实偏移，并明确日语 CC 边界即测试标准**（不再另建人工金标）。第八轮把“P90 为什么下不去”拆开：test 集 90% 的 matched cue 起点系统性早 −0.37/−0.40 s（同段音频重转写复现，是当前对齐的起点缺陷，不是缓存/参考问题；EP001 仅 −55 ms），且 P90 只覆盖 42–45% 的 CC 字符；FA 塌缩吞掉成段对白（累计空洞 122–229 s）。`fix_by_asr` 整集偏移改为**默认关**，分段重对齐实测更差、留 P3。
 > **总目标**：把音频链路从 `WebRTC VAD → kotoba Whisper → 时间重叠匹配` 迁移到 `Qwen3-ASR → Qwen3-ForcedAligner → 全局文本对齐`；默认行为在 P2 验收前保持不变。
 
 ## 0. 当前一句话（clear 后从这里开始）
 
-已经完成：P1 稳定 ASR 核心、P2 对齐层、`run_all --asr` 接入、实机验证、held-out 三集基准；第八轮补齐 signed 偏差/覆盖分解/P90 归因/空洞诊断；**第九轮**按用户定位重排主次，并把测试标准收成一条 gate 命令（`release_gate.py` + `eval/gate.baseline.json`）。**用户已确认日语 CC 边界即测试标准**，所以 raw 数字就是验收结果：test P50 400 ms / P90 1196 ms（可靠 P90 510 ms），P2-14 未达标。**测试 1392 passed / 79.8% / 0 failed。**
+已经完成：P1 稳定 ASR 核心、P2 对齐层、`run_all --asr` 接入、实机验证、held-out 三集基准；第八轮补齐 signed 偏差/覆盖分解/P90 归因/空洞诊断；**第九轮**按用户定位重排主次，并把测试标准收成一条 gate 命令（`release_gate.py` + `eval/gate.baseline.json`）。**用户已确认日语 CC 边界即测试标准**，所以 raw 数字就是验收结果：test P50 400 ms / P90 1196 ms（可靠 P90 510 ms），P2-14 未达标。**测试 1377 passed / 79.6% / 0 failed。**
 
 **主次（用户定位：先应用新技术 + 建立测试标准，再慢慢改精度）：**
 
 - **主 1｜新技术落地**：🟡 真实目录 + 真实视频命名端到端已跑通（`run_all --asr qwen3`，
-  exit 0，13 自动修 / 272 review）。剩余：失败回退、ASS 策略、默认切换的开关/回滚。
-  **先证明“能换上去用”，不追精度。**
+  exit 0）。但**它仍被塞在旧流程里**：只自动修 13/296，272 条 review 全堆在报告——
+  这是设计问题，不是模型问题。**按 ADR-010 重设计**：ASR-first 流程 + Review 阶梯
+  （L0 自动 / L1 AI 批审 / L2 AI 复核 / L3 人工残留）；旧流程里的 `ai_fragments`、
+  `ai_review_fixes`、`auto_classify` 等替代人工机制必须接回来。
+  当前下一步：生成 ASR 工作单、`apply_fixes` 加 `set_time`、自动分级。
 - **主 2｜测试标准闭环**：✅ 一条命令已落地
   `python scripts\eval\release_gate.py --manifests ... --baseline eval\gate.baseline.json`；
   按 CC 标准判 test 的 P50≤100 / 可靠 P90≤300，并与冻结基线比回归，退出码 0/1。
-  剩余：把它接进日常流程（改完必跑），基线只在确认新起点时用 `--update-baseline` 冻结。
+  剩余：把 auto/AI/human 三档计数接进 gate；基线只在确认新起点时冻结。
+- **主 3｜翻译换成 LLM-only**：✅ 百度路径已删除（代码/配置/测试/文档），
+  `whisper_fixer` 的替换翻译改走 `lib.llm.call_chat`；翻译阶段接 glossary + 场景，
+  无 key 时明确失败/保留原文，不回退机翻。
 - **次｜精度迭代**：起点 −0.4 s、FA 塌缩/空洞、覆盖率、chunk、Whisper 文本混合——
   等主 1/2 稳定后按证据逐个改，一次只动一个变量。
 
@@ -186,7 +192,7 @@ python scripts\eval\diagnose_timeline.py --asr-json temp\asr\digimon_ep002_main.
 
 **用户定位**：先应用新技术、建立测试标准，再慢慢改精度；不要陷进单点技术细节。
 **提交**：`d40ce74`（CC 即边界测试标准）+ 本轮 gate 提交（见 git log 顶部）。
-**测试**：1392 passed / 79.8% / 0 failed。
+**测试**：1377 passed / 79.6% / 0 failed。
 
 已完成：
 
@@ -210,6 +216,64 @@ python scripts\eval\diagnose_timeline.py --asr-json temp\asr\digimon_ep002_main.
 2. **主 2**：把 gate 接进日常流程——改完必跑；基线只在确认新起点时 `--update-baseline` 冻结。
 3. **次**：起点偏差、FA 空洞/塌缩、覆盖率等，按 gate 数字逐个迭代，一次只动一个变量。
 
+## 0.9 新技术接入台账（第九轮盘点，对照任务书）
+
+对照 `tech-route-2026.md` §0.1 / §8.1，按「代码 / 资产 / 真机测试」三列看：
+
+| 技术（任务书优先级） | 代码 | 本机资产 | 真机测试 | 状态 |
+|---|---|---|---|---|
+| Qwen3-ASR 1.7B（P0） | ✅ adapter/worker/router | ✅ `models/` | ✅ 3 集 + 端到端 | ✅ `--asr qwen3` opt-in |
+| Qwen3-FA 0.6B（P0） | ✅ | ✅ | ✅ | ✅ |
+| Qwen3-ASR 0.6B 草稿（P0） | 🟡 只能换 model，无模式/CLI | ✅ | ❌（仅莎莉历史） | ⬜ 待测/接入 |
+| Whisper large-v3 兜底（P0） | ✅ adapter | ⚠️ 只有 HF 缓存；faster-whisper / CLI 都不可用 | ✅ 缓存 A/B | ⚠️ 运行时不可用 |
+| FireRedVAD / AED（P1） | ⬜ | ⬜（无网、无模型） | ⬜ | ⛔ 离线阻塞 |
+| 置信度 v2：跨引擎/可读性（P1） | 🟡 对齐置信度有，跨引擎/LLM 无 | ⚠️ 需 Whisper 运行时 / LLM key | ⚠️ | ⬜ |
+| glossary-first → ASR context（P1） | 🟡 context 通到 worker；run_all 不传，`ASR_CONTEXT_FILE` 未使用 | ✅ glossary 可生成 | ❌ | ⬜ 零新资产，可立即接 |
+| LLM 主翻译 + glossary（P1） | ✅ 独立 `scripts/translate_srt.py`；百度路径已删除 | ❌ `LLM_API_KEY` 为空 | ❌ | ⚠️ 工具在，未进 run_all/未测；**翻译已定为 LLM-only**（ADR-010） |
+| 人声分离默认关（P2） | ✅ demucs，仅 Whisper 路径 | ✅ HTDemucs | ❌ ASR 路径 | 🟡 |
+| OP/ED AED + 指纹（P2） | ⬜ | 依赖 FireRedVAD | ⬜ | ⛔ |
+| 切片重对齐（P2） | ⬜（还是旧 spot fix） | ✅ FA | ❌ | ⬜ |
+| 说话人分离（P5） | ⬜ | ⬜ | ⬜ | ⛔ |
+| VibeVoice（P5） | ⬜ | ⬜ 7B | ⬜ | ⛔ |
+| 云兜底（P5） | ⬜ | ❌ key/网络 | ⬜ | ⛔ |
+
+**结论**：P0 的 ASR/FA 已接并跑过；P1 里只有 **glossary-first** 是零新资产、可立即接，
+**0.6B** 是资产在本机、可直接测。FireRedVAD / VibeVoice / 云兜底被离线挡住，
+LLM 翻译被 key 挡住，Whisper 运行时被依赖挡住（只剩历史缓存做 A/B）。
+
+## 0.10 第十轮：ASR-first 重设计 + Review 阶梯 + 去百度
+
+**用户决定（2026-10-18）**：
+1. 百度翻译静默砍掉，全部走 LLM；之后不再维护/测试传统机翻。
+2. 流程按选用的技术设计（取长补短），不硬塞进旧流程；旧流程只是工程实现，必要时重设计。
+3. review 不该有 272 条；旧流程里有很多替代人工的机制，先读懂再设计。
+
+**已落库**：
+- `docs/adr/010-asr-first-pipeline.md`：ASR-first 数据流、三种模式、Review 阶梯、
+  LLM-only 翻译、迁移步骤。旧 3-Phase 只保留编排骨架。
+- `CONTEXT.md` 核心原则 7/8/9：流程按技术设计；Review 阶梯（L0 自动 → L1 AI 批审 →
+  L2 AI 复核 → L3 人工残留）；翻译全部 LLM。
+- 百度路径删除：`fix/translate_srt.py`、`BAIDU_*` 配置、`test_baidu_translate.py`、
+  SKILL/技术路线文档中的 Baidu 说明；`whisper_fixer` 的替换翻译改走 `lib.llm.call_chat`，
+  无 key 时保留原文交给翻译阶段。
+
+**旧流程里可直接复用的“替代人工”机制**（ASR 路由目前没接）：
+`whisper_pipeline` 的置信度 triage（high/retry/none）、`ai_fragments_<EP>.json` +
+`Fixer.apply_ai_fragments()`、`ai_review_candidates.json` → `ai_review_fixes.json` →
+`apply_fixes`、`auto_classify`/`auto_clean_glossary`、OP/ED 预替换、`reuse/apply`、`polish_zh`。
+
+**Review 目标（按 CC 条数，每集）**：L0 ≥60%（现状 13/285≈5%）；L1+L2 覆盖剩余 ≥90%；
+L3 人工 ≤5%（现状 272 条全堆在报告）。
+
+**下一步（实现顺序）**：
+1. `fix_by_asr` 为每条非自动修复生成 `asr_review_<EP>.json`（证据 + 空 decision）。
+2. `apply_fixes` 加 `set_time`（SRT），让 AI 裁决能同时改时间/文本；run_all 汇总工作单。
+3. 自动分级：高置信 `replace_text`（`--asr-fix-text` 时）直接 L0；其余进 L1。
+4. ASR-first 编排收口：`--asr qwen3` 跳过 VAD 门控/Whisper 修复区，Phase 3 接 LLM 翻译。
+5. 评测加 auto/AI/human 三档计数，进 gate，防止“把 review 挪个文件”冒充优化。
+
+**测试**：1377 passed / 79.6%（删除百度 15 条测试；其余不变）。
+
 ## 1. 状态总览
 
 | 阶段 | 内容 | 状态 | 验收 |
@@ -217,7 +281,7 @@ python scripts\eval\diagnose_timeline.py --asr-json temp\asr\digimon_ep002_main.
 | P0 | 边界测试标准 + 基线指标 | ✅ 用户确认日语 CC 边界即测试标准；三集基准 + 测量有效性（signed/覆盖/空洞）已落地 | `episode_benchmark` 新报告字段；CER/边界/偏差可复现 |
 | P1 | 稳定核心 + Qwen3/Whisper 适配 + 评测/CLI | ✅ 3 集跑通；Qwen3 vs Whisper large-v3 A/B 已记录；默认不变 | 契约/registry/router/CLI 稳定；A/B 有 raw + matched-span 数据 |
 | P2 | Qwen3-FA + cue mapper + align_repair | 🟡 核心/CLI/`run_all --asr` 完成；**P2-14 按 CC 标准未达标** | raw test P50 400 ms / 可靠 P90 510 ms；signed P50 −384 ms（起点缺陷） |
-| 测试 | 1392 tests / 79.8% 覆盖 / 0 failed | 🟡 主链补齐；剩余根脚本/nouns 旧入口/whisper_backends/align_cues | 关键路径每个分支至少一条测试 |
+| 测试 | 1377 tests / 79.6% 覆盖 / 0 failed | 🟡 主链补齐；剩余根脚本/nouns 旧入口/whisper_backends/align_cues | 关键路径每个分支至少一条测试 |
 | P3 | FireRedVAD/AED，VAD 降级为提示 | ⬜ 未开始 | speech/music/singing 时间线对比 |
 | P4 | glossary-first + 翻译 prompt，百度下线 | ⬜ 未开始 | 专名 F1 / 翻译人工评分 |
 | P5 | VibeVoice / 云兜底 | ⬜ 未开始 | 单集实验 + 成本/隐私评估 |
@@ -609,7 +673,7 @@ coverage: 64.0% (13,607 statements)     # 上轮 576 / 36.3%
 | `asr` / `scan` / `apply` / `eval` / `ass` / `utils` | — | 10–80% | 同左 | 两轮均未动 |
 
 两轮共新增 13 个测试文件 + 6 个扩展：
-`test_translate_srt`、`test_baidu_translate`、`test_polish_zh`、`test_nouns_aggregate`、
+`test_translate_srt`、`test_polish_zh`、`test_nouns_aggregate`、
 `test_build_glossary`、`test_nouns_extractor`、`test_find_suspect_nouns`、`test_oped_fixer`、
 `test_oped_fill`、`test_run_all_steps`、`test_episode_workflow`、`test_whisper_fixer`、
 `test_reuse`；扩展 `test_whisper_pipeline`、`test_whisper_backends`、`test_align_repair`、
@@ -826,7 +890,7 @@ coverage: 64.0% (13,607 statements)     # 上轮 576 / 36.3%
 | `lib/config.py` | 新配置项 | ✅ |
 | `run_all.py` / `fix_orchestrator.py` / `episode_workflow.py` | P2 `--asr` 接入（flag 控制） | ✅ |
 | `tests/test_whisper_pipeline.py` / `test_whisper_backends.py` | 扩展：VAD 时间线 / Tier1+Tier2 / `main()` 闸门 / faster+openai 后端 | ✅ |
-| `tests/test_translate_srt.py` / `test_baidu_translate.py` / `test_polish_zh.py` | 翻译链路（LLM prompt/JSON、百度签名、润色写盘策略） | ✅ |
+| `tests/test_translate_srt.py` / `test_polish_zh.py` | 翻译链路（LLM prompt/JSON、润色写盘策略）；百度测试已于第十轮删除 | ✅ |
 | `tests/test_nouns_aggregate.py` / `test_build_glossary.py` / `test_nouns_extractor.py` / `test_find_suspect_nouns.py` | 专名链路（合并/输出/sidecar/规则） | ✅ |
 | `tests/test_oped_fixer.py` / `test_oped_fill.py` | OP/ED（三分类 / 只改歌词 / 只填空行） | ✅ |
 | `tests/test_run_all_steps.py` / `test_episode_workflow.py` | 编排（顺序 / flag / 资源驱动步骤 / Whisper-ASR 分派） | ✅ |
@@ -872,7 +936,7 @@ python -m pytest -q tests\test_cue_mapper.py -k duplicate
 
 # 本轮 P0 链路（Whisper 编排 / 翻译 / 专名 / OP-ED / 编排）
 python -m pytest -q tests\test_whisper_pipeline.py tests\test_whisper_backends.py `
-  tests\test_translate_srt.py tests\test_baidu_translate.py tests\test_polish_zh.py `
+  tests\test_translate_srt.py tests\test_polish_zh.py `
   tests\test_nouns_aggregate.py tests\test_build_glossary.py `
   tests\test_nouns_extractor.py tests\test_find_suspect_nouns.py `
   tests\test_oped_fixer.py tests\test_oped_fill.py `

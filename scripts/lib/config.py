@@ -98,12 +98,10 @@ def apply_llm_params(body, max_tokens=None):
     return body
 
 # ═══════════════════════════════════════════════════════════════
-# Baidu Translate
+# Translation
 # ═══════════════════════════════════════════════════════════════
-
-BAIDU_APPID        = os.environ.get('BAIDU_APPID', '')
-BAIDU_SECRET       = os.environ.get('BAIDU_SECRET', '')
-BAIDU_API_ENDPOINT = os.environ.get('BAIDU_API_ENDPOINT', '') or 'https://fanyi-api.baidu.com/api/trans/vip/translate'
+# LLM-only (ADR-010): the Baidu Translate path was removed on 2026-10-18
+# and is no longer maintained or tested.  LLM_* below is the only backend.
 
 # ═══════════════════════════════════════════════════════════════
 # I/O encoding

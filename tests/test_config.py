@@ -7,7 +7,6 @@ from lib.config import (
     WHISPER_CLI, WHISPER_MODEL, WHISPER_RETRY_MODEL, WHISPER_BACKEND,
     LLM_API_KEY, LLM_MODEL, LLM_BASE_URL,
     LLM_MODEL_DEFAULT, LLM_BASE_URL_DEFAULT,
-    BAIDU_APPID, BAIDU_SECRET, BAIDU_API_ENDPOINT,
     PYTHONIOENCODING, VIDEO_CANDIDATES,
     DEFAULT_TARGET_LANG, DEFAULT_TIMEOUT,
     DEFAULT_COMPARE_THRESHOLD, DEFAULT_MAX_PAD, DEFAULT_MAX_CHARS,
@@ -67,19 +66,12 @@ class TestLLMConfig:
         assert isinstance(LLM_BASE_URL_DEFAULT, str)
         assert bool(LLM_BASE_URL or LLM_BASE_URL_DEFAULT)
 
-
-class TestBaiduConfig:
-    """Baidu Translate config."""
-
-    def test_baidu_appid_is_str(self):
-        assert isinstance(BAIDU_APPID, str)
-
-    def test_baidu_secret_is_str(self):
-        assert isinstance(BAIDU_SECRET, str)
-
-    def test_baidu_api_endpoint_has_default(self):
-        assert isinstance(BAIDU_API_ENDPOINT, str)
-        assert BAIDU_API_ENDPOINT != ''  # has a hardcoded default URL
+    def test_baidu_translation_config_is_gone(self):
+        """ADR-010: translation is LLM-only; no traditional MT knobs."""
+        import lib.config as config
+        assert not hasattr(config, 'BAIDU_APPID')
+        assert not hasattr(config, 'BAIDU_SECRET')
+        assert not hasattr(config, 'BAIDU_API_ENDPOINT')
 
 
 class TestPathDefaults:

@@ -1,17 +1,19 @@
 # 测试与覆盖率计划
 
-> 最后更新：2026-10-18（第九轮：CC 边界标准 + release gate）
+> 最后更新：2026-10-18（第十轮：ASR-first 重设计 + 去百度）
 > 目标不变：**能力靠测试证明，不靠真实项目碰运气。** 真实项目只负责发现问题；每个问题在修之前先落一个最小 fixture test。
 
 ## 0. 现状
 
 ```text
 python -m pytest -q
-1392 passed in ~9s           # 无网络、无模型、无真实项目依赖
-coverage: 79.8% (14,665 statements)
+1377 passed in ~9s           # 无网络、无模型、无真实项目依赖
+coverage: 79.6% (14,499 statements)
 ```
 
-本轮 **+14 tests**（1378 → 1392），覆盖率 **79.7% → 79.8%**，0 failed。
+本轮 **−15 tests**（1392 → 1377）：删除百度翻译路径（`test_baidu_translate.py` 与
+`fix/translate_srt.py`，共 15 条）；`whisper_fixer` 的替换翻译测试改走 LLM mock。
+覆盖率 79.8% → 79.6%（删掉的百度模块原本有测试覆盖），0 failed。
 
 新增/扩展测试文件：
 
@@ -23,13 +25,15 @@ coverage: 79.8% (14,665 statements)
 | `test_fix_by_asr.py`（扩展） | 整集偏移默认关闭、显式 `global_offset=True`、`ASR_GLOBAL_OFFSET` 环境默认 |
 | `test_asr_registry.py`（扩展） | aligner 适配器尊重 `ASRConfig.model` 本地路径（离线模型不再回落到 Hub） |
 | `test_project_utils.py` / `test_subtitle_session.py`（扩展） | 未补零视频名解析（`01、Title.mkv` → EP001）、201/1080p 反例、SubtitleSession 视频解析 |
+| `test_whisper_fixer.py`（改造） | 替换翻译改走 LLM：有 key 翻译、无 key 保留原文、失败批次保留原文；删除百度 mock |
+| `test_config.py`（改造） | 断言 `BAIDU_*` 配置已不存在（ADR-010） |
 
 ### 覆盖率按目录（本轮 vs 上轮）
 
 | 目录 | 语句 | 覆盖 | 上轮 | 说明 |
 |---|---:|---:|---:|---|
-| `scripts/lib`（含子目录） | 3,569 | **85.8%** | 85.9% | 新增 `lost_spans`、视频名解析；对齐/ASR 契约稳 |
-| `scripts/fix` | 3,240 | **78.0%** | 77.9% | SubtitleSession 视频解析 + 早退提示；whisper_pipeline 81% |
+| `scripts/lib`（含子目录） | 3,566 | **85.8%** | 85.8% | 删百度配置；新增 `lost_spans`、视频名解析；对齐/ASR 契约稳 |
+| `scripts/fix` | 3,080 | **77.3%** | 78.0% | 删除百度翻译模块；SubtitleSession 视频解析 + 早退提示；whisper_pipeline 81% |
 | `scripts/nouns` | 2,424 | **67.2%** | 67.2% | `auto_classify` / `auto_clean_glossary` 仍 0%（旧入口） |
 | `scripts` 根 | 2,013 | **65.8%** | 65.7% | run_all 96%、translate_srt 85%、polish_zh 99% |
 | `scripts/asr` | 603 | **95.0%** | 95.0% | worker 99%、CLI 99% |
@@ -39,7 +43,7 @@ coverage: 79.8% (14,665 statements)
 | `scripts/eval` | 1,074 | **90.0%** | 90.3% | 新增 release gate；benchmark 新指标 |
 | `scripts/ass` | 313 | **86.3%** | 86.3% | CLI main 已测 |
 | `scripts/utils` | 285 | **80.4%** | 80.4% | — |
-| **合计** | **14,665** | **79.8%** | 79.8% | — |
+| **合计** | **14,499** | **79.6%** | 79.8% | — |
 
 ### 做得好的部分
 
@@ -173,7 +177,7 @@ python -m pytest -q tests/test_alignment_base.py tests/test_alignment_timeline.p
 
 ## 6. 覆盖率门槛（渐进）
 
-当前 **79.8%**。按缺口补，不追求一次到 85%：
+当前 **79.6%**。按缺口补，不追求一次到 85%：
 
 | 阶段 | 目标 | 重点 |
 |---|---:|---|
@@ -181,7 +185,7 @@ python -m pytest -q tests/test_alignment_base.py tests/test_alignment_timeline.p
 | 上上轮 | 64.0% | P0 链路 + 相邻联动 + 修复/片段/复用/专名补齐 |
 | 上轮 | 74.0% | run_all 步骤、scanner、apply、worker、ass/reuse CLI |
 | 再上轮 | 79.0% | whisper_utils、episode_workflow、reuse、asr_eval、CC 清洁 |
-| **现在** | **79.8%** | 时间轴质量、三集基准、display linger、diagnose/benchmark |
+| **现在** | **79.6%** | 时间轴质量、三集基准、display linger、diagnose/benchmark |
 | 下一轮 | ≥82% | 根脚本 65.8%、nouns 67.2%、whisper_backends 59%、align_cues 78% |
 
 > 覆盖率不是目的：**关键路径（扫描→修复→专名→翻译→应用→交付）每个分支至少有一条测试**，比总百分比更重要。

@@ -270,11 +270,10 @@ def test_translate_replacements_skips_japanese():
     assert items[0]['replacement'] == 'おはよう'
 
 
-def test_translate_replacements_uses_baidu(monkeypatch):
-    monkeypatch.setattr('fix.translate_srt.load_credentials',
-                        lambda: ('id', 'secret', None))
-    monkeypatch.setattr('fix.translate_srt.baidu_translate',
-                        lambda text, *a, **k: f'译:{text}')
+def test_translate_replacements_uses_llm(monkeypatch):
+    monkeypatch.setattr(wf, 'LLM_API_KEY', 'test-key')
+    monkeypatch.setattr('lib.llm.call_chat',
+                        lambda *a, **k: '["译:おはよう"]')
     items = [{'replacement': 'おはよう'}, {'replacement': ''}]
 
     wf._translate_whisper_replacements(items, 'zh')
@@ -284,29 +283,28 @@ def test_translate_replacements_uses_baidu(monkeypatch):
     assert items[1]['replacement'] == ''
 
 
-def test_translate_replacements_without_credentials_keeps_ja(monkeypatch,
-                                                             capsys):
-    monkeypatch.setattr('fix.translate_srt.load_credentials',
-                        lambda: ('', '', None))
+def test_translate_replacements_without_llm_key_keeps_ja(monkeypatch,
+                                                          capsys):
+    monkeypatch.setattr(wf, 'LLM_API_KEY', '')
     items = [{'replacement': 'おはよう'}]
 
     wf._translate_whisper_replacements(items, 'zh')
 
     assert items[0]['replacement'] == 'おはよう'
-    assert 'Baidu credentials not found' in capsys.readouterr().err
+    assert 'LLM_API_KEY not set' in capsys.readouterr().err
 
 
-def test_translate_replacements_keeps_original_on_identity(monkeypatch):
-    monkeypatch.setattr('fix.translate_srt.load_credentials',
-                        lambda: ('id', 'secret', None))
-    monkeypatch.setattr('fix.translate_srt.baidu_translate',
-                        lambda text, *a, **k: text)
+def test_translate_replacements_keeps_original_on_failed_llm(monkeypatch,
+                                                             capsys):
+    monkeypatch.setattr(wf, 'LLM_API_KEY', 'test-key')
+    monkeypatch.setattr('lib.llm.call_chat', lambda *a, **k: None)
     items = [{'replacement': 'おはよう'}]
 
     wf._translate_whisper_replacements(items, 'zh')
 
     assert items[0]['replacement'] == 'おはよう'
     assert 'whisper_original_ja' not in items[0]
+    assert 'kept Japanese' in capsys.readouterr().err
 
 
 # ═══════════════════════════════════════════════════════════════

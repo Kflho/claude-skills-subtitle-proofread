@@ -24,7 +24,9 @@ from lib.whisper_utils import (
 setup_windows_utf8()
 
 from fix.subtitle_session import SubtitleSession
-from lib.config import VAD_OVERLAP_DELETE_S, VAD_DELETE_MAX_DUR_S
+from lib.config import (
+    VAD_OVERLAP_DELETE_S, VAD_DELETE_MAX_DUR_S, LLM_API_KEY,
+)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -107,63 +109,63 @@ def _apply_vad_clean_from_cache(speech_segs, cues, srt_path, target_lang='ja',
 
 
 def _translate_whisper_replacements(all_items: list, target_lang: str):
-    """Translate Whisper replacement text from Japanese to target language.
+    """Translate Whisper replacement text ja→target with the LLM.
 
-    Only activates when target_lang ≠ 'ja'.  Uses Baidu Translate API if
-    credentials are available; degrades gracefully otherwise.
+    All translation is LLM-only (ADR-010); there is no traditional MT path.
+    Without an LLM key (or on a failed batch) the Japanese originals are
+    kept — the Phase 3 LLM translation pass owns them then.
     """
     if target_lang == 'ja':
         return
 
     to_translate = [f for f in all_items
                     if f.get('replacement', '').strip()]
-
     if not to_translate:
         return
 
-    appid = None
-    secret = None
-    endpoint = None
-    try:
-        from fix.translate_srt import baidu_translate, load_credentials
-        appid, secret, endpoint = load_credentials()
-    except Exception:
-        pass
-
-    if not appid or not secret:
-        print(f'[translate] Baidu credentials not found — '
-              f'keeping Japanese originals (AI will translate '
-              f'{len(to_translate)} items)',
-              file=sys.stderr)
-        print(f'[translate] Set BAIDU_APPID + BAIDU_SECRET or '
-              f'~/.baidu_translate to enable auto-translation.',
-              file=sys.stderr)
+    if not LLM_API_KEY:
+        print(f'[translate] LLM_API_KEY not set — keeping Japanese originals '
+              f'({len(to_translate)} items); the LLM translation phase will '
+              f'handle them.', file=sys.stderr)
         return
 
-    print(f'[translate] Baidu: translating {len(to_translate)} Whisper '
-          f'outputs ja → {target_lang} ...', file=sys.stderr)
+    from lib.llm import call_chat, extract_json_array
 
     translated_count = 0
     failed_count = 0
-    for f in to_translate:
-        jp_text = f['replacement'].strip()
-        try:
-            from fix.translate_srt import baidu_translate
-            translated = baidu_translate(
-                jp_text, appid, secret, source='ja', target=target_lang,
-                endpoint=endpoint)
-            if translated and translated != jp_text:
-                f['whisper_original_ja'] = jp_text
-                f['replacement'] = translated
+    batch_size = 40
+    for start in range(0, len(to_translate), batch_size):
+        batch = to_translate[start:start + batch_size]
+        texts = [f['replacement'].strip() for f in batch]
+        prompt = (
+            f'Translate these Japanese subtitle lines to {target_lang}. '
+            'Return ONLY a JSON array of strings in the same order. '
+            'Keep character names and terms consistent; no notes.\n'
+            + json.dumps(texts, ensure_ascii=False)
+        )
+        content = call_chat([
+            {'role': 'system',
+             'content': 'You translate anime subtitles precisely.'},
+            {'role': 'user', 'content': prompt},
+        ], temperature=0.1)
+        result = extract_json_array(content) if content else None
+        if not isinstance(result, list) or len(result) != len(texts):
+            failed_count += len(batch)
+            continue
+        for item, translated in zip(batch, result):
+            if isinstance(translated, str) and translated.strip():
+                item['whisper_original_ja'] = item['replacement'].strip()
+                item['replacement'] = translated.strip()
                 translated_count += 1
             else:
                 failed_count += 1
-        except Exception:
-            failed_count += 1
 
-    print(f'[translate] Done: {translated_count} translated, '
-          f'{failed_count} failed (kept original)',
-          file=sys.stderr)
+    if translated_count:
+        print(f'[translate] LLM: {translated_count} replacements translated '
+              f'ja → {target_lang}', file=sys.stderr)
+    if failed_count:
+        print(f'[translate] LLM: {failed_count} kept Japanese (failed batch); '
+              f'the LLM translation phase will handle them.', file=sys.stderr)
 
 
 # ═══════════════════════════════════════════════════════════════

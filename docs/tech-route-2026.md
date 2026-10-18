@@ -7,6 +7,10 @@
 > **结论先行**：把「Whisper + WebRTC VAD + 时间重叠匹配」换成「**Qwen3-ASR-1.7B + Qwen3-ForcedAligner-0.6B + FireRedVAD（只作提示）+ 全局文本对齐**」。Whisper 保留为 fallback；VibeVoice-ASR 作为可选的「说话人 / 热词」模式；云 API（MAI-Transcribe-2 / Scribe v2 / Gemini 3.5 Transcribe）只做难例兜底。**MMS FA 不适合日语字幕，不采用。**
 >
 > **证据等级**：本文标注 `[A]` 官方文档/代码、`[B]` 第三方公开基准、`[C]` 架构推断。所有公开基准都需要在我们的 193 集素材上复测，不能直接当结论。
+>
+> **2026-10-18 修订**：翻译改为 **LLM-only**（百度路径已删除、不再维护/测试）；
+> 流程以 [`adr/010-asr-first-pipeline.md`](adr/010-asr-first-pipeline.md) 的 **ASR-first**
+> 设计为准。本文保留调研背景，冲突处以 ADR-010 和 `CONTEXT.md` 核心原则为准。
 
 ---
 
@@ -21,7 +25,7 @@
 | VAD | `webrtcvad`（2010 年代 GMM） | **FireRedVAD**（语音/歌唱/音乐 AED） | **P1** | WebRTC 在 2026 多语基准 F1 52.3、漏检 64.15%；FireRed 97.57、漏检 3.62% `[B]` |
 | 置信度 | Whisper 的 `avg_logprob` / `no_speech_prob` / `compression_ratio` | **对齐一致度 + 跨引擎一致性 + 语言/重复检测 + LLM 可读性** | **P1** | 这些指标是 Whisper 特有的，Qwen3 不暴露 logprob；不能把旧阈值硬套 |
 | 人声分离 | demucs htdemucs，文档「推荐」 | **默认关**；只在病态 BGM 下试 BS-RoFormer / Mel-Band RoFormer | **P2** | 分离有伪影和延迟；Qwen3 本身对 BGM/歌曲更鲁棒；先验证再开 |
-| 翻译 | 百度翻译 + LLM 双路径 | **LLM 为主**；Qwen-MT 做批量草稿；百度降级为可选 fallback | **P1** | 百度是通用 MT，无上下文/术语约束；动画台词的语气、敬称、专名需要 LLM |
+| 翻译 | 百度翻译 + LLM 双路径 | **LLM-only**（百度已删除，ADR-010）；Qwen-MT 只做批量草稿 | **P1** | 百度是通用 MT，无上下文/术语约束；动画台词的语气、敬称、专名需要 LLM |
 | 专名 | 翻译前才生成词表 | **glossary-first**：先建词表，作为 ASR `context` / 热词，再进翻译 | **P1** | 在 ASR 阶段就把人名/术语喂进去，比事后替换更有效 |
 | OP/ED | 固定 180s / 相似度 | **FireRedVAD AED + 跨集音频指纹 + 字幕重复度** | **P2** | 固定窗口已经踩过坑；AED 能直接给 speech/singing/music 时间线 |
 | 切片重跑 | `whisper_spot_fix.py` | 改为「重新对齐 + 重新切段」；ASR 不必重跑 | **P2** | 根因是段级时间戳/长 cue 合并，不是模型没跑对那 9 秒 |
@@ -66,7 +70,7 @@
 | 时间匹配 | `match_whisper_to_cues()` | 区间重叠；±3s 宽窗重试；覆盖率 0.3/0.5 | 启发式；多句合并/拆分时错配；无字符级边界 | `whisper_pipeline.py:582` |
 | 置信度 | `filter_low_confidence()` | `avg_logprob` / `no_speech_prob` / `compression_ratio` | 只适用于 Whisper；Qwen3 无这些输出 | `dev/technical-details.md` §6 |
 | 人声分离 | `separate_vocals()` | demucs htdemucs | 2022 模型；伪影/延迟；默认推荐 | `whisper-pipeline.md` |
-| 翻译 | `translate_srt.py` | 百度 API + LLM 双路径 | 百度通用 MT；1 QPS；无上下文 | `lib/config.py` |
+| 翻译 | `translate_srt.py` | LLM-only（百度路径已删除，ADR-010） | 原百度通用 MT；1 QPS；无上下文 | `lib/config.py` |
 | 专名 | `nouns/*` | 翻译前扫描 → Jamdict → AI 审查 → 映射 | 事后补救；ASR 阶段没吃到词表 | `references/*` |
 | OP/ED | `fix/oped_*.py` | 相似度/重复度 + 固定 180s 兜底 | 固定窗口已造成误覆盖 | `config.py` 注释 |
 | 切片修复 | `whisper_spot_fix.py` | 对时间段重跑 Whisper | 根因是长 cue/时间戳，不是那几秒音频 | `SKILL.md` |
@@ -452,7 +456,10 @@ FireRedVAD 还提供 **AED**（audio event detection）：
 
 ### 5.4 翻译
 
-**现状**：百度 API + LLM 双路径；百度 1 QPS、200 万字符/月免费、通用 MT。
+**现状（2026-10-18 修订）**：百度路径已删除，翻译全部走 LLM（ADR-010）。
+以下是当时的调研记录，保留作为背景；实施以 ADR-010 为准。
+
+原状：百度 API + LLM 双路径；百度 1 QPS、200 万字符/月免费、通用 MT。
 
 **问题**：
 
@@ -462,7 +469,7 @@ FireRedVAD 还提供 **AED**（audio event detection）：
 
 **建议**：
 
-1. **LLM 为主**：DeepSeek / Qwen / Gemini / GPT 均可，保持 OpenAI 兼容接口。
+1. **LLM 为唯一路径**：DeepSeek / Qwen / Gemini / GPT 均可，保持 OpenAI 兼容接口。
 2. **Qwen-MT** 作为批量草稿/低成本选项（阿里云，多语言 API）`[A]`；再用 LLM 做语气/术语审校。
 3. **Prompt 升级**：
    - 注入 glossary（人名/地名/术语/角色关系）；
@@ -471,7 +478,7 @@ FireRedVAD 还提供 **AED**（audio event detection）：
    - 输出必须满足行长/CPS（每行 ≤ 指定字符，阅读速度 ≤ 指定 CPS）；
    - 禁止添加原文没有的信息；不确定时保留 `[???]`。
 4. **两遍法**：高价值集先直译，再让 LLM 做「术语/语气/长度」审校；低价值集一遍过。
-5. **百度降级**：只在无 LLM key 时 fallback；默认不启用。
+5. ~~百度降级~~：**已删除**；无 LLM key 时明确失败/保留原文，不回退机翻。
 
 ### 5.5 专名：从「事后替换」改成「源头注入」
 
@@ -825,7 +832,7 @@ scripts/
 | `fix/fix_orchestrator.py` | `fix_by_asr()`；按引擎路由 | ✅ P2（flag 控制） |
 | `fix/whisper_pipeline.py` | `match_whisper_to_cues` / `align_and_fix` 标记 legacy | ⬜ P2 尾项 |
 | `scan/unified_scanner.py` | VAD 切到 `lib/audio/vad.py` | ⬜ P3 |
-| `translate_srt.py` | 百度路径标记 deprecated；默认 LLM | ⬜ P4 |
+| `translate_srt.py` | 百度路径已删除；翻译全部走 LLM（ADR-010） | ✅ P4 前半 |
 | `run_all.py` | `--asr` / `--asr-python` / `--asr-fix-text`（`--aligner`/`--vad-engine`/`--hotwords` 待 P3/P4） | ✅ P2（flag 控制） |
 | `SKILL.md` / `README.md` | 更新技术栈、安装向导、后端说明 | 🟡 文档已拆分；技术栈更新待 P6 |
 

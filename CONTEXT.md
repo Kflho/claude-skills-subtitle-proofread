@@ -62,7 +62,6 @@ scripts/
 │   ├── oped_fixer.py           #   OP/ED跨集一致性修复
 │   ├── align_repair.py         #   P2 对齐→修复计划/时间码/窗口重对齐
 │   ├── compare_srt.py          #   字幕对比/相似度
-│   ├── translate_srt.py        #   百度翻译+LLM翻译
 │   └── episode_workflow.py     #   单集子进程工作流
 │
 ├── scan/                       # Phase 1: 字符扫描
@@ -103,7 +102,7 @@ scripts/
 
 1. **数据契约**: 模块间通过结构化数据（dataclass/dict/JSON）通信，orchestrator 统一写文件。例外: FragmentProcessor 直接写 SRT（与 VAD 对齐的耦合不可避免）。
 
-2. **资源驱动**: 有什么用什么。有视频→Whisper修复；有参考字幕→AI注入上下文。无视频→残血运行（仅扫描+人工审查）。
+2. **资源驱动**: 有什么用什么。有视频→ASR 链路；有参考字幕→AI注入上下文。无视频→残血运行（仅扫描+AI 审查）。
 
 3. **单一配置源**: `lib/config.py`。所有 env var 读取出处唯一。不直接 `os.environ.get()`。
 
@@ -113,11 +112,24 @@ scripts/
 
 6. **稳定核心 + 插件适配器**: ASR 契约/registry/router/评测固定；新模型只加 `lib/asr/adapters/<name>.py`，不改 router/CLI/修复管线。见 `docs/adr/006-stable-asr-core.md`。
 
+7. **流程按技术设计，不硬套旧流程**: 先定数据流和能力边界，再落到代码。
+   旧 3-Phase 只保留编排骨架（SCAN → FIX → UNIFY/DELIVER）；内部步骤围绕
+   `Qwen3-ASR + FA` 设计（ASR-first），VAD/AED 只做提示。旧流程是工程实现，
+   不是规范；必要时重设计。见 `docs/adr/010-asr-first-pipeline.md`。
+
+8. **Review 阶梯**: L0 自动（高置信）→ L1 AI 批审（工作单）→ L2 AI 复核 →
+   L3 人工残留（目标 ≤5%，附片段/理由）。复用 `ai_fragments_<EP>.json`、
+   `ai_review_fixes.json`、`auto_classify`，不新造人工队列；不把 review
+   从一个文件挪到另一个文件冒充优化。
+
+9. **翻译全部 LLM**: 无传统 MT/百度 fallback（已移除、不再维护/测试）。
+   glossary-first + 场景/角色上下文；翻译是独立阶段，不是参考字幕的副产物。
+
 ## 测试
 
 ```bash
-cd <skill>/tests && pytest -q    # 1392 tests, ~9s, 无外部依赖
-cd <skill> && pytest -q tests --cov --cov-report=term-missing   # 覆盖率 79.8%，矩阵见 docs/test-plan.md
+cd <skill>/tests && pytest -q    # 1377 tests, ~9s, 无外部依赖
+cd <skill> && pytest -q tests --cov --cov-report=term-missing   # 覆盖率 79.6%，矩阵见 docs/test-plan.md
 ```
 
 分层: Tier 1 (纯函数) → Tier 2 (tempfile) → Tier 3 (mock 外部二进制)。
@@ -126,9 +138,9 @@ P0 链路（Whisper 编排/VAD、翻译、专名、OP/ED、编排）已补齐；
 
 ## 技术路线
 
-2026 技术栈修订提案：`docs/tech-route-2026.md`；决策记录：`docs/adr/005-asr-alignment-stack.md`、`docs/adr/006-stable-asr-core.md`、`docs/adr/007-cue-alignment.md`、`docs/adr/008-qwen3-long-audio-chunking.md`、`docs/adr/009-reference-as-benchmark.md`。
+2026 技术栈修订提案：`docs/tech-route-2026.md`；决策记录：`docs/adr/005-asr-alignment-stack.md`、`docs/adr/006-stable-asr-core.md`、`docs/adr/007-cue-alignment.md`、`docs/adr/008-qwen3-long-audio-chunking.md`、`docs/adr/009-reference-as-benchmark.md`、`docs/adr/010-asr-first-pipeline.md`。
 
-核心变化：`Qwen3-ASR-1.7B + Qwen3-ForcedAligner-0.6B` 替代 `Whisper kotoba + 时间重叠匹配`；`FireRedVAD` 只作提示/AED；Whisper 保留 fallback。**默认管线仍走旧链路**，2026 链路以独立 CLI 交付。
+核心变化：`Qwen3-ASR-1.7B + Qwen3-ForcedAligner-0.6B` 替代 `Whisper kotoba + 时间重叠匹配`；`FireRedVAD` 只作提示/AED；Whisper 保留 fallback。**流程按 ASR-first 重设计**（ADR-010）：3-Phase 只保留编排骨架，内部不再用 VAD 门控修复区、不再用时间重叠贴 cue；review 走 L0 自动 → L1 AI 批审 → L2 AI 复核 → L3 人工残留；翻译全部走 LLM（百度已移除）。迁移期默认链路仍是旧 Whisper，回滚开关 `ASR_ENGINE=whisper`。
 
 ASR 架构已按「稳定核心 + 插件适配器」落地：`lib/asr/base.py`（契约）、`registry.py`（自动发现）、`router.py`（路由），新模型只写 `lib/asr/adapters/<name>.py`，不改 core。P1 进度见 `docs/tech-route-progress.md`。
 
@@ -136,7 +148,7 @@ P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 
 
 素材现状：**验收作品定为数码宝贝（Digimon Adventure）**，目录 `D:\videos\Animation\TV\数码宝贝`。**EP01/02/03 视频完整（各约 1386s）**；用户人工复核三集视频/CC 均无真实偏移。日文参考：`日语字幕\` 下 S01E01–S01E54 共 54 集 `ja[cc].srt`，已清洁；主故事窗口 `[95,1240]`。01–05 另有中文字幕，只能做参考无关/翻译复用。素材台账 `eval/materials.md`，清单 `eval/manifest.digimon.json`（Qwen3）与 `eval/manifest.digimon.whisper.json`（A/B）。莎莉/阿童木历史素材只保留机制/吞吐回放。
 
-测试：1392 passed / 0 failed / 79.8% 覆盖；矩阵与剩余缺口见 `docs/test-plan.md`。
+测试：1377 passed / 0 failed / 79.6% 覆盖；矩阵与剩余缺口见 `docs/test-plan.md`。
 
 ## 配置
 
@@ -144,5 +156,4 @@ P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 
 - `WHISPER_CLI` / `WHISPER_MODEL` — Whisper 路径
 - `ASR_ENGINE` / `ASR_MODEL` / `QWEN_PYTHON` — 2026 ASR 路线（默认 `whisper`，未启用）
 - `ASR_GLOBAL_OFFSET` — 整集偏移默认关；`--asr-global-offset` 或 `ASR_GLOBAL_OFFSET=1` 才应用
-- `LLM_API_KEY` — LLM API key
-- `BAIDU_APPID` / `BAIDU_SECRET` — 百度翻译（可选）
+- `LLM_API_KEY` — LLM API key（翻译/审查全部走 LLM）

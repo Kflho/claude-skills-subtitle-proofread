@@ -297,7 +297,6 @@ export LLM_BASE_URL='https://api.deepseek.com/v1'
 | 乱码扫描 | ✅ | ✅ | ✅ | ✅ |
 | LLM 翻译 | ✅ (ja→zh) | — | ✅ (ru→zh) | ✅ (任意→zh) |
 | Whisper 修复 | ✅ (kotoba) | ⚠️ 需中文模型 | ❌ | ⚠️ 需对应模型 |
-| Baidu 翻译层 | ❌ (日语目标无需) | ✅ (Whisper 输出 ja→zh) | ❌ | ❌ |
 | 词典过滤 | ✅ (jamdict/JMdict) | ✅ (jieba/498K 词) | ❌ | ❌ |
 | 专名分类 | ✅ (jamdict) | ✅ (jieba + 规则) | ❌ | ❌ |
 | Glossary 清洗 | ✅ (JMdict + 规则) | ✅ (jieba 词典 + 规则) | ❌ | ❌ |
@@ -306,7 +305,8 @@ export LLM_BASE_URL='https://api.deepseek.com/v1'
 > `translate_srt.py` **自动检测源语言**（ja/ru/zh），动态切换 system prompt，无需手动指定。
 > 日语检测到假名时启用专用规则（敬语、主语省略等），非日语跳过。
 > `--lang zh` 时使用 jieba 分词 + 词典查询对标 jamdict。jieba 不可用时退回 n-gram + 启发式规则。
-> Baidu 翻译为**可选**：未配置时自动降级，日语原文保留在 AI fragments 中由 AI 自行翻译。
+> **翻译全部走 LLM**（ADR-010）：百度/传统 MT 路径已删除，不再维护或测试；
+> 无 `LLM_API_KEY` 时明确失败/保留原文，不静默降级到机翻。
 > AI 润色为**可选**：Pipeline 末尾交互提问。需要 `LLM_API_KEY` 环境变量。无 key 时降级为 AI 助理自行润色（⚠️ 高 token 消耗，7.5 万 cue）。
 > ⚠️ **translate_srt.py 必须要有 LLM_API_KEY**：无 key 时脚本无法运行。不要静默降级为 AI 自行翻译——量级太大（193 集 × 200 条 = 不可行）。正确做法：告知用户 key 为空，请用户设置后重试。详见 [references/translation.md](references/translation.md)。
 
@@ -440,8 +440,7 @@ python "<scripts-dir>/fix/oped_fill.py" "<SUBTITLE_DIR>" \
 | `Done: 0 fixed` + 无 `[whisper]` 输出 | `--video-dir` 缺失或路径错 |
 | 某步骤失败但已写中间文件 | 清空 `temp/` + `reports/`，`--force-rescan` 重跑 |
 | 参考字幕乱码 / 解析 0 cue | 编码探测失准；检查 BOM/转码；ASS 惯例 UTF-16LE+BOM |
-| `Baidu credentials not found` / `polish LLM_API_KEY not set` | 正常降级，可忽略 |
-| `translate_srt LLM_API_KEY not set` | **不要降级为 AI 自行翻译**；让用户设置后重跑 |
+| `LLM_API_KEY not set`（翻译/润色） | 明确失败或保留原文；不要降级到传统机翻（已移除） |
 | `HTTP 400 invalid model` | 用 `deepseek-flash`，或更新 `lib/config.py:LLM_MODEL_DEFAULT` |
 | 翻译 exit 0 但成片仍是日文 | 推理 token 吃光预算：`LLM_REASONING_EFFORT=none`，必要时提高 `LLM_MAX_TOKENS` |
 | 译文带编号原文（`1. 原文`） | glossary 回显；说明文字写 CLAUDE.md，不要写 JSON |
