@@ -1,7 +1,7 @@
 # 2026 技术路线实施进度
 
 > **用途**：跨会话续跑。新会话先读本文件，再读 [`tech-route-2026.md`](tech-route-2026.md)、[`ADR-006`](adr/006-stable-asr-core.md)、[`ADR-007`](adr/007-cue-alignment.md)、[`ADR-008`](adr/008-qwen3-long-audio-chunking.md)、[`test-plan.md`](test-plan.md)。
-> **最后更新**：2026-10-18（第七轮：按用户人工结论改为无偏移 + Whisper large-v3 A/B；1362 tests / 79.6%）
+> **最后更新**：2026-10-18（第七轮：无偏移修正 + Whisper large-v3 A/B；1362 tests / 79.6%；提交 c902ee7 / 8d13613）
 > **当前阶段**：EP01–03 视频/日文 CC 齐备；只读基准 + 防过拟合协议落地；**用户确认视频/CC 无真实偏移**，此前 -0.37/-0.40 s 是 ASR 起点 vs CC 显示起点的系统差，整集偏移已降级为 opt-in 诊断。Whisper large-v3 q5 A/B 已跑：文本更好、打轴更差。默认仍走 Whisper，P2-14 未达标。
 > **总目标**：把音频链路从 `WebRTC VAD → kotoba Whisper → 时间重叠匹配` 迁移到 `Qwen3-ASR → Qwen3-ForcedAligner → 全局文本对齐`；默认行为在 P2 验收前保持不变。
 
@@ -28,7 +28,7 @@
 - [ ] **死代码决策**：`episode_workflow._write_ai_review_json`、`--mode`、`auto_classify` / `auto_clean_glossary` 旧入口。
 - [ ] **可选工具化**：CC 清洁 + 主故事窗口 + 参考平移仍是一次性脚本；`diagnose_timeline` 有窗口/偏移参数但不是完整工具。
 
-> **新会话入口**：先读本节 A/B/C，再读 `eval/protocol.md`、`eval/materials.md` §6/§7、`docs/adr/009-reference-as-benchmark.md`。
+> **新会话入口**：先读 §0.6 第七轮交接，再读本节 A/B/C、`eval/protocol.md`、`eval/materials.md` §6/§7、`docs/adr/009-reference-as-benchmark.md`。
 
 ### B. 素材已就绪（2026-10-18 22:29）
 
@@ -36,7 +36,7 @@
 - [ ] **用户人工确认 EP02/03 日文 CC 与视频同步**（EP01 已确认；EP02/03 实测有 -0.37/-0.40 s 全局偏移，可能是音频切点/CC 版本差异，需人工确认）。
 - [ ] **三集分类**：按实际音频标 `clean` / `overlap` / `bgm`（当前 `unclassified`，不猜）。
 - [x] **三集评测**：主故事窗口 [95,1240]、缓存 ASR JSON、`episode_benchmark.py` 基线/最终报告已生成。
-- [ ] **后续**：P0 A/B、chunk 调参、12 集 manifest、默认切换评估。
+- [ ] **后续**：chunk 调参、12 集 manifest、默认切换评估；P0 A/B 已完成（Whisper 文本更好、Qwen3 打轴更好）。
 
 ### C. 当前现场（2026-10-18 第七轮）
 
@@ -47,6 +47,7 @@ ASR：Qwen3 1.7B + FA JSON；Whisper large-v3 q5 JSON（temp/asr/*_main.*.json�
 基准：temp/reports/digimon_qwen3_raw.{json,md}、digimon_whisper_raw.{json,md}
 协议：eval/protocol.md；ADR-009（参考=考卷）
 测试：1362 passed / 79.6% / 0 failed
+提交：c902ee7（无偏移修正 + Whisper A/B）
 ```
 
 ### D. 第七轮待办（按优先级）
@@ -61,6 +62,54 @@ ASR：Qwen3 1.7B + FA JSON；Whisper large-v3 q5 JSON（temp/asr/*_main.*.json�
    的混合方案（需解决把 Whisper 文本喂给 FA 的接口），或至少把 Whisper 作为文本候选。
 5. **chunk 45/60/90**：只用零时长率/RTF 在 dev 选，test 验证一次。
 6. **P4 翻译/润色**：prompt 用原文 + glossary + 场景；参考字幕不回流。
+
+## 0.6 第七轮交接（2026-10-18，clear 入口）
+
+**提交**：`c902ee7`（无偏移修正 + Whisper A/B）、`8d13613`（状态表）。
+**测试**：1362 passed / 79.6% / 0 failed（`pytest -q`，约 8 s）。
+**当前默认**：`ASR_ENGINE=whisper` 不变；Qwen3 路线走 `run_all --asr qwen3` / 独立 CLI。
+
+### 结论（先看这 5 条）
+
+1. **用户人工复核：EP01–03 视频/CC 没有真实偏移**。`estimate_global_offset` 的 -0.37/-0.40 s 是
+   ASR 起点 vs CC 显示起点的系统差；**raw 才是验收口径**。`align_cues --global-offset` 已改为 opt-in。
+2. **Qwen3 raw test**：CER 0.2633、match 153/687、P50 400 ms、P90 1196 ms、±100 ms 5.1%、
+   可靠匹配 P90 510 ms。**P2-14 未达标**（目标 P50 ≤100 / P90 ≤300）。
+3. **Whisper large-v3 q5 raw test**：CER 0.2041、match 195/687、P50 757 ms、可靠 P90 1325 ms。
+   **文本更好、打轴更差**；默认没有切，混合方案待评估。
+4. **真实收益**：结尾 display linger 保留后，raw 下三集原本 106 条自动修复会缩短结尾，
+   现在 0 条；零时长 span 不再自动修；新增质量诊断/只读基准/防过拟合协议。
+5. **被否**：全局偏移、局部偏移、cursor 回看；overlong trim 保持 opt-in。
+   不要把 offset-corrected 的 57.5 ms / 68.3% 再写进任何验收。
+
+### 恢复入口
+
+```powershell
+# 测试
+cd tests; pytest -q
+
+# 三集 raw 基准（Qwen3）
+python scripts\eval\episode_benchmark.py --manifest eval\manifest.digimon.json `
+  --output temp\reports\digimon_qwen3_raw.md --json-out temp\reports\digimon_qwen3_raw.json
+
+# Whisper A/B（同参考、同窗口）
+python scripts\eval\episode_benchmark.py --manifest eval\manifest.digimon.whisper.json `
+  --output temp\reports\digimon_whisper_raw.md --json-out temp\reports\digimon_whisper_raw.json
+
+# 时间轴诊断
+python scripts\eval\diagnose_timeline.py --asr-json temp\asr\digimon_ep001_main.qwen3.json
+```
+
+关键文件：`eval/protocol.md`、`docs/adr/009-reference-as-benchmark.md`、
+`eval/reports/digimon_benchmark_2026-10-18.md`、`eval/manifest.digimon*.json`。
+
+### 下一步（按优先级）
+
+1. **P90 机制修复**：P3 FireRedVAD 或分段重对齐，处理 FA 零时长；先 dev，test 只验证一次。
+2. **文本路线决策**：Qwen3 单模型 vs “Whisper 文本 + Qwen3-FA 对齐”混合；Whisper 文本明显更好。
+3. **测量有效性**：dialogue-covered CER + P90 outlier 报告。
+4. **收尾**：`fix_by_asr` 仍默认整集偏移，加显式开关；chunk 45/60/90 用无参考指标在 dev 选。
+5. **P4**：翻译/润色 prompt 证据化；默认切换等 P2-14 达标。
 
 ## 1. 状态总览
 
