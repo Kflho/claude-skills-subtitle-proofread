@@ -1,7 +1,7 @@
 # 2026 技术路线实施进度
 
 > **用途**：跨会话续跑。新会话先读本文件，再读 [`tech-route-2026.md`](tech-route-2026.md)、[`ADR-006`](adr/006-stable-asr-core.md)、[`ADR-007`](adr/007-cue-alignment.md)、[`ADR-008`](adr/008-qwen3-long-audio-chunking.md)、[`test-plan.md`](test-plan.md)。
-> **最后更新**：2026-10-18（HEAD `de899b9`；测试收尾 + 用户金标素材策略）
+> **最后更新**：2026-10-18（HEAD `67fb650`；测试收尾 + 任务进度记录；金标素材待接收）
 > **当前阶段**：P2 对齐 + `run_all --asr` + 实机验证完成；测试 P0/P1 补洞完成（967 tests / 64.0%）；默认仍走 Whisper。下一步 = **用用户提供的金标素材做 P2-14 验收**（莎莉/阿童木字幕质量差，不再作金标）。
 > **总目标**：把音频链路从 `WebRTC VAD → kotoba Whisper → 时间重叠匹配` 迁移到 `Qwen3-ASR → Qwen3-ForcedAligner → 全局文本对齐`；默认行为在 P2 验收前保持不变。
 
