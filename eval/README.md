@@ -83,6 +83,15 @@ python scripts/eval/episode_benchmark.py --manifest eval/manifest.digimon.whispe
 
 对比时只看同一 split、同一 ASR 缓存；dev 看方向，test 冻结后跑一次。
 
+报告第八轮起还带三块测量有效性信息（读法见 `eval/protocol.md` §2.1）：
+
+- **Signed start error**：P10/P50/P90、early share、P90−P10。test 集 90% 的 matched cue
+  起点早 −0.37/−0.40 s，这是 CC 显示起点约定；报告它，但**不要减掉**。
+- **Text decomposition**：字符覆盖率、matched-span CER（相似度 ≥0.85 / ≥0.5）、
+  无匹配字符数。Qwen3 三集只覆盖 42–45% 的 CC 字符，P90 不能外推整集。
+- **Timeline holes**：塌缩 run + 前置空洞（EP001–03：19/7/9 个，累计 229/122/96 s），
+  是 P3 VAD 的输入清单，不是 P2 的自动修复对象。
+
 
 ## 4. 看什么
 

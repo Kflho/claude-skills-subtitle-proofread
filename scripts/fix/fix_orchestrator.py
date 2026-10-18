@@ -381,12 +381,20 @@ class Fixer:
     # ═══════════════════════════════════════════════════════════
 
     def fix_by_asr(self, *, engine: str = None, asr_result=None,
-                   write_text: bool = False, config=None) -> FixReport:
+                   write_text: bool = False, global_offset: bool | None = None,
+                   config=None) -> FixReport:
         """Align cue times against the 2026 ASR route (Qwen3 + FA).
 
         Default behaviour is time-only: text is never replaced unless
         ``write_text=True`` and the cue is garbled with plausible ASR text;
         no cue is ever deleted.  ``asr_result`` is injectable for tests.
+
+        ``global_offset`` controls the whole-file drift correction.  It is
+        **off by default** (config ``ASR_GLOBAL_OFFSET``): on the Digimon
+        reference the estimate absorbs the CC display-onset convention, not
+        a real cut/frame-rate drift, and applying it would shift correctly
+        timed cues.  The estimate is still written to the alignment report
+        as diagnostics; pass ``global_offset=True`` to apply it.
 
         The full diagnosis is written to ``temp/scans/<EP>.alignment.json``;
         review candidates are appended to report layer 2 as ⬜.
@@ -396,6 +404,10 @@ class Fixer:
             apply_repairs, estimate_global_offset, plan_repairs, shift_cues,
             summarize_plan,
         )
+
+        if global_offset is None:
+            from lib.config import ASR_GLOBAL_OFFSET
+            global_offset = ASR_GLOBAL_OFFSET
 
         if not self._srt_path or not os.path.exists(self._srt_path):
             return FixReport(source='asr', details=['No subtitle file'])
@@ -420,7 +432,8 @@ class Fixer:
         aligned = map_report(cues, result, config=cfg,
                              language=self.target_lang)
         offset = estimate_global_offset(aligned.alignments)
-        if offset is not None:
+        offset_applied = bool(global_offset and offset is not None)
+        if offset_applied:
             # A whole-file drift (different cut / frame-rate) should move all
             # cues together; per-cue fixes alone would be blocked by the
             # neighbour-overlap guard on adjacent subtitles.
@@ -429,6 +442,13 @@ class Fixer:
                                  language=self.target_lang)
             print(f'[asr] global offset {offset:+.2f}s applied to all cues',
                   file=sys.stderr)
+        elif offset is not None:
+            # Per-cue start fixes still follow the ASR onset, so a systematic
+            # onset difference would be applied cue by cue anyway.  Say so:
+            # the switch only stops the whole-file shift.
+            print(f'[asr] global offset estimate {offset:+.2f}s NOT applied '
+                  '(raw mode; --asr-global-offset to opt in); per-cue start '
+                  'fixes still follow ASR onset', file=sys.stderr)
 
         plan = plan_repairs(cues, aligned.alignments, config=cfg)
         stats = summarize_plan(plan)
@@ -444,6 +464,7 @@ class Fixer:
                     'engine': aligned.engine,
                     'model': aligned.model,
                     'global_offset': offset,
+                    'global_offset_applied': offset_applied,
                     'summary': aligned.summary(),
                     'plan': stats,
                     'cues': [a.to_dict() for a in aligned.alignments],
@@ -458,7 +479,7 @@ class Fixer:
         if stats['auto']:
             new_cues, apply_stats = apply_repairs(cues, plan, config=cfg)
             applied = apply_stats['fix_time'] + apply_stats['replace_text']
-        if offset is not None:
+        if offset_applied:
             # A global shift moves *every* cue's timecode; count cues, not
             # (global + per-cue) twice.
             applied = len(cues)

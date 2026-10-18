@@ -17,7 +17,8 @@ def _args(**overrides):
     base = {'step': None, 'dry_run': False, 'video_dir': None,
             'target_lang': 'ja', 'skip_whisper': False,
             'vad_clean_apply': False, 'asr_engine': '', 'asr_python': '',
-            'asr_fix_text': False, 'no_backup': False}
+            'asr_fix_text': False, 'asr_global_offset': False,
+            'no_backup': False}
     base.update(overrides)
     return SimpleNamespace(**base)
 
@@ -35,12 +36,14 @@ def _patch_steps(monkeypatch, calls, report=None):
 
     def step_audio(project_dir, episode, scan_result, dry_run=False,
                    video_dir=None, target_lang='ja', vad_clean_apply=False,
-                   asr_engine='', asr_python='', asr_fix_text=False):
+                   asr_engine='', asr_python='', asr_fix_text=False,
+                   asr_global_offset=False):
         calls.append(('audio', {'scan_result': scan_result,
                                 'dry_run': dry_run,
                                 'target_lang': target_lang,
                                 'vad_clean_apply': vad_clean_apply,
-                                'asr_engine': asr_engine}))
+                                'asr_engine': asr_engine,
+                                'asr_global_offset': asr_global_offset}))
         return report
 
     def step_translate(project_dir, episode, scan_result, dry_run=False,
@@ -217,8 +220,9 @@ def _install_fake_fixer(monkeypatch):
             return FixReport(source='whisper', applied=3, ai_review=1,
                              failed=2)
 
-        def fix_by_asr(self, write_text=False):
-            self.asr_calls.append({'write_text': write_text})
+        def fix_by_asr(self, write_text=False, global_offset=None):
+            self.asr_calls.append({'write_text': write_text,
+                                   'global_offset': global_offset})
             return FixReport(source='asr', applied=5)
 
     monkeypatch.setattr(fx, 'Fixer', FakeFixer)
@@ -264,7 +268,18 @@ def test_step_audio_asr_route_calls_fix_by_asr(monkeypatch):
                            asr_fix_text=True)
 
     assert report.applied == 5
-    assert created[0].asr_calls == [{'write_text': True}]
+    assert created[0].asr_calls == [{'write_text': True,
+                                     'global_offset': False}]
+
+
+def test_step_audio_asr_route_threads_global_offset(monkeypatch):
+    created = _install_fake_fixer(monkeypatch)
+
+    ew.step_audio('/proj', 'EP001', None, asr_engine='qwen3',
+                  asr_global_offset=True)
+
+    assert created[0].asr_calls == [{'write_text': False,
+                                     'global_offset': True}]
 
 
 def test_step_audio_asr_dry_run_does_not_call_model(monkeypatch):

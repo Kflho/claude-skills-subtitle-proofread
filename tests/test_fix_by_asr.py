@@ -126,7 +126,8 @@ def test_fix_by_asr_applies_consistent_global_offset(project):
     srt.write_text('\n'.join(blocks), encoding='utf-8')
 
     fixer = Fixer('EP010', str(project), srt_dir=str(project))
-    report = fixer.fix_by_asr(asr_result=make_result(tokens))
+    report = fixer.fix_by_asr(asr_result=make_result(tokens),
+                              global_offset=True)
 
     assert report.applied == 30
     text = srt.read_text(encoding='utf-8')
@@ -135,6 +136,59 @@ def test_fix_by_asr_applies_consistent_global_offset(project):
         (project / 'temp' / 'scans' / 'EP010.alignment.json')
         .read_text(encoding='utf-8'))
     assert payload['global_offset'] == pytest.approx(-0.5)
+    assert payload['global_offset_applied'] is True
+
+
+def test_fix_by_asr_records_offset_but_does_not_apply_by_default(project):
+    """The Digimon reference has no real drift: raw must stay the default."""
+    from lib.subtitle_io import format_tc
+
+    blocks = []
+    tokens = []
+    for i in range(30):
+        start = 10.0 + i * 5.0
+        text = f'セリフ{i}'
+        blocks.append(
+            f"{i + 1}\n{format_tc(start + 0.5)} --> {format_tc(start + 1.5)}"
+            f"\n{text}\n")
+        tokens.append((text, start, start + 1.0))
+    srt = project / 'EP012.srt'
+    srt.write_text('\n'.join(blocks), encoding='utf-8')
+
+    fixer = Fixer('EP012', str(project), srt_dir=str(project))
+    fixer.fix_by_asr(asr_result=make_result(tokens))
+
+    payload = json.loads(
+        (project / 'temp' / 'scans' / 'EP012.alignment.json')
+        .read_text(encoding='utf-8'))
+    assert payload['global_offset'] == pytest.approx(-0.5)
+    assert payload['global_offset_applied'] is False
+
+
+def test_fix_by_asr_env_flag_enables_global_offset(project, monkeypatch):
+    """ASR_GLOBAL_OFFSET is the config-level default; explicit arg wins."""
+    from lib.subtitle_io import format_tc
+
+    blocks = []
+    tokens = []
+    for i in range(30):
+        start = 10.0 + i * 5.0
+        text = f'セリフ{i}'
+        blocks.append(
+            f"{i + 1}\n{format_tc(start + 0.5)} --> {format_tc(start + 1.5)}"
+            f"\n{text}\n")
+        tokens.append((text, start, start + 1.0))
+    srt = project / 'EP013.srt'
+    srt.write_text('\n'.join(blocks), encoding='utf-8')
+    monkeypatch.setattr('lib.config.ASR_GLOBAL_OFFSET', True)
+
+    fixer = Fixer('EP013', str(project), srt_dir=str(project))
+    fixer.fix_by_asr(asr_result=make_result(tokens))
+    payload = json.loads(
+        (project / 'temp' / 'scans' / 'EP013.alignment.json')
+        .read_text(encoding='utf-8'))
+    assert payload['global_offset_applied'] is True
+    assert '00:00:10,000 --> 00:00:11,000' in srt.read_text(encoding='utf-8')
 
 
 def test_fix_by_asr_moves_two_adjacent_cues_together(project):
@@ -171,6 +225,7 @@ def test_step_fix_episodes_threads_asr_flags(monkeypatch, tmp_path):
         captured['engine'] = args.asr_engine
         captured['python'] = args.asr_python
         captured['text'] = args.asr_fix_text
+        captured['offset'] = args.asr_global_offset
 
     monkeypatch.setattr('fix.episode_workflow._run_pipeline', fake_pipeline)
     resources = {'has_video': True, 'has_whisper': False,
@@ -179,9 +234,11 @@ def test_step_fix_episodes_threads_asr_flags(monkeypatch, tmp_path):
     selected = run_all.step_fix_episodes(
         str(tmp_path), 'ja', resources, episodes=['EP001'],
         skip_if_clean=False, asr_engine='qwen3',
-        asr_python='.venv-qwen\\Scripts\\python.exe', asr_fix_text=True)
+        asr_python='.venv-qwen\\Scripts\\python.exe', asr_fix_text=True,
+        asr_global_offset=True)
 
     assert selected == ['EP001']
     assert captured == {'engine': 'qwen3',
                         'python': '.venv-qwen\\Scripts\\python.exe',
-                        'text': True}
+                        'text': True,
+                        'offset': True}

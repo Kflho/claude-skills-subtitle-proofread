@@ -3,7 +3,7 @@
 import pytest
 
 from lib.alignment.quality import (
-    TimelinePolicy, TimelineQuality, assess_units, is_broken,
+    TimelinePolicy, TimelineQuality, assess_units, is_broken, lost_spans,
     median_char_rate, repair_overlong_units, should_fallback, unit_triples,
 )
 from lib.asr.base import Segment, Token
@@ -216,3 +216,46 @@ def test_repair_allowed_starts_restricts_to_segment_edges():
 def test_median_char_rate_falls_back_when_no_sane_unit():
     assert median_char_rate([]) == pytest.approx(0.20)
     assert median_char_rate(units(('あ', 1.0, 1.0))) == pytest.approx(0.20)
+
+
+# ═══════════════════════════════════════════════════════════════
+# Lost spans (P3 hand-off)
+# ═══════════════════════════════════════════════════════════════
+
+def test_lost_spans_reports_a_collapsed_run_after_a_gap():
+    raw = units(
+        ('マーチング', 63.795, 64.435),
+        ('フィシーズ', 115.796, 115.796),
+        ('助かっ', 115.796, 115.796),
+        ('た', 115.796, 115.796),
+        ('やっと', 115.796, 116.195),
+    )
+    spans = lost_spans(raw)
+    assert len(spans) == 1
+    span = spans[0]
+    assert span['reason'] == 'collapsed_run'
+    assert span['gap_start'] == pytest.approx(64.435)
+    assert span['gap_end'] == pytest.approx(115.796)
+    assert span['gap_s'] == pytest.approx(51.361)
+    assert span['units'] == 3
+    assert span['chars'] == 9        # フィシーズ(5) + 助かっ(3) + た(1)
+
+
+def test_lost_spans_ignores_small_gaps_and_normal_runs():
+    raw = units(('おはよう', 1.0, 1.6), ('元気', 2.0, 2.4))
+    assert lost_spans(raw) == []
+
+
+def test_lost_spans_reports_overlong_token_for_few_chars():
+    raw = units(('あ', 0.0, 12.0), ('い', 12.0, 12.2))
+    spans = lost_spans(raw, overlong_seconds=5.0)
+    assert any(s['reason'] == 'overlong_token' for s in spans)
+    overlong = [s for s in spans if s['reason'] == 'overlong_token'][0]
+    assert overlong['duration_s'] == pytest.approx(12.0)
+    assert overlong['text'] == 'あ'
+
+
+def test_lost_spans_gap_threshold_is_configurable():
+    raw = units(('あ', 0.0, 0.5), ('い', 1.0, 1.0))
+    assert lost_spans(raw, gap_seconds=3.0) == []
+    assert lost_spans(raw, gap_seconds=0.4)[0]['reason'] == 'collapsed_run'

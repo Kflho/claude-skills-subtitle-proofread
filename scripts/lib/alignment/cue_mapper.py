@@ -340,10 +340,17 @@ def _map_one(index: int, cue: dict, timeline: CharTimeline, cursor: int,
 
 def map_report(cues, result, *, config: AlignmentConfig | None = None,
                language: str = 'ja',
-               policy: TimelinePolicy | None = None) -> AlignmentReport:
-    """Convenience wrapper: alignments + engine metadata + warnings."""
+               policy: TimelinePolicy | None = None,
+               timeline: CharTimeline | None = None) -> AlignmentReport:
+    """Convenience wrapper: alignments + engine metadata + warnings.
+
+    ``timeline`` lets a caller build the character axis once and reuse it
+    for other measurements (the benchmark scores text coverage on the same
+    axis), instead of rebuilding it per report.
+    """
     cfg = config or AlignmentConfig()
-    timeline = build_char_timeline(result, policy=policy)
+    if timeline is None:
+        timeline = build_char_timeline(result, policy=policy)
     alignments = map_cues(cues, timeline, config=cfg, language=language)
     report = AlignmentReport(
         alignments=alignments,

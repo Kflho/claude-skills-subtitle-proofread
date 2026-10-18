@@ -92,6 +92,16 @@ def test_build_qwen3_aligner_contract():
     assert adapter.name == 'qwen3_fa'
 
 
+def test_qwen3_aligner_honours_local_model_paths():
+    """A caller's offline/local ASR path must reach the worker, not the Hub."""
+    config = ASRConfig(model='models/Qwen3-ASR-local',
+                       aligner_model='models/Qwen3-FA-local',
+                       python='python.exe')
+    adapter = registry.build('qwen3_fa', config=config)
+    assert adapter.client.asr_model == 'models/Qwen3-ASR-local'
+    assert adapter.client.aligner_model == 'models/Qwen3-FA-local'
+
+
 def test_auto_candidates_do_not_raise_with_unavailable_engines():
     # Main env has no qwen_asr and likely no Whisper model; must not raise.
     candidates = registry.auto_candidates('asr', config=ASRConfig())

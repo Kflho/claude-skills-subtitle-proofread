@@ -50,7 +50,7 @@ scripts/
 │   └── alignment/              # P2 cue 对齐（纯 stdlib，不 import 模型）
 │       ├── base.py             #     契约/归一化/状态词表（含 display linger 规则）
 │       ├── timeline.py         #     ASRResult → 字符时间轴（token/segment 兜底）
-│       ├── quality.py          #     时间轴健康度：零时长 run/overlong/fallback
+│       ├── quality.py          #     时间轴健康度：零时长 run/overlong/fallback/空洞(lost_spans)
 │       ├── cue_mapper.py       #     时间窗 + 字符匹配 + 精确串就近
 │       ├── diagnostics.py      #     信号/置信度/边界统计
 │       └── aligner.py          #     registry 对齐服务（ALIGNER_ENGINE）
@@ -115,8 +115,8 @@ scripts/
 ## 测试
 
 ```bash
-cd <skill>/tests && pytest -q    # 1362 tests, ~9s, 无外部依赖
-pytest -q --cov --cov-report=term-missing   # 覆盖率 79.6%，矩阵见 docs/test-plan.md
+cd <skill>/tests && pytest -q    # 1378 tests, ~9s, 无外部依赖
+cd <skill> && pytest -q tests --cov --cov-report=term-missing   # 覆盖率 79.7%，矩阵见 docs/test-plan.md
 ```
 
 分层: Tier 1 (纯函数) → Tier 2 (tempfile) → Tier 3 (mock 外部二进制)。
@@ -131,16 +131,17 @@ P0 链路（Whisper 编排/VAD、翻译、专名、OP/ED、编排）已补齐；
 
 ASR 架构已按「稳定核心 + 插件适配器」落地：`lib/asr/base.py`（契约）、`registry.py`（自动发现）、`router.py`（路由），新模型只写 `lib/asr/adapters/<name>.py`，不改 core。P1 进度见 `docs/tech-route-progress.md`。
 
-P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 → 信号/置信度；`quality.py` 评估零时长/overlong，token 灾难性塌缩才回退 segment）、`fix/align_repair.py`（修复计划/时间码/整集偏移/相邻 cue 联动；结尾 display linger 保留）、`scripts/asr/align_cues.py`（端到端 CLI，默认 dry-run；整集偏移改为 opt-in）、`run_all --asr`（flag 控制）。参考字幕按 `eval/protocol.md` 只作 held-out 基准；用户已确认视频/CC 无真实偏移，raw 才是验收口径。三集基准：`temp/reports/digimon_qwen3_raw.{json,md}`、`digimon_whisper_raw.{json,md}`。
+P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 → 信号/置信度；`quality.py` 评估零时长/overlong/空洞 `lost_spans`，token 灾难性塌缩才回退 segment）、`fix/align_repair.py`（修复计划/时间码/整集偏移/相邻 cue 联动；结尾 display linger 保留）、`scripts/asr/align_cues.py`（端到端 CLI，默认 dry-run；整集偏移改为 opt-in）、`run_all --asr`（flag 控制；`--asr-global-offset` 单独 opt-in）。参考字幕按 `eval/protocol.md` 只作 held-out 基准；用户已确认视频/CC 无真实偏移，raw 才是验收口径。三集基准：`temp/reports/digimon_qwen3_raw.{json,md}`、`digimon_whisper_raw.{json,md}`（第八轮新增 signed 偏差/覆盖分解/空洞：`temp/reports/digimon_qwen3_r8.*`、`digimon_whisper_r8.*`）。**第八轮结论**：test 集 90% matched cue 起点系统性早 −0.37/−0.40 s（CC 显示约定），P90 只覆盖 42–45% 的 CC 字符，FA 塌缩吞掉成段对白（累计空洞 122–229 s）；分段重对齐/overlong/cue 级 rate trim 均实测无收益，P3 VAD 才能修。
 
 素材现状：**验收作品定为数码宝贝（Digimon Adventure）**，目录 `D:\videos\Animation\TV\数码宝贝`。**EP01/02/03 视频完整（各约 1386s）**；用户人工复核三集视频/CC 均无真实偏移。日文参考：`日语字幕\` 下 S01E01–S01E54 共 54 集 `ja[cc].srt`，已清洁；主故事窗口 `[95,1240]`。01–05 另有中文字幕，只能做参考无关/翻译复用。素材台账 `eval/materials.md`，清单 `eval/manifest.digimon.json`（Qwen3）与 `eval/manifest.digimon.whisper.json`（A/B）。莎莉/阿童木历史素材只保留机制/吞吐回放。
 
-测试：1362 passed / 0 failed / 79.6% 覆盖；矩阵与剩余缺口见 `docs/test-plan.md`。
+测试：1378 passed / 0 failed / 79.7% 覆盖；矩阵与剩余缺口见 `docs/test-plan.md`。
 
 ## 配置
 
 所有配置在 `lib/config.py`。环境变量在 CLAUDE.md 中设置。关键变量:
 - `WHISPER_CLI` / `WHISPER_MODEL` — Whisper 路径
 - `ASR_ENGINE` / `ASR_MODEL` / `QWEN_PYTHON` — 2026 ASR 路线（默认 `whisper`，未启用）
+- `ASR_GLOBAL_OFFSET` — 整集偏移默认关；`--asr-global-offset` 或 `ASR_GLOBAL_OFFSET=1` 才应用
 - `LLM_API_KEY` — LLM API key
 - `BAIDU_APPID` / `BAIDU_SECRET` — 百度翻译（可选）

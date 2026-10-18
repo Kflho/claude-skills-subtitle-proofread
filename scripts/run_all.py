@@ -219,7 +219,8 @@ def _filter_by_start(episodes, start_from):
 def step_fix_episodes(project_dir, lang, resources,
                       skip_whisper=False, episodes=None, limit=0, start_from=None,
                       skip_if_clean=True, target_dir=None, vad_clean_apply=False,
-                      asr_engine='', asr_python='', asr_fix_text=False):
+                      asr_engine='', asr_python='', asr_fix_text=False,
+                      asr_global_offset=False):
     """Phase 2: Unified error-fix via Fixer (reference → Whisper → AI fragments).
 
     Each episode goes through the cascading priority:
@@ -326,6 +327,7 @@ def step_fix_episodes(project_dir, lang, resources,
         args.asr_engine = asr_engine
         args.asr_python = asr_python
         args.asr_fix_text = asr_fix_text
+        args.asr_global_offset = asr_global_offset
         print(f'[fix] {ep} ({i+1}/{len(selected)})', file=sys.stderr)
         try:
             _run_pipeline(project_dir, ep, resources, args)
@@ -1140,6 +1142,10 @@ Examples:
     parser.add_argument('--asr-fix-text', action='store_true',
                         help='also apply high-confidence ASR text replacements '
                              '(default: timecodes only)')
+    parser.add_argument('--asr-global-offset', action='store_true',
+                        help='apply the estimated whole-file offset to every '
+                             'cue (default OFF: the estimate absorbs the CC '
+                             'display-onset convention; see ADR-009)')
     args = parser.parse_args()
 
     project_dir = args.target_dir or os.getcwd()
@@ -1280,7 +1286,8 @@ Examples:
                                       vad_clean_apply=args.vad_clean_apply,
                                       asr_engine=args.asr,
                                       asr_python=args.asr_python,
-                                      asr_fix_text=args.asr_fix_text)
+                                      asr_fix_text=args.asr_fix_text,
+                                      asr_global_offset=args.asr_global_offset)
 
         step_ai_review(project_dir, resolved_lang, target_dir=target_dir)
     else:

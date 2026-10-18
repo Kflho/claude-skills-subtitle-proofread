@@ -142,7 +142,8 @@ def step_compare(project_dir, episode, scan_result, translated_path, dry_run=Fal
 
 def step_audio(project_dir, episode, scan_result, dry_run=False, video_dir=None,
                target_lang='ja', vad_clean_apply=False,
-               asr_engine='', asr_python='', asr_fix_text=False):
+               asr_engine='', asr_python='', asr_fix_text=False,
+               asr_global_offset=False):
     """Audio mode: dispatch garbled cues + missing subtitles to unified VAD+Whisper fix.
 
     v5.3: Single fix_by_whisper() call covers garbled, partial overlap,
@@ -150,7 +151,8 @@ def step_audio(project_dir, episode, scan_result, dry_run=False, video_dir=None,
 
     ``asr_engine`` switches to the 2026 ASR alignment route
     (``Fixer.fix_by_asr``) instead of Whisper; it fixes cue times and never
-    deletes cues.
+    deletes cues.  ``asr_global_offset`` opts into the whole-file drift
+    correction (off by default: it absorbs the CC display-onset convention).
 
     ``vad_clean_apply`` 默认 False（分级 L1）：VAD 删条只出清单不写盘。
     """
@@ -165,7 +167,8 @@ def step_audio(project_dir, episode, scan_result, dry_run=False, video_dir=None,
             print(f'[audio] DRY RUN — ASR alignment via {asr_engine}')
             return FixReport(source='asr')
         print(f'[audio] ASR route: {asr_engine}')
-        report = fixer.fix_by_asr(write_text=asr_fix_text)
+        report = fixer.fix_by_asr(write_text=asr_fix_text,
+                                  global_offset=asr_global_offset)
         print(f'[audio] ASR done: {report.applied} fixed, '
               f'{report.ai_review} review')
         return report
@@ -467,7 +470,9 @@ def _run_pipeline(project_dir, episode, resources, args):
                                vad_clean_apply=getattr(args, 'vad_clean_apply', False),
                                asr_engine=asr_engine,
                                asr_python=getattr(args, 'asr_python', ''),
-                               asr_fix_text=getattr(args, 'asr_fix_text', False))
+                               asr_fix_text=getattr(args, 'asr_fix_text', False),
+                               asr_global_offset=getattr(
+                                   args, 'asr_global_offset', False))
 
         elif step == 'translate':
             translated_path = step_translate(project_dir, episode, scan_result,

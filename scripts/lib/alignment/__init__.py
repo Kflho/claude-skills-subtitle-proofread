@@ -23,7 +23,7 @@ from lib.alignment.base import (
 )
 from lib.alignment.timeline import CharTimeline, build_char_timeline
 from lib.alignment.quality import (
-    TimelinePolicy, TimelineQuality, assess_units, is_broken,
+    TimelinePolicy, TimelineQuality, assess_units, is_broken, lost_spans,
     repair_overlong_units, should_fallback,
 )
 from lib.alignment.cue_mapper import map_cues, map_report
@@ -41,7 +41,7 @@ __all__ = [
     'STATUS_GARBLED', 'STATUS_MATCH', 'STATUS_MISSING_ASR', 'STATUS_NO_ASR',
     'STATUS_NO_SPEECH', 'TimelinePolicy', 'TimelineQuality', 'assess_units',
     'boundary_stats', 'build_aligner', 'build_char_timeline',
-    'confidence_for', 'is_broken', 'map_cues', 'map_report',
+    'confidence_for', 'is_broken', 'lost_spans', 'map_cues', 'map_report',
     'normalize_text', 'repair_overlong_units', 'should_fallback',
     'similarity_ratio', 'strip_tags', 'summarize',
 ]

@@ -321,6 +321,59 @@ def repair_overlong_units(units, *,
     return out, repaired
 
 
+def lost_spans(units, *, gap_seconds: float = 3.0,
+               overlong_seconds: float = 5.0) -> list[dict]:
+    """Locate timeline holes the aligner swallowed (P3 hand-off).
+
+    Two pathologies produce a hole where speech used to be:
+
+    * ``collapsed_run`` — a run of zero-duration units that begins after a
+      time gap.  The text exists but its timestamps all sit at one instant,
+      so the audio between the previous unit and that instant has no axis
+      (measured on EP002: 51 s of dialogue stacked at 115.796 s);
+    * ``overlong_token`` — one unit with a handful of characters stretched
+      over several seconds (EP003 has a 52 s token).
+
+    The output is intentionally a *diagnosis*: it names the audio windows a
+    repair pass (P3 VAD / segmented re-alignment) would need.  Re-aligning
+    the same window with the same FA was measured on EP002 and made things
+    worse, so callers must not treat this as an instruction to re-run blindly.
+    """
+    triples = unit_triples(units)
+    out: list[dict] = []
+    prev_end: float | None = None
+    for index, (text, start, end) in enumerate(triples):
+        chars = visible_len(text)
+        duration = max(0.0, end - start)
+        if prev_end is not None and chars and start - prev_end >= gap_seconds:
+            run = index
+            run_chars = 0
+            while (run < len(triples) and visible_len(triples[run][0])
+                   and abs(triples[run][2] - triples[run][1]) <= ZERO_EPS):
+                run_chars += visible_len(triples[run][0])
+                run += 1
+            if run_chars:
+                out.append({
+                    'reason': 'collapsed_run',
+                    'gap_start': round(prev_end, 3),
+                    'gap_end': round(start, 3),
+                    'gap_s': round(start - prev_end, 3),
+                    'units': run - index,
+                    'chars': run_chars,
+                })
+        if chars and duration >= overlong_seconds and chars <= 3:
+            out.append({
+                'reason': 'overlong_token',
+                'start': round(start, 3),
+                'end': round(end, 3),
+                'duration_s': round(duration, 3),
+                'chars': chars,
+                'text': text,
+            })
+        prev_end = end if prev_end is None else max(prev_end, end)
+    return out
+
+
 def unit_triples(units) -> list[tuple[str, float, float]]:
     """Normalise Token/Segment objects or triples into ``(text, s, e)``."""
     triples = []

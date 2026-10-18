@@ -132,6 +132,8 @@ python scripts\run_all.py --lang ja `
 ```
 
 - 默认只改时间码；加 `--asr-fix-text` 才允许高置信文本替换；永不删条。
+- 整集偏移**默认不应用**（`ASR_GLOBAL_OFFSET`/`global_offset=False`）：估计值只写进
+  `alignment.json` 作诊断；确认有独立证据（换剪辑/帧率）再加 `--asr-global-offset`。
 - `--asr` 会绕过 `--skip-if-clean`（时间对齐对「文本干净但轴漂」也有效）。
 - 每集诊断写到 `temp/scans/<EP>.alignment.json`；审查候选进报告 Layer 2 ⬜。
 - ASS 写回仍不支持（`fix_by_asr` 直接返回说明，不改文件）。

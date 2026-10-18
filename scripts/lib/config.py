@@ -36,6 +36,13 @@ ASR_MAX_NEW_TOKENS  = int(os.environ.get('ASR_MAX_NEW_TOKENS', '') or 4096)
 ASR_REQUEST_TIMEOUT = float(os.environ.get('ASR_REQUEST_TIMEOUT', '') or 1800)
 ASR_CONTEXT_FILE    = os.environ.get('ASR_CONTEXT_FILE', '')
 ASR_FALLBACK        = os.environ.get('ASR_FALLBACK', 'whisper').strip().lower()
+# Whole-file offset (different cut / frame rate) — OFF by default.  The
+# Digimon reference was hand-checked: the estimated -0.37/-0.40 s is the
+# ASR speech onset vs CC display onset convention, not a real drift, and
+# shifting every cue forward would damage correctly timed subtitles.  Opt in
+# per run (`--asr-global-offset`) only with independent evidence.
+ASR_GLOBAL_OFFSET   = (os.environ.get('ASR_GLOBAL_OFFSET', '').strip().lower()
+                       in {'1', 'true', 'yes', 'on'})
 
 ALIGNER_ENGINE      = os.environ.get('ALIGNER_ENGINE', 'qwen3').strip().lower()
 ALIGNER_MODEL       = os.environ.get('ALIGNER_MODEL', 'Qwen/Qwen3-ForcedAligner-0.6B')

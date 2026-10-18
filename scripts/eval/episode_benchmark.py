@@ -14,6 +14,12 @@ That keeps the Japanese CC a *benchmark*, not a tuning input.  Parameters
 must come from audio/ASR-internal evidence or a stated prior; the reference
 only measures the outcome.
 
+Besides CER and boundary percentiles the report now carries the measurement
+validity blocks (added round 8, see ``eval/protocol.md`` §2.1): signed start
+error (bias vs spread), a text decomposition (character coverage +
+matched-span CER), P90 attribution flags, and timeline holes from
+``alignment.quality.lost_spans``.  None of them feeds a threshold.
+
 Manifest additions (on top of ``asr_eval.py``):
 
     {"id": "EP002", "split": "test", "main_window": [95, 1233],
@@ -42,7 +48,7 @@ _SCRIPTS = Path(__file__).resolve().parents[1]
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-from eval.asr_eval import compute_cer  # noqa: E402
+from eval.asr_eval import compute_cer, normalize_text  # noqa: E402
 from fix.align_repair import (  # noqa: E402
     estimate_global_offset, plan_repairs, shift_cues, summarize_plan,
 )
@@ -50,8 +56,9 @@ from lib.alignment.base import AlignmentConfig  # noqa: E402
 from lib.alignment.cue_mapper import map_report  # noqa: E402
 from lib.alignment.diagnostics import boundary_stats  # noqa: E402
 from lib.alignment.quality import (  # noqa: E402
-    TimelinePolicy, assess_units, unit_triples,
+    TimelinePolicy, assess_units, lost_spans, unit_triples,
 )
+from lib.alignment.timeline import build_char_timeline  # noqa: E402
 from lib.asr.base import ASRConfig, ASRResult  # noqa: E402
 from lib.asr.router import ASRRouter  # noqa: E402
 from lib.config import (  # noqa: E402
@@ -153,16 +160,247 @@ def _quality(result: ASRResult) -> dict:
     }
 
 
+# ═══════════════════════════════════════════════════════════════
+# Measurement validity: dialogue-covered CER + P90 attribution
+# ═══════════════════════════════════════════════════════════════
+#
+# The plain CER denominator is *all* reference text, including signs, song
+# lyrics and speaker labels the ASR was never asked to transcribe.  Those
+# show up as deletions and inflate the number.  ``dialogue_cer`` therefore
+# re-scores the same hypothesis against only those reference cues that have
+# a character match in the ASR; comparing it with the global CER says how
+# much of the error is reference text with no ASR counterpart.
+#
+# ``explain_p90`` answers the *other* half of the question: when the P90
+# start error is large, what kind of cue produced it (collapsed FA span,
+# 1–2 character particle, stretched span, repeated/ambiguous line)?
+# It is read-only diagnosis, never a repair input.
+#
+# ``signed_start_stats`` exposes the systematic part: against Japanese CC
+# the ASR start is consistently ~0.4 s earlier on EP02/03 (display-onset
+# convention, see ADR-009).  Absolute P50/P90 alone hide that, so the sign
+# and the early share are reported next to them.  Neither is subtracted
+# from the output — the raw numbers stay the gate.
+
+def _pct(values: list[float], p: float) -> float:
+    values = sorted(values)
+    if not values:
+        return 0.0
+    pos = (len(values) - 1) * p
+    lo = int(pos)
+    hi = min(lo + 1, len(values) - 1)
+    return values[lo] * (1 - (pos - lo)) + values[hi] * (pos - lo)
+
+
+def dialogue_cer(cues: list[dict], timeline, alignments: list, *,
+                 cover_similarity: float = 0.5,
+                 match_similarity: float = 0.85) -> dict:
+    """Text decomposition: how much CC text has an ASR counterpart?
+
+    The plain CER counts every reference character, including signs, song
+    lyrics and lines the mapper never matched, against the whole ASR text.
+    This function splits the reference instead:
+
+    * ``match`` (similarity ≥ 0.85): CER inside the matched ASR span;
+    * ``covered`` (similarity ≥ 0.5): same, for partially matched dialogue;
+    * ``unsupported``: cues with no character match at all.
+
+    The hypothesis of each bucket is the ASR characters the mapper actually
+    placed under the cue, so the score describes *text mismatch inside
+    covered dialogue* and does not re-count context as insertions.  The
+    global CER keeps the insertions/deletions view; the two are meant to be
+    read together.
+    """
+    buckets = {
+        'covered': {'distance': 0, 'ref_chars': 0, 'cues': 0},
+        'match': {'distance': 0, 'ref_chars': 0, 'cues': 0},
+    }
+    total_ref = unsupported_ref = matched_chars = 0
+    unsupported = 0
+    for cue, al in zip(cues, alignments):
+        text = str(cue.get('text', '') or '')
+        ref_chars = len(normalize_text(text))
+        if not ref_chars:
+            continue
+        total_ref += ref_chars
+        matched_chars += min(al.matched_chars, ref_chars)
+        if al.similarity < cover_similarity or al.char_span is None:
+            unsupported += 1
+            unsupported_ref += ref_chars
+            continue
+        detail = compute_cer(text, timeline.slice_text(*al.char_span))
+        for key in ('covered', 'match'):
+            if key == 'match' and al.similarity < match_similarity:
+                continue
+            buckets[key]['distance'] += detail['distance']
+            buckets[key]['ref_chars'] += detail['ref_chars']
+            buckets[key]['cues'] += 1
+
+    def _rate(bucket):
+        return (round(bucket['distance'] / bucket['ref_chars'], 4)
+                if bucket['ref_chars'] else None)
+
+    return {
+        'kind': 'matched-span',
+        'cover_similarity': cover_similarity,
+        'match_similarity': match_similarity,
+        'covered_cues': buckets['covered']['cues'],
+        'match_cues': buckets['match']['cues'],
+        'covered_ref_chars': buckets['covered']['ref_chars'],
+        'covered_distance': buckets['covered']['distance'],
+        'covered_cer': _rate(buckets['covered']),
+        'match_ref_chars': buckets['match']['ref_chars'],
+        'match_distance': buckets['match']['distance'],
+        'match_cer': _rate(buckets['match']),
+        'unsupported_cues': unsupported,
+        'unsupported_ref_chars': unsupported_ref,
+        'ref_chars_total': total_ref,
+        'matched_chars': matched_chars,
+        'char_coverage': (round(matched_chars / total_ref, 3)
+                          if total_ref else 0.0),
+    }
+
+
+def error_bands(alignments: list) -> dict:
+    """Distribution of absolute start errors over matched cues."""
+    starts = [abs(al.start_error) for al in alignments
+              if al.status == 'match' and al.start_error is not None]
+    bands = {'n': len(starts), 'le_100': 0, 'le_200': 0, 'le_300': 0,
+             'le_500': 0, 'gt_500': 0}
+    for value in starts:
+        if value <= 0.1:
+            bands['le_100'] += 1
+        if value <= 0.2:
+            bands['le_200'] += 1
+        if value <= 0.3:
+            bands['le_300'] += 1
+        if value <= 0.5:
+            bands['le_500'] += 1
+        else:
+            bands['gt_500'] += 1
+    return bands
+
+
+def signed_start_stats(alignments: list) -> dict:
+    """Signed start-error distribution — separates bias from spread.
+
+    ``signed`` keeps the direction (negative = ASR starts before the cue).
+    A tight distribution centred on −0.4 s is a display-onset convention,
+    not a per-cue error; the absolute P50/P90 cannot tell the two apart.
+    """
+    values = [al.start_error for al in alignments
+              if al.status == 'match' and al.start_error is not None]
+    if not values:
+        return {'n': 0, 'early': 0, 'early_share': 0.0,
+                'p10_ms': 0.0, 'p50_ms': 0.0, 'p90_ms': 0.0,
+                'spread_ms': 0.0, 'abs_p50_ms': 0.0, 'abs_p90_ms': 0.0}
+    p10, p50, p90 = (_pct(values, 0.1), _pct(values, 0.5), _pct(values, 0.9))
+    early = sum(1 for v in values if v < 0)
+    abs_values = [abs(v) for v in values]
+    return {
+        'n': len(values),
+        'early': early,
+        'early_share': round(early / len(values), 3),
+        'p10_ms': round(1000 * p10, 1),
+        'p50_ms': round(1000 * p50, 1),
+        'p90_ms': round(1000 * p90, 1),
+        'spread_ms': round(1000 * (p90 - p10), 1),
+        'abs_p50_ms': round(1000 * _pct(abs_values, 0.5), 1),
+        'abs_p90_ms': round(1000 * _pct(abs_values, 0.9), 1),
+    }
+
+
+def outlier_flags(al, cue_norm: str, timeline_text: str,
+                  cfg: AlignmentConfig) -> list[str]:
+    """Explain one large start error with cheap, model-free signals."""
+    flags = []
+    aligned = al.aligned_duration
+    if (al.start is not None and al.end is not None
+            and al.end - al.start <= 1e-3):
+        flags.append('zero_span')
+    elif al.cue_duration >= 0.5 and aligned < 0.15:
+        flags.append('collapsed')
+    elif aligned > max(1.0, 2.0 * al.cue_duration):
+        flags.append('stretched')
+    if al.cue_chars <= 2:
+        flags.append('short_cue')
+    if al.confidence == 'low':
+        flags.append('low_confidence')
+    if float((al.signals or {}).get('repeat_score', 0.0)) > cfg.max_repeat_score:
+        flags.append('repeat')
+    if cue_norm and timeline_text and timeline_text.count(cue_norm) > 1:
+        flags.append('ambiguous')
+    return flags
+
+
+def explain_p90(cues: list[dict], alignments: list, timeline=None, *,
+                bound_ms: float = 300.0, limit: int = 10,
+                cfg: AlignmentConfig | None = None) -> dict:
+    """Attribute the largest start errors to their likely mechanism.
+
+    ``bound_ms`` is the P2 acceptance bound (300 ms), not a tuned value.
+    A cue can carry several flags; ``plain`` counts cues whose error has no
+    cheap explanation (the ones worth investigating by hand).
+    """
+    cfg = cfg or AlignmentConfig()
+    bound = bound_ms / 1000.0
+    timeline_text = timeline.text if timeline is not None else ''
+    cue_norm = [normalize_text(str(c.get('text', '') or '')) for c in cues]
+    counts = {key: 0 for key in
+              ('zero_span', 'collapsed', 'stretched', 'short_cue',
+               'low_confidence', 'repeat', 'ambiguous', 'plain')}
+    matched = 0
+    examples: list[dict] = []
+    for al in alignments:
+        if al.status != 'match' or al.start_error is None:
+            continue
+        matched += 1
+        if abs(al.start_error) <= bound:
+            continue
+        norm = (cue_norm[al.cue_index]
+                if 0 <= al.cue_index < len(cue_norm) else '')
+        raw = (str(cues[al.cue_index].get('text', '') or '')
+               if 0 <= al.cue_index < len(cues) else '')
+        flags = outlier_flags(al, norm, timeline_text, cfg)
+        if flags:
+            for flag in flags:
+                counts[flag] += 1
+        else:
+            counts['plain'] += 1
+        examples.append({
+            'cue_index': al.cue_index,
+            'start_error_ms': round(1000 * al.start_error, 1),
+            'cue_start': round(al.cue_start, 3),
+            'cue_chars': al.cue_chars,
+            'similarity': round(al.similarity, 3),
+            'confidence': al.confidence,
+            'flags': flags,
+            'cue_text': raw[:60],
+            'asr_text': (al.asr_text or '')[:60],
+        })
+    examples.sort(key=lambda item: abs(item['start_error_ms']), reverse=True)
+    over = len(examples)
+    return {
+        'bound_ms': bound_ms,
+        'matched': matched,
+        'n_over': over,
+        'share_over': round(over / matched, 3) if matched else 0.0,
+        'flags': counts,
+        'examples': examples[:limit],
+    }
+
+
 def evaluate_episode(ep: dict, result: ASRResult, *,
                      elapsed_s: float | None = None,
                      policy: TimelinePolicy | None = None,
                      apply_global_offset: bool = False) -> dict:
     """Score one cached/transcribed ASR result.  Pure measurement.
 
-    ``apply_global_offset`` mirrors the production pipeline
-    (``fix_by_asr``): estimate one consistent file-level drift from the
-    cue↔ASR matches, shift all cues, then re-map.  It is off by default so
-    the raw token calendar stays visible; report both when judging.
+    ``apply_global_offset`` is a *diagnostic*: it estimates one consistent
+    file-level drift from the cue↔ASR matches, shifts all cues, then
+    re-maps.  Production ``fix_by_asr`` no longer does this by default
+    (raw is the gate), so the flag exists only to show what a whole-file
+    shift would do.
     """
     ep_id = ep.get('id', '?')
     ref_path = ep.get('reference_srt')
@@ -177,13 +415,14 @@ def evaluate_episode(ep: dict, result: ASRResult, *,
         raise ValueError(f'{ep_id}: no reference cues in main_window={window!r}')
 
     cer = compute_cer(ref_text(cues), result.text)
-    report = map_report(cues, result, policy=policy)
+    timeline = build_char_timeline(result, policy=policy)
+    report = map_report(cues, result, policy=policy, timeline=timeline)
     global_offset = None
     if apply_global_offset:
         global_offset = estimate_global_offset(report.alignments)
         if global_offset:
             cues = shift_cues(cues, global_offset)
-            report = map_report(cues, result, policy=policy)
+            report = map_report(cues, result, policy=policy, timeline=timeline)
     stats = report.summary()
     stats['boundary'] = boundary_stats(report.alignments)
     reliable = [al for al in report.alignments
@@ -199,6 +438,11 @@ def evaluate_episode(ep: dict, result: ASRResult, *,
         and entry.new_end < entry.cue_end - clean)
     plan_stats['end_truncating_auto'] = truncating
     quality = _quality(result)
+    dialogue = dialogue_cer(cues, timeline, report.alignments)
+    p90 = explain_p90(cues, report.alignments, timeline)
+    signed = signed_start_stats(report.alignments)
+    spans = lost_spans(unit_triples(result.tokens)) if result.tokens else []
+    collapsed = [s for s in spans if s['reason'] == 'collapsed_run']
 
     duration = float(result.audio_duration or 0.0)
     return {
@@ -220,17 +464,26 @@ def evaluate_episode(ep: dict, result: ASRResult, *,
         'asr_segments': len(result.segments),
         'cer': round(cer['cer'], 4),
         'cer_detail': cer,
+        'dialogue_cer': dialogue,
         'token_quality': quality['tokens'],
         'segment_quality': quality['segments'],
         'timeline': {
             'source': report.timeline_source,
             'fallback': report.timeline_fallback,
             'quality': report.timeline_quality,
+            'collapsed_runs': len(collapsed),
+            'collapsed_gap_s': round(sum(s['gap_s'] for s in collapsed), 3),
+            'collapsed_chars': sum(s['chars'] for s in collapsed),
+            'overlong_tokens': sum(1 for s in spans
+                                   if s['reason'] == 'overlong_token'),
         },
         'alignment': {
             'status': stats['status'],
             'clean_ratio': stats['clean_ratio'],
             'boundary': stats['boundary'],
+            'signed_start': signed,
+            'error_bands': error_bands(report.alignments),
+            'p90': p90,
             'reliable': reliable_boundary,
         },
         'plan': plan_stats,
@@ -254,10 +507,36 @@ def aggregate(rows: list[dict]) -> dict:
             continue
         total_ref = sum(r['cer_detail']['ref_chars'] for r in ok)
         total_dist = sum(r['cer_detail']['distance'] for r in ok)
+        dialogue_rows = [r.get('dialogue_cer') or {} for r in ok]
+        covered_ref = sum(d.get('covered_ref_chars', 0) for d in dialogue_rows)
+        covered_dist = sum(d.get('covered_distance', 0) for d in dialogue_rows)
+        match_ref = sum(d.get('match_ref_chars', 0) for d in dialogue_rows)
+        match_dist = sum(d.get('match_distance', 0) for d in dialogue_rows)
+        matched_chars = sum(d.get('matched_chars', 0) for d in dialogue_rows)
+        bands = [r['alignment'].get('error_bands') or {} for r in ok]
+        band_n = sum(b.get('n', 0) for b in bands)
+        band_le300 = sum(b.get('le_300', 0) for b in bands)
+        p90_rows = [r['alignment'].get('p90') or {} for r in ok]
+        p90_flags: dict[str, int] = {}
+        for item in p90_rows:
+            for key, value in (item.get('flags') or {}).items():
+                p90_flags[key] = p90_flags.get(key, 0) + int(value)
         out[split] = {
             'episodes': len(ok),
             'macro_cer': _mean([r['cer'] for r in ok]),
             'micro_cer': round(total_dist / total_ref, 4) if total_ref else None,
+            'covered_cer': (round(covered_dist / covered_ref, 4)
+                            if covered_ref else None),
+            'covered_ref_chars': covered_ref,
+            'match_cer': (round(match_dist / match_ref, 4)
+                          if match_ref else None),
+            'match_ref_chars': match_ref,
+            'char_coverage': (round(matched_chars / total_ref, 3)
+                              if total_ref else None),
+            'dialogue_covered_cues': sum(d.get('covered_cues', 0)
+                                         for d in dialogue_rows),
+            'dialogue_match_cues': sum(d.get('match_cues', 0)
+                                       for d in dialogue_rows),
             'match': sum(r['alignment']['status'].get('match', 0) for r in ok),
             'cues': sum(r['ref_cues'] for r in ok),
             'p50_start_ms': _mean([r['alignment']['boundary']['start']['p50_ms']
@@ -266,6 +545,27 @@ def aggregate(rows: list[dict]) -> dict:
                                    for r in ok]),
             'hit100_start': _mean([r['alignment']['boundary']['start']['hit_100']
                                    for r in ok]),
+            'hit300_start': (round(band_le300 / band_n, 3)
+                             if band_n else None),
+            'signed_p50_ms': _mean(
+                [(r['alignment'].get('signed_start') or {}).get('p50_ms')
+                 for r in ok]),
+            'signed_spread_ms': _mean(
+                [(r['alignment'].get('signed_start') or {}).get('spread_ms')
+                 for r in ok]),
+            'early_share': _mean(
+                [(r['alignment'].get('signed_start') or {}).get('early_share')
+                 for r in ok]),
+            'p90_over': sum(item.get('n_over', 0) for item in p90_rows),
+            'p90_flags': p90_flags,
+            'collapsed_runs': sum(r['timeline'].get('collapsed_runs', 0)
+                                  for r in ok),
+            'collapsed_gap_s': round(sum(r['timeline'].get('collapsed_gap_s', 0)
+                                         for r in ok), 3),
+            'collapsed_chars': sum(r['timeline'].get('collapsed_chars', 0)
+                                   for r in ok),
+            'overlong_tokens': sum(r['timeline'].get('overlong_tokens', 0)
+                                   for r in ok),
             'token_zero_ratio': _mean([r['token_quality']['zero_ratio']
                                        for r in ok]),
             'auto_fix': sum(r['plan']['auto'] for r in ok),
@@ -285,6 +585,12 @@ def aggregate(rows: list[dict]) -> dict:
 # Rendering
 # ═══════════════════════════════════════════════════════════════
 
+def _fmt(value, suffix: str = '') -> str:
+    if value is None:
+        return '—'
+    return f'{value}{suffix}'
+
+
 def render_markdown(rows: list[dict], agg: dict, manifest: dict) -> str:
     lines = [
         '# held-out episode benchmark',
@@ -294,18 +600,20 @@ def render_markdown(rows: list[dict], agg: dict, manifest: dict) -> str:
         '- note: reference Japanese CC is a benchmark, not a tuning input '
         '(see eval/protocol.md).',
         '',
-        '| split | id | CER | ref chars | cues | match | P50 起 (ms) | '
-        'P90 起 (ms) | ±100ms | rel | rel P90 | offset | auto | trunc | '
-        'token zero | RTF |',
-        '|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|',
+        '| split | id | CER | ref chars | cues | match | '
+        'P50 起 (ms) | P90 起 (ms) | ±100ms | ±300ms | rel | rel P90 | '
+        'offset | auto | trunc | token zero | RTF |',
+        '|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|',
     ]
     for r in rows:
         if 'error' in r:
             lines.append(f"| {r.get('split', '?')} | {r.get('id', '?')} | "
-                         f"ERROR: {r['error']} | | | | | | | | | | | | | |")
+                         f"ERROR: {r['error']} | | | | | | | | | | | | | | |")
             continue
         b = r['alignment']['boundary']['start']
         rel = r['alignment']['reliable']
+        bands = r['alignment'].get('error_bands') or {}
+        hit300 = (bands.get('le_300', 0) / bands['n']) if bands.get('n') else None
         offset = ('' if r.get('global_offset') is None
                   else f"{r['global_offset']:+.2f}s")
         lines.append(
@@ -313,25 +621,150 @@ def render_markdown(rows: list[dict], agg: dict, manifest: dict) -> str:
             f"{r['ref_chars']} | {r['ref_cues']} | "
             f"{r['alignment']['status'].get('match', 0)} | "
             f"{b['p50_ms']} | {b['p90_ms']} | {b['hit_100']:.1%} | "
+            f"{_fmt(None if hit300 is None else round(100 * hit300, 1), '%')} | "
             f"{rel['n']} | {rel['p90_ms']} | "
             f"{offset} | {r['plan']['auto']} | "
             f"{r['plan'].get('end_truncating_auto', 0)} | "
             f"{r['token_quality']['zero_ratio']:.1%} | {r['rtf']} |")
     if agg:
         lines += ['', '## Aggregate by split', '',
-                  '| split | eps | macro CER | micro CER | match | '
-                  'P50 起 | P90 起 | ±100ms | rel | rel P90 | auto | trunc | '
-                  'token zero | RTF |',
-                  '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
+                  '| split | eps | macro CER | micro CER | '
+                  'match | P50 起 | P90 起 | ±100ms | ±300ms | rel | rel P90 | '
+                  'auto | trunc | token zero | RTF |',
+                  '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
         for split, a in agg.items():
             lines.append(
                 f"| {split} | {a['episodes']} | {a['macro_cer']} | "
-                f"{a['micro_cer']} | {a['match']}/{a['cues']} | "
+                f"{a['micro_cer']} | "
+                f"{a['match']}/{a['cues']} | "
                 f"{a['p50_start_ms']} | {a['p90_start_ms']} | "
-                f"{a['hit100_start']:.1%} | {a['reliable_n']} | "
+                f"{a['hit100_start']:.1%} | "
+                f"{_fmt(None if a.get('hit300_start') is None else round(100 * a['hit300_start'], 1), '%')} | "
+                f"{a['reliable_n']} | "
                 f"{a['p90_reliable_ms']} | {a['auto_fix']} | "
                 f"{a['end_truncating_auto']} | "
                 f"{a['token_zero_ratio']:.1%} | {a['rtf']} |")
+    text_rows = [r for r in rows if 'error' not in r and r.get('dialogue_cer')]
+    if text_rows:
+        lines += ['', '## Text decomposition (reference coverage)', '',
+                  '`char cov` = matched reference characters / all reference '
+                  'characters. `match CER` and `covered CER` score only cues '
+                  'the mapper matched (similarity ≥ 0.85 / ≥ 0.5) against the '
+                  'ASR characters placed under them; context insertions are '
+                  'excluded and remain visible in the global CER.',
+                  '',
+                  '| split | id | ref chars | char cov | no-match chars | '
+                  'match cues | match CER | covered cues | covered CER |',
+                  '|---|---|---:|---:|---:|---:|---:|---:|---:|']
+        for r in text_rows:
+            d = r['dialogue_cer']
+            lines.append(
+                f"| {r['split']} | {r['id']} | {d.get('ref_chars_total', 0)} | "
+                f"{_fmt(d.get('char_coverage'))} | "
+                f"{d.get('unsupported_ref_chars', 0)} | "
+                f"{d.get('match_cues', 0)} | {_fmt(d.get('match_cer'))} | "
+                f"{d.get('covered_cues', 0)} | {_fmt(d.get('covered_cer'))} |")
+        for split, a in (agg or {}).items():
+            if a.get('covered_cer') is None and a.get('match_cer') is None:
+                continue
+            lines.append(
+                f"| {split} | (split) | — | {_fmt(a.get('char_coverage'))} | — | "
+                f"{a.get('dialogue_match_cues', 0)} | {_fmt(a.get('match_cer'))} | "
+                f"{a.get('dialogue_covered_cues', 0)} | {_fmt(a.get('covered_cer'))} |")
+    hole_rows = [r for r in rows if 'error' not in r
+                 and r['timeline'].get('collapsed_runs')]
+    if hole_rows:
+        lines += ['', '## Timeline holes (ForcedAligner collapse)', '',
+                  'A collapsed run is a stretch of dialogue whose timestamps '
+                  'all sit at one instant; the audio in the preceding gap has '
+                  'no time axis and cannot be matched. Re-aligning the same '
+                  'window with the same FA was measured on EP002 and came out '
+                  'worse, so this is a P3 hand-off, not a P2 repair.',
+                  '',
+                  '| split | id | collapsed runs | gap seconds | chars stacked | '
+                  'overlong tokens |',
+                  '|---|---|---:|---:|---:|---:|']
+        for r in hole_rows:
+            t = r['timeline']
+            lines.append(
+                f"| {r['split']} | {r['id']} | {t.get('collapsed_runs', 0)} | "
+                f"{t.get('collapsed_gap_s', 0)} | "
+                f"{t.get('collapsed_chars', 0)} | "
+                f"{t.get('overlong_tokens', 0)} |")
+        for split, a in (agg or {}).items():
+            if not a.get('collapsed_runs'):
+                continue
+            lines.append(
+                f"| {split} | (split) | {a['collapsed_runs']} | "
+                f"{a['collapsed_gap_s']} | {a['collapsed_chars']} | "
+                f"{a['overlong_tokens']} |")
+    attributed = [r for r in rows if 'error' not in r
+                  and (r['alignment'].get('p90') or {}).get('matched')]
+    signed_rows = [r for r in rows if 'error' not in r
+                   and (r['alignment'].get('signed_start') or {}).get('n')]
+    if signed_rows:
+        lines += ['', '## Signed start error (bias vs spread)', '',
+                  'Signed = ASR start − cue start. A tight distribution '
+                  'centred away from 0 is the reference\'s display-onset '
+                  'convention (ADR-009); it is reported, never subtracted '
+                  '(raw stays the gate).',
+                  '',
+                  '| split | id | n | early | P10 (ms) | P50 (ms) | P90 (ms) | '
+                  'P90−P10 (ms) | |err| P50 | |err| P90 |',
+                  '|---|---|---:|---:|---:|---:|---:|---:|---:|---:|']
+        for r in signed_rows:
+            s = r['alignment']['signed_start']
+            lines.append(
+                f"| {r['split']} | {r['id']} | {s['n']} | "
+                f"{s['early_share']:.1%} | {s['p10_ms']} | {s['p50_ms']} | "
+                f"{s['p90_ms']} | {s['spread_ms']} | {s['abs_p50_ms']} | "
+                f"{s['abs_p90_ms']} |")
+        for split, a in (agg or {}).items():
+            if a.get('signed_p50_ms') is None:
+                continue
+            lines.append(
+                f"| {split} | (split mean) | — | "
+                f"{_fmt(None if a.get('early_share') is None else round(100 * a['early_share'], 1), '%')} | "
+                f"— | {a['signed_p50_ms']} | — | {a['signed_spread_ms']} | "
+                f"— | — |")
+    if attributed:
+        lines += ['', '## P90 attribution (matched cues, |start error| > 300 ms)',
+                  '',
+                  'A cue can carry several flags; `plain` means no cheap '
+                  'explanation (inspect by hand). `stretched`/`collapsed`/'
+                  '`zero_span` describe the ForcedAligner span, not the cue.',
+                  '',
+                  '| split | id | matched | over | zero span | collapsed | '
+                  'stretched | short cue | low conf | ambiguous | repeat | '
+                  'plain |',
+                  '|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
+        for r in attributed:
+            p90 = r['alignment']['p90']
+            flags = p90.get('flags') or {}
+            lines.append(
+                f"| {r['split']} | {r['id']} | {p90.get('matched', 0)} | "
+                f"{p90.get('n_over', 0)} | {flags.get('zero_span', 0)} | "
+                f"{flags.get('collapsed', 0)} | {flags.get('stretched', 0)} | "
+                f"{flags.get('short_cue', 0)} | "
+                f"{flags.get('low_confidence', 0)} | "
+                f"{flags.get('ambiguous', 0)} | {flags.get('repeat', 0)} | "
+                f"{flags.get('plain', 0)} |")
+        examples = []
+        for r in attributed:
+            for item in (r['alignment']['p90'].get('examples') or [])[:5]:
+                examples.append((r['id'], item))
+        if examples:
+            lines += ['', '### Largest start errors', '',
+                      '| id | cue | start error (ms) | chars | sim | conf | '
+                      'flags | reference text |',
+                      '|---|---:|---:|---:|---:|---|---|---|']
+            for ep_id, item in examples:
+                text = (item.get('cue_text') or '').replace('|', '/')
+                lines.append(
+                    f"| {ep_id} | {item.get('cue_index')} | "
+                    f"{item.get('start_error_ms')} | {item.get('cue_chars')} | "
+                    f"{item.get('similarity')} | {item.get('confidence') or '—'} | "
+                    f"{', '.join(item.get('flags') or ['plain'])} | {text} |")
     errors = [r for r in rows if 'error' in r]
     if errors:
         lines += ['', '## Errors', '']
@@ -370,7 +803,8 @@ def main(argv: list[str] | None = None) -> int:
                         help='force a timestamp source (diagnostics)')
     parser.add_argument('--global-offset', action='store_true',
                         help='estimate and apply one whole-file offset first '
-                             '(mirrors fix_by_asr)')
+                             '(diagnostic only: production fix_by_asr is '
+                             'raw by default)')
     parser.add_argument('--output', default='')
     parser.add_argument('--json-out', default='')
     parser.add_argument('--limit', type=int, default=0)

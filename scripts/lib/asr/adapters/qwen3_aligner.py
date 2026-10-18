@@ -53,7 +53,11 @@ def build(config: ASRConfig, **kwargs) -> Qwen3ForcedAlignerAdapter:
         client = Qwen3WorkerClient(
             python_exe=kwargs.pop('python_exe', None) or config.python
             or QWEN_PYTHON or None,
-            asr_model=kwargs.pop('asr_model', None) or ASR_MODEL,
+            # The worker hosts the forced aligner on top of the ASR model, so
+            # a caller's local `config.model` path must reach it too (otherwise
+            # an offline copy still resolves to the Hub default).
+            asr_model=(kwargs.pop('asr_model', None) or config.model
+                       or ASR_MODEL),
             aligner_model=(kwargs.pop('aligner_model', None)
                            or config.aligner_model or ALIGNER_MODEL),
             device=kwargs.pop('device', None) or config.device or ASR_DEVICE,
