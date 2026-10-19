@@ -120,6 +120,12 @@ def test_load_mappings_filters_metadata_and_empty_values(tmp_path):
     assert '_comment' not in glossary
 
 
+def test_load_mappings_accepts_utf8_bom(tmp_path):
+    path = tmp_path / 'noun_mappings.json'
+    path.write_text('\ufeff' + json.dumps({'サリー': '莎莉'}), encoding='utf-8')
+    assert tr.load_mappings(str(path))[1] == {'サリー': '莎莉'}
+
+
 def test_load_mappings_missing_file_is_empty():
     assert tr.load_mappings('no-such-file.json') == ('', {})
 

@@ -3,9 +3,14 @@
 import pytest
 
 from lib.translation.qa import (
-    chrf_score, count_kana, cue_violations, glossary_misses,
+    chrf_score, clean_text, count_kana, cue_violations, glossary_misses,
     is_untranslated, qa_report,
 )
+
+
+def test_clean_text_strips_html_and_ass_tags():
+    assert clean_text('<i>你好</i>') == '你好'
+    assert clean_text('{\\an8}你好') == '你好'
 
 
 def test_glossary_longest_match_accepts_full_name():

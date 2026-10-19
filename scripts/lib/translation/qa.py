@@ -19,9 +19,12 @@ def count_kana(text: str) -> int:
     return len(KANA_RE.findall(text or ''))
 
 
+TAG_RE = re.compile(r'<[^>]+>|\{[^}]*\}')
+
+
 def clean_text(text: str) -> str:
-    """Visible characters for length/CPS: drop whitespace and line breaks."""
-    return re.sub(r'\s+', '', text or '')
+    """Visible characters for length/CPS: drop whitespace, HTML/ASS tags."""
+    return re.sub(r'\s+', '', TAG_RE.sub('', text or ''))
 
 
 def is_untranslated(source: str, target: str) -> bool:

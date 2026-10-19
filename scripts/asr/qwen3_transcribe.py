@@ -170,6 +170,9 @@ def main(argv: list[str] | None = None) -> int:
     if not os.path.exists(audio_path):
         print(f'[qwen3] audio not found: {audio_path}', file=sys.stderr)
         return 2
+    # The worker process may run with a different cwd (repo root), so a
+    # project-relative path would be missing on the worker side.
+    audio_path = os.path.abspath(audio_path)
 
     context = args.context or _read_context(args.context_file)
     print(f'[qwen3] engine={args.engine} lang={args.language} '
