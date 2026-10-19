@@ -117,3 +117,41 @@ def test_cli_namefix_writes_approved_copies(tmp_path, monkeypatch):
     assert '佐武と市' in fixed
     # the source directory is untouched
     assert 'サブト位置' in (ja / 'EP001.srt').read_text(encoding='utf-8')
+
+def test_cli_namefix_in_place_backs_up_source(tmp_path, monkeypatch):
+    ja = tmp_path / 'ja'
+    ja.mkdir()
+    (ja / 'EP001.srt').write_text(
+        "1\n00:00:01,000 --> 00:00:03,000\n闇を切り裂く男…世のサブト位置\n\n",
+        encoding='utf-8')
+    glossary = tmp_path / 'g.json'
+    glossary.write_text(json.dumps(GLOSSARY, ensure_ascii=False),
+                        encoding='utf-8')
+    meta = tmp_path / 'm.json'
+    meta.write_text(json.dumps(META, ensure_ascii=False), encoding='utf-8')
+
+    def fake_review(items, brief, **kwargs):
+        return [dict(items[0], verdict='accept', reason='固定句')]
+
+    monkeypatch.setattr('lib.review.context_agent.review_name_repairs',
+                        fake_review)
+    rc = context_review.main([
+        '--project', str(tmp_path), '--glossary', str(glossary),
+        '--meta', str(meta), '--ja-dir', str(ja), '--mode', 'namefix',
+        '--in-place', '--report', str(tmp_path / 'r.json')])
+    assert rc == 0
+    assert '佐武と市' in (ja / 'EP001.srt').read_text(encoding='utf-8')
+    assert 'サブト位置' in (ja / 'EP001.srt.bak').read_text(encoding='utf-8')
+
+def test_honorific_suffix_is_preserved_in_proposals():
+    proposals = propose_repairs('サブ君は', _entries())
+    assert len(proposals) == 1
+    assert proposals[0]['from'] == 'サブ君'
+    assert proposals[0]['to'] == '佐武君'
+
+def test_split_honorific_handles_kun_readings():
+    from lib.asr.namefix import split_honorific
+    assert split_honorific('サブ君', 'サブクン') == ('君', 'サブ')
+    assert split_honorific('サブ君', 'サブ君') == ('君', 'サブ')
+    assert split_honorific('サブちゃん', 'サブチャン') == ('ちゃん', 'サブ')
+    assert split_honorific('サブ', 'サブ') == ('', 'サブ')

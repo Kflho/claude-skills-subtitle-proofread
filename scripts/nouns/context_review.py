@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Context review CLI: near-term promotion + style flags, grounded in a series profile.
 
 Examples:
@@ -26,7 +26,9 @@ import argparse
 import glob
 import json
 import os
+import shutil
 import sys
+import time
 
 import lib._path  # noqa: F401,E402
 
@@ -36,6 +38,16 @@ from lib.review.context_agent import (  # noqa: E402
     apply_approvals, review_near_terms, review_style,
 )
 from lib.subtitle_io import read_subtitles, write_subtitles  # noqa: E402
+
+
+def _backup(path: str) -> str:
+    """One .bak per file; a timestamped name if a .bak already exists."""
+    bak = path + '.bak'
+    if os.path.exists(bak):
+        stamp = time.strftime('%Y%m%d%H%M%S')
+        bak = f'{path}.{stamp}.bak'
+    shutil.copyfile(path, bak)
+    return bak
 
 
 def _load_candidates(path: str) -> list[dict]:
@@ -93,6 +105,8 @@ def main(argv=None):
     parser.add_argument('--allow-near', action='store_true',
                         help='namefix mode: also propose one-mora mismatches')
     parser.add_argument('--max-proposals', type=int, default=120)
+    parser.add_argument('--in-place', action='store_true', default=False,
+                        help='namefix/oped: write the source files (one .bak per file)')
     parser.add_argument('--out-dir', default='',
                         help='namefix mode: write corrected copies here')
     parser.add_argument('--sample', type=int, default=20,
@@ -188,10 +202,15 @@ def main(argv=None):
                 cues_by_ep[os.path.basename(path)[:-4]] = read_subtitles(
                     path, mark_garbled=False)
             new_cues, changes = apply_text_keyed(cues_by_ep, filled)
-            out_dir = args.out_dir or os.path.join(args.project, 'temp',
-                                                   'oped_textkeyed')
-            os.makedirs(out_dir, exist_ok=True)
             touched = sorted({c['episode'] for c in changes})
+            if args.in_place:
+                out_dir = zh_dir
+                for episode in touched:
+                    _backup(os.path.join(zh_dir, f'{episode}.srt'))
+            else:
+                out_dir = args.out_dir or os.path.join(args.project, 'temp',
+                                                       'oped_textkeyed')
+                os.makedirs(out_dir, exist_ok=True)
             for episode in touched:
                 write_subtitles(os.path.join(out_dir, f'{episode}.srt'),
                                 new_cues[episode])
@@ -248,8 +267,9 @@ def main(argv=None):
         for decision in accepted:
             by_episode.setdefault(decision['episode'], []).append(decision)
         written = []
-        if args.out_dir and by_episode:
-            os.makedirs(args.out_dir, exist_ok=True)
+        if (args.out_dir or args.in_place) and by_episode:
+            if args.out_dir:
+                os.makedirs(args.out_dir, exist_ok=True)
             for episode, rows in by_episode.items():
                 path, cues = files[episode]
                 repaired = list(cues)
@@ -258,7 +278,11 @@ def main(argv=None):
                     text = str(repaired[idx].get('text') or '')
                     repaired[idx] = dict(repaired[idx],
                                          text=apply_repairs(text, [row]))
-                target = os.path.join(args.out_dir, f'{episode}.srt')
+                if args.in_place:
+                    _backup(path)
+                    target = path
+                else:
+                    target = os.path.join(args.out_dir, f'{episode}.srt')
                 write_subtitles(target, repaired)
                 written.append(target)
         payload = {'mode': 'namefix', 'profile': profile_path,

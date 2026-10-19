@@ -37,6 +37,22 @@ from dataclasses import dataclass, field
 MIN_EXACT_LEN = 2
 MIN_NEAR_LEN = 5
 
+# honorifics that must survive a repair (サブ君 → 佐武君, never 佐武)
+SUFFIXES = (('ちゃん', 'チャン'), ('さん', 'サン'), ('君', 'キミ'),
+            ('君', 'クン'), ('殿', 'ドノ'), ('様', 'サマ'), ('先生', 'センセイ'))
+
+
+def split_honorific(surface: str, reading: str):
+    """Return (honorific, core_reading) so a repair keeps 君/さん/ちゃん."""
+    for honorific, kana in SUFFIXES:
+        if not surface.endswith(honorific):
+            continue
+        if reading.endswith(kana):
+            return honorific, reading[:-len(kana)]
+        if reading.endswith(honorific):
+            return honorific, reading[:-len(honorific)]
+    return '', reading
+
 _SKIP_POS = ('助詞', '助動詞', '動詞', '形容詞', '副詞', '接続詞', '連体詞',
              '記号', '感動詞')
 
@@ -175,7 +191,15 @@ def propose_repairs(text: str, entries: list[NameEntry], tokenizer=None,
             surface = ''.join(s[2] for s in window)
             if len(reading) < MIN_EXACT_LEN:
                 continue
+
+            # keep honorifics: サブ君 → 佐武君 (not 佐武)
+            suffix, core_reading = split_honorific(surface, reading)
+
             entry = index.get(reading)
+            if entry is None and suffix:
+                entry = index.get(core_reading)
+                if entry is not None:
+                    reading = core_reading
             distance = 0
             if entry is not None:
                 if not _has_katakana(surface) and surface not in allow:
@@ -200,8 +224,8 @@ def propose_repairs(text: str, entries: list[NameEntry], tokenizer=None,
                 continue
             start, end = window[0][0], window[-1][1]
             proposals.append({'start': start, 'end': end, 'from': surface,
-                              'to': entry.canonical_ja, 'reading': reading,
-                              'distance': distance,
+                              'to': entry.canonical_ja + suffix,
+                              'reading': reading, 'distance': distance,
                               'context': text})
             used.update(range(i, j))
             break

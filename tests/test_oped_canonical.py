@@ -140,3 +140,32 @@ def test_cli_oped_writes_filled_report_without_touching_srt(tmp_path, monkeypatc
     data = json.loads(report.read_text(encoding='utf-8'))
     assert data['candidates'][0]['canonical'] == '佐武与市捕物控'
     assert (srt / 'EP001.srt').read_text(encoding='utf-8') == before
+
+def test_cli_text_keyed_in_place_backs_up(tmp_path, monkeypatch):
+    candidates = tmp_path / 'cands.json'
+    candidates.write_text(json.dumps({'candidates': [
+        {'region': 'OP', 'episode_count': 3, 'variants': {'旧译法': 2},
+         'canonical': ''}]}, ensure_ascii=False), encoding='utf-8')
+    glossary = tmp_path / 'g.json'
+    glossary.write_text(json.dumps({'サブ': '佐武'}, ensure_ascii=False),
+                        encoding='utf-8')
+    meta = tmp_path / 'm.json'
+    meta.write_text('{}', encoding='utf-8')
+    zh = tmp_path / 'translated' / 'zh'
+    zh.mkdir(parents=True)
+    (zh / 'EP001.srt').write_text(
+        "1\n00:00:01,000 --> 00:00:02,000\n旧译法\n\n", encoding='utf-8')
+
+    def fake_chat(messages, **kwargs):
+        return json.dumps({'decisions': [{'id': 0, 'canonical': '规范句'}]},
+                          ensure_ascii=False), ''
+
+    monkeypatch.setattr('lib.llm.call_chat', fake_chat)
+    rc = context_review.main([
+        '--project', str(tmp_path), '--glossary', str(glossary),
+        '--meta', str(meta), '--candidates', str(candidates), '--mode', 'oped',
+        '--apply-text-keyed', '--in-place',
+        '--report', str(tmp_path / 'r.json')])
+    assert rc == 0
+    assert '规范句' in (zh / 'EP001.srt').read_text(encoding='utf-8')
+    assert '旧译法' in (zh / 'EP001.srt.bak').read_text(encoding='utf-8')
