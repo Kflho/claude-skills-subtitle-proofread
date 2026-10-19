@@ -418,6 +418,30 @@ judge-refiner）、IWSLT 2026 Subtitling（长度/压缩约束）、gpt-subtrans
 - AED speech 边界（EP001）：CER .349 / P50 113ms / coverage .461 变好，但
   P90 2792ms、可靠 P90 720ms 变差 → **不上线**；先修 speech 区间噪声/只在长 gap 切。
 
+## 0.14 新模型用法调研（2026-10）
+
+**关键发现：Qwen3-FA 的用法只用了“ASR 后出时间戳”，没用来直接对齐 CC 文本。**
+
+- 官方：Qwen3-FA 支持任意文本单元、最多 5 分钟、11 语言；Qwen3-ASR 支持
+  Speech / Singing Voice / Songs with BGM，且 `transcribe(context=...)` 是
+  system message（可放 hotwords）。
+- 探针（EP001 前 60s，12 条 CC）：原始音频直接 FA，第一个 token 0.88s
+  （CC 4.47s，被 BGM 拉早）；**FireRedVAD speech 遮罩后 FA，第一个 token 4.40s**
+  （误差 ~70ms）。
+- 结论：正确用法是 **FireRedVAD VAD 取 speech 区 + Qwen3-FA 直接对齐 CC 文本**，
+  不是 ASR 文本→token→自写 mapper。现有 ASR 第一 token 也是 0.88s，说明同样被
+  音乐带偏。
+- 其他：
+  - Qwen3-ASR 的 context/hotwords 我们基本没用；应把 series glossary 当前置
+    hotwords，而不是只在翻译后 repair。
+  - FireRedVAD 官方 AED 输出 `event2timestamps`；适合 OP/ED/speech 分类，不适合
+    强行切块（已实测 P90 变差）。
+  - Mel-Band 有现成 `melband-roformer-infer` 包；Qwen3-ASR 官方支持 Songs with BGM，
+    先测“原始 vs 分离人声”再决定是否接，不自己写推理。
+  - 翻译：gpt-subtrans/VideoLingo 已有 summary/scene/terminology/retry 结构；
+    我们保留 pairs + series glossary，禁止并条回退，下一步 summary/MQM，不重写翻译器。
+- 详见 `docs/research-2026-10-model-usage.md`。
+
 ## 1. 状态总览
 
 | 阶段 | 内容 | 状态 | 验收 |
