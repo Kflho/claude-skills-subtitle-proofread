@@ -39,6 +39,10 @@ translated/zh/<EP>.qa.json
 # 视频直出：<output>/ja/<EP>.srt + <output>/zh/<EP>.srt + qa.json
 ```
 
+> `video_to_zh.py` 是 **A 转写 + C 翻译** 的快捷粗剪，不替代原有完整 A–D：
+> 专名审查、`auto_translate`、`oped_fixer`、`polish_zh` 见
+> [references/workflows.md §5](references/workflows.md#场景-5完整流程视频--成品中文)。
+
 详细步骤：[references/quickstart.md](references/quickstart.md) ·
 环境配置：[references/setup.md](references/setup.md) ·
 翻译参数：[references/translation.md](references/translation.md)。

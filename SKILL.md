@@ -112,7 +112,9 @@ python scripts/video_to_zh.py \
 ```
 
 输出 `<输出目录>/ja/<EP>.srt`（Qwen3 转写）+ `<输出目录>/zh/<EP>.srt`（中文）+ QA。
-注意：ASR 是句子级、raw text 有错；这是粗剪，不是最终字幕。
+注意：ASR 是句子级、raw text 有错；这是**A+C 快捷粗剪**，不是原有完整 A–D。
+专名审查、`auto_translate`、`oped_fixer`、`polish_zh` 仍按
+[references/workflows.md](references/workflows.md) 的完整流程走。
 
 ### 环境设置
 

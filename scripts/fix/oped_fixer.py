@@ -38,7 +38,8 @@ import argparse
 from collections import defaultdict, Counter
 from dataclasses import dataclass, field
 
-import lib._path  # noqa: F401
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import lib._path  # noqa: F401,E402
 from lib.whisper_utils import (
     OP_BOUNDARY_SEC, ED_BOUNDARY_SEC,
     parse_srt, parse_ass_cues, parse_subtitles, write_srt,

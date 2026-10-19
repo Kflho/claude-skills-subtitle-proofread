@@ -53,6 +53,10 @@ python scripts/video_to_zh.py \
 - raw ASR 文本可能有错（`水田→水電`），翻译会继承；这是视频直出的质量上限，不是模型不会；
 - OP/ED 仍未覆盖。
 
+> **这不是原有完整流程的替代品。** `video_to_zh.py` 只做 A（转写）+ C（翻译）的快捷粗剪；
+> 原有的 B（专名审查）、D（`auto_translate` / `oped_fixer` / `polish_zh`）仍在
+> [workflows.md §5](workflows.md#场景-5完整流程视频--成品中文)。要交付成品，走那条 A–D。
+
 ## 3. 整条 pipeline（修复 + 翻译）
 
 ```bash

@@ -43,7 +43,8 @@ import tempfile
 import urllib.request
 from collections import defaultdict
 
-import lib._path  # noqa: F401
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import lib._path  # noqa: F401,E402
 from lib.config import (LLM_API_KEY, LLM_MODEL, LLM_BASE_URL,
                         LLM_MODEL_DEFAULT, LLM_BASE_URL_DEFAULT,
                         WHISPER_CLI, WHISPER_MODEL,

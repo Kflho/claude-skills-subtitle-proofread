@@ -100,6 +100,9 @@ python "<scripts>/auto_translate.py" \
 
 > 起点：仅有视频 → 终点：中文 SRT（专名统一、翻译一致）
 
+> 快捷粗剪可用 `video_to_zh.py`（只做 A 转写 + C 翻译）；它不是下面 A–D 的替代。
+> 要专名审查、auto_translate、OP/ED、润色，仍走本场景完整流程。
+
 ```
 Phase A: Whisper 转录
   whisper_batch_transcribe.py  →  日语参考字幕/
