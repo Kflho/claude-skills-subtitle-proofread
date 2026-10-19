@@ -53,6 +53,29 @@ python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json \
 **🤖 审查点（不可跳过）**：dry-run 之后、`--apply` 之前，审查 `temp/noun_map.json`：
 定标准名、定 scope、删误判变体（如把标题「铁腕阿童木」并进「阿童木」变体）。
 
+**变体归一 + 闸门**（分批翻译会漂；词表注入解决大部分，剩下用确定性归一）：
+
+```bash
+# 预览 / 写盘：把人工确认过的 aliases 变体改回规范写法（.bak 备份）
+python "<scripts-dir>/nouns/normalize_variants.py" \
+  --zh-dir "<中文翻译>" --glossary "<项目>/glossaries/<series>.json" \
+  --meta "<项目>/glossaries/<series>.meta.json" --dry-run
+python "<scripts-dir>/nouns/normalize_variants.py" ... --apply
+
+# 候选（只读）：哪些变体还没进表
+python "<scripts-dir>/nouns/normalize_variants.py" ... \
+  --discover --ja-dir "<日文参考>" --report temp/variants_candidates.json
+
+# 闸门：kana / echo / 变体 / CPS 超阈值就退出 1
+python "<scripts-dir>/eval/text_gate.py" --zh-dir "<中文翻译>" \
+  --glossary "<项目>/glossaries/<series>.json" --meta "<...meta.json>" \
+  --source-dir "<日文参考>" --max-kana 0 --max-variants 0
+```
+
+> 实测：EP051 无词表 2/15 规范写法，带词表 15/15；52 集副本上变体 197 → 0。
+> 别名必须人工确认：`圣诞`（圣诞老人）这类曾被误改成「三太」，已进回归测试。
+> 设计见 `sk_01_dev/docs/glossary-variants.md`。
+
 **scope**：`global` = 跨全集；`per_episode` = 仅该集；`auto` = episodes ≥ 2 取 global。
 
 **续跑/失败**：大项目先 `--status` 确认无 ⚠ 再聚合；中断用 `--resume`。
