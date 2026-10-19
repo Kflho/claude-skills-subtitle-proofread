@@ -289,6 +289,7 @@ class Qwen3WorkerClient:
     def transcribe(self, audio_path: str, *, language: str = 'ja',
                    context: str = '', timestamps: bool = True,
                    chunk_sec: float | None = None,
+                   chunk_boundaries: list[float] | None = None,
                    timeout: float | None = None) -> ASRResult:
         payload = {
             'cmd': 'transcribe',
@@ -299,6 +300,8 @@ class Qwen3WorkerClient:
         }
         if chunk_sec is not None and float(chunk_sec) > 0:
             payload['chunk_sec'] = float(chunk_sec)
+        if chunk_boundaries:
+            payload['chunk_boundaries'] = [float(b) for b in chunk_boundaries]
         result = self.request(payload, timeout=timeout)
         out = ASRResult.from_dict(result)
         if not out.engine:

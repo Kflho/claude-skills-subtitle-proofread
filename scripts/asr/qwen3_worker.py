@@ -254,13 +254,16 @@ class QwenRuntime:
             want_ts = False
 
         chunk_sec = float(payload.get('chunk_sec', self.args.chunk_sec) or 0.0)
+        chunk_boundaries = payload.get('chunk_boundaries') or None
         _log(f'transcribe {Path(audio).name} lang={requested_language} '
-             f'ctx={len(context)}ch timestamps={want_ts} chunk={chunk_sec}s')
+             f'ctx={len(context)}ch timestamps={want_ts} chunk={chunk_sec}s '
+             f'boundaries={len(chunk_boundaries) if chunk_boundaries else 0}')
 
-        if chunk_sec > 0:
+        if chunk_sec > 0 or chunk_boundaries:
             text, tokens, segments, duration, n_chunks = self._transcribe_chunked(
                 audio, requested_language=requested_language,
-                context=context, want_ts=want_ts, chunk_sec=chunk_sec)
+                context=context, want_ts=want_ts, chunk_sec=chunk_sec,
+                chunk_boundaries=chunk_boundaries)
         else:
             results = self.model.transcribe(
                 audio=audio,
@@ -295,12 +298,14 @@ class QwenRuntime:
                 'aligner': self.args.aligner or None,
                 'chunk_sec': chunk_sec,
                 'chunks': n_chunks,
+                'chunk_boundaries': list(chunk_boundaries or []),
             },
         )
         return result.to_dict()
 
     def _transcribe_chunked(self, audio: str, *, requested_language: str,
-                            context: str, want_ts: bool, chunk_sec: float):
+                            context: str, want_ts: bool, chunk_sec: float,
+                            chunk_boundaries=None):
         """Chunk long audio ourselves, then offset/merge per-chunk results.
 
         qwen_asr's own long-audio path splits at 180 s; on this material the
@@ -308,13 +313,28 @@ class QwenRuntime:
         (measured: 48% zero-duration tokens, 5-minute speech gaps).  Doing
         the split here keeps every alignment request short and gives us the
         offsets explicitly.
+
+        ``chunk_boundaries`` (seconds) lets the caller cut at AED speech gaps
+        instead of fixed ``chunk_sec`` intervals.
         """
         from qwen_asr.inference.utils import (
             SAMPLE_RATE, load_audio_any, split_audio_into_chunks,
         )
 
         wav, sr = load_audio_any(audio)
-        parts = split_audio_into_chunks(wav=wav, sr=sr, max_chunk_sec=chunk_sec)
+        if chunk_boundaries:
+            duration = len(wav) / float(sr)
+            cuts = sorted({0.0, duration, *[float(b) for b in chunk_boundaries
+                                          if 0 < float(b) < duration]})
+            parts = []
+            for start, end in zip(cuts, cuts[1:]):
+                if end - start < 0.1:
+                    continue
+                parts.append((wav[int(start * sr):int(end * sr)], start))
+            _log(f'chunked by AED boundaries: {len(parts)} chunks')
+        else:
+            parts = split_audio_into_chunks(wav=wav, sr=sr,
+                                            max_chunk_sec=chunk_sec)
         joiner = '' if language_name(requested_language) == 'Japanese' else ' '
 
         texts: list[str] = []

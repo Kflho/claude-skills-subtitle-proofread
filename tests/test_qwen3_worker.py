@@ -413,6 +413,25 @@ class TestChunkedTranscribe:
         chunk_audio, sample_rate = model.calls[0]['audio']
         assert (len(chunk_audio), sample_rate) == (5, 1.0)
 
+    def test_chunk_boundaries_split_at_given_cuts(self, tmp_path, fake_qwen_asr):
+        fake_qwen_asr(duration=10.0)
+        model = FakeModel([
+            [_part('あ。', _item('あ', 0.2, 0.4))],
+            [_part('い。', _item('い', 0.2, 0.4))],
+            [_part('う。', _item('う', 0.2, 0.4))],
+        ])
+        runtime = _runtime(model, chunk_sec=0.0)
+
+        result = runtime.transcribe({
+            'audio': _audio_path(tmp_path), 'timestamps': True,
+            'chunk_boundaries': [2.0, 5.0],
+        })
+
+        assert len(model.calls) == 3
+        assert result['meta']['chunks'] == 3
+        assert result['meta']['chunk_boundaries'] == [2.0, 5.0]
+        assert [t['start'] for t in result['tokens']] == [0.2, 2.2, 5.2]
+
     def test_long_audio_offsets_are_merged(self, tmp_path, fake_qwen_asr):
         fake_qwen_asr(duration=130.0)
         model = FakeModel([
