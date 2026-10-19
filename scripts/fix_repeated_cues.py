@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Whisper 重复检测 + 切片修复 — 独立后处理脚本。
 
 检测连续高度相似的 cue（Whisper 幻觉重复），切片音频重跑 Whisper 修复。
@@ -143,6 +143,11 @@ def resolve_qwen_paths():
     return python, asr, aligner
 
 
+def _valid_text(text: str) -> bool:
+    return any(ch.isalnum() or '\u3040' <= ch <= '\u30ff' or '\u4e00' <= ch <= '\u9fff'
+               for ch in str(text or ''))
+
+
 def qwen_result_to_segs(result: dict) -> list[dict]:
     """Normalise worker output to ``[{text,start_s,end_s}]`` (slice-relative)."""
     result = result or {}
@@ -177,7 +182,7 @@ class QwenSliceClient:
         self._req_id += 1
         rid = str(self._req_id)
         request = {'cmd': 'transcribe', 'id': rid, 'audio': wav_path,
-                   'language': self._lang, 'timestamps': True}
+                   'language': self._lang, 'timestamps': False}
         try:
             self._proc.stdin.write(json.dumps(request) + '\n')
             self._proc.stdin.flush()
@@ -232,6 +237,12 @@ def fix_group(group_indices, cues, video_path, lang='ja',
     first_idx = group_indices[0]
     last_idx = group_indices[-1]
 
+    # Qwen works on the group itself: its segment timestamps are slice-relative
+    # and were not reliable enough to rebuild the timeline, so the replacement
+    # reuses the original group span instead.
+    if engine == 'qwen3':
+        context_window = 0
+
     # Audio slice range (with context padding)
     ctx_start_idx = max(0, first_idx - context_window)
     ctx_end_idx = min(len(cues) - 1, last_idx + context_window)
@@ -260,10 +271,50 @@ def fix_group(group_indices, cues, video_path, lang='ja',
         return cues, {'error': str(e)}
 
     if engine == 'qwen3' and qwen is not None:
-        kept = qwen.transcribe(slice_path)
-    else:
-        segs = run_whisper(slice_path, WHISPER_CLI, WHISPER_MODEL, language=lang)
-        kept, discarded = filter_low_confidence(segs)
+        segs = qwen.transcribe(slice_path)
+        text = ' '.join(s['text'].strip() for s in segs if s['text'].strip()).strip()
+        if not _valid_text(text):
+            text = ''
+        group_cues = cues[first_idx:last_idx + 1]
+        before = cues[:first_idx]
+        after = cues[last_idx + 1:]
+        span_start = cues[first_idx]['start_s']
+        span_end = cues[last_idx]['end_s']
+        similar = bool(text) and any(
+            text_similarity(text, str(c.get('text') or '')) >= 0.6
+            for c in group_cues)
+        if span_end - span_start > 12.0:
+            print(f'    -> group spans {span_end - span_start:.1f}s, keeping as-is')
+            result = before + group_cues + after
+            new_count = len(group_cues)
+        elif not text:
+            print(f'    -> Qwen returned nothing, deleting {len(group_indices)} cues')
+            result = before + after
+            new_count = 0
+        elif similar:
+            print(f'    -> Qwen agrees with the repeated text, keeping as-is')
+            result = before + group_cues + after
+            new_count = len(group_cues)
+        else:
+            print(f'    -> Qwen text replaces {len(group_cues)} cue(s)')
+            result = before + [{'start_s': span_start, 'end_s': span_end,
+                                'text': text}] + after
+            new_count = 1
+        for cue in result:
+            cue['start'] = format_tc(cue['start_s'])
+            cue['end'] = format_tc(cue['end_s'])
+        for i, cue in enumerate(result, 1):
+            cue['index'] = i
+        try:
+            os.unlink(slice_path)
+            os.rmdir(tmpdir)
+        except OSError:
+            pass
+        return result, {'original_count': len(group_indices),
+                        'new_count': new_count, 'still_similar': similar}
+
+    segs = run_whisper(slice_path, WHISPER_CLI, WHISPER_MODEL, language=lang)
+    kept, discarded = filter_low_confidence(segs)
 
     # Map Whisper output back to absolute timeline
     new_cues = []
@@ -349,7 +400,9 @@ def process_one(srt_path, video_path, lang='ja', similarity_threshold=0.85,
 
     total_fixed = 0
     reports = []
-    for indices in groups:
+    for indices in reversed(groups):
+        if not indices or indices[-1] >= len(cues):
+            continue
         cues, report = fix_group(indices, cues, video_path, lang,
                                  dry_run=dry_run, engine=engine, qwen=qwen)
         reports.append(report)
