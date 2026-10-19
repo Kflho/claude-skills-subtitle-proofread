@@ -1,4 +1,3 @@
-dev/
 __pycache__/
 *.pyc
 .venv-qwen/
@@ -8,3 +7,6 @@ eval/manifest.json
 .coverage
 htmlcov/
 coverage.xml
+
+# 本机配置（绝对路径、API 来源）：只在本机保存，不随仓库分发
+sk_01_dev/LOCAL_ENV.md
