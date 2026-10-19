@@ -76,6 +76,27 @@ python "<scripts-dir>/eval/text_gate.py" --zh-dir "<中文翻译>" \
 > 别名必须人工确认：`圣诞`（圣诞老人）这类曾被误改成「三太」，已进回归测试。
 > 设计见 `sk_01_dev/docs/glossary-variants.md`。
 
+**语境审查 agent**（专名是否符合作品世界 + 语体）：
+
+```bash
+# 背景档案（年代/人物/固定用语）+ 近似词候选判定（promote/reject/uncertain）
+python "<scripts-dir>/nouns/context_review.py" --project "<项目>" \
+  --glossary "<项目>/glossaries/<series>.json" \
+  --meta "<项目>/glossaries/<series>.meta.json" \
+  --candidates "<项目>/temp/variants_candidates.json" --mode near --dry-run
+# 批准后写 _meta.aliases（备份），再跑 normalize_variants
+python "<scripts-dir>/nouns/context_review.py" ... --mode near --apply-approvals
+
+# 语体审查：确定性检测 + 定向改写（只出 patch，不写字幕）
+python "<scripts-dir>/nouns/context_review.py" ... --mode style --sample 3
+python "<scripts-dir>/nouns/context_review.py" ... --mode style-fix
+```
+
+> 实测（EP051，300 条）：**在 system prompt 里加风格块没有可测收益**（加与不加
+> 现代语/方言命中 9–10、语体标准差 0.096–0.102），所以没有 `--style` 开关；
+> 有效路径是「检测 → 定向改写 → 约束校验」（52 集：85 条 → 接受 69、命中 70→0）。
+> 设计见 `sk_01_dev/docs/style-context.md`。
+
 **scope**：`global` = 跨全集；`per_episode` = 仅该集；`auto` = episodes ≥ 2 取 global。
 
 **续跑/失败**：大项目先 `--status` 确认无 ⚠ 再聚合；中断用 `--resume`。
