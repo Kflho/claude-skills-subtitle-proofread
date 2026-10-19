@@ -1,4 +1,4 @@
-﻿# 设计文档已迁移
+# 设计文档已迁移
 
 sk_01_dev/docs/ 下的这些文件已移到仓库的 eferences/design/，随 harness 同步：
 

@@ -120,3 +120,11 @@ python scripts/harness/init_local.py --check
 ```
 
 期望全绿/无 problems；有失败先修环境，不要继续跑 pipeline。
+
+## 9. 隐私检查
+
+`ash
+python scripts/harness/privacy_check.py
+``n
+扫描 git 跟踪文件里的密钥模式与 home 路径；返回非 0 就先修，再提交。
+

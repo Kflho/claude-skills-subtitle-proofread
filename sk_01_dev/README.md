@@ -25,10 +25,10 @@ skill 本体仍然只保留用户上手文档（`SKILL.md`、`README.md`、`refe
 
 ## skill 本体路径
 
-`D:\data\local\software\programming\skill\projects\sk_01`
+开发源在 `<repo>`；机器路径不写进被跟踪文档，harness 副本用同步脚本生成。
 
 ## DSH skill 注册
 
-`C:\Users\54238\.agents\skills\subtitle-proofread` → skill 本体（junction）。
+`~/.agents/skills/subtitle-proofread` 是 `scripts/harness/sync_skill.py` 生成的**同步副本**（不是 junction）；本机路径/API 由副本内 `local.json` 提供。
 DSH 只扫描 `~/.agents/skills`、`~/.dsh/skills`、项目的 `.agents/skills`/`.dsh/skills`，
 不扫描 `~/.claude/skills`；这是之前 catalog 看不到的原因。

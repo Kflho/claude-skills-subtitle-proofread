@@ -52,10 +52,10 @@
 
 - 之前 **没有**：`subtitle-proofread` 只在 `~/.claude/skills`，DSH 只扫描
   `<project>/.dsh/skills`、`<project>/.agents/skills`、`~/.dsh/skills`、`~/.agents/skills`。
-- 已创建 junction：
-  `C:\Users\54238\.agents\skills\subtitle-proofread -> D:\...\sk_01`
+- 已改为**同步副本**（`scripts/harness/sync_skill.py`，非 junction）：
+  `~/.agents/skills/subtitle-proofread`
 - 当前会话 catalog 已出现 `subtitle-proofread`，描述已改为 Qwen3-ASR/FA + FireRedVAD 诊断状态。
-- 仓库内 skill 本体仍是唯一源；`.claude/skills` 只是另一个 junction。
+- 仓库仍是唯一开发源；harness 读取同步副本，本机配置在副本 `local.json`。
 
 ## 6. 下一步（OP/ED 研究）
 

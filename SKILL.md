@@ -16,7 +16,7 @@ description: >
   **先找现有实现**（`oped_fixer`、`apply_map`、`run_all`、`references/*`），不要另写一套。
 - **开发与 harness 分离**：本仓库是唯一开发源；harness 读取的是**同步副本**
   （`~/.agents/skills/subtitle-proofread`），不要用 junction 指向仓库。
-  改完运行 `python scripts/harness/sync_skill.py --dry-run` 预览，再去掉
+  改完先跑 `python scripts/harness/privacy_check.py`，再 `python scripts/harness/sync_skill.py --dry-run` 预览，去掉
   `--dry-run` 同步；描述变更需新会话/重新加载才生效。
 - **本机路径与密钥只写在 harness 副本的 `local.json`**：同步后在副本里运行
   `python scripts/harness/init_local.py --force`（自动从环境/`~/.claude/settings.json`
