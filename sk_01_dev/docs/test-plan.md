@@ -1,12 +1,32 @@
-# 测试与覆盖率计划
+﻿# 测试与覆盖率计划
 
-> 最后更新：2026-10-18（第十轮：ASR-first 重设计 + 去百度）
+> 最后更新：2026-10-19（复核填充 + 专名变体归一/闸门）
 > 目标不变：**能力靠测试证明，不靠真实项目碰运气。** 真实项目只负责发现问题；每个问题在修之前先落一个最小 fixture test。
 
 ## 0. 现状
 
 ```text
 python -m pytest -q
+1509 passed, 2 skipped in ~10s   # 无网络、无模型；2 例项目词表测试需 SABU_GLOSSARY_DIR
+```
+
+**2026-10-19 新增 39 例**（1472 → 1511）：
+
+- `tests/test_review_pack.py` / `test_review_fill.py` / `test_review_apply.py` /
+  `test_review_failures.py`：复核包契约、路由（时间不发送）、双策略白名单、
+  字符预算分批、ID 补问、逐条回滚、QA→pack→apply→QA 离线全链路；
+- `tests/test_glossary_normalize.py`：变体表安全过滤（等于规范名/单字/子串）、
+  最长匹配、普通词不动、判别式候选发现、真实词表不越界（「圣诞老人」回归）；
+- `tests/test_normalize_cli.py`：dry-run 不写盘、apply 生效 + `.bak`、二次幂等、
+  `--discover` 只读；
+- `tests/test_text_gate.py`：kana/echo/变体/CPS 四种闸门与阈值、报告结构。
+
+真实数据证据（EP001–003 + 52 集副本）见 `docs/review-ai-fill.md`、
+`docs/glossary-variants.md`；全部实验脚本在 `scripts/eval/`，不入默认管线。
+
+## 0.1 历史（第十轮，2026-10-18）
+
+```text
 1423 passed in ~9s           # 无网络、无模型、无真实项目依赖
 coverage: 79.0% (15,753 statements)
 ```

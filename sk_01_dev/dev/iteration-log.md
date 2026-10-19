@@ -5,6 +5,33 @@
 >
 > **记录规则**：只记架构/流程/接口级变更（新增/删除/重命名脚本、工作流顺序调整、报告格式变更）。不记修 bug、调参数、加 flag 等正常开发活动。
 
+## 2026-10-19 — 专名变体归一 + 译后闸门
+
+### 架构变更
+- 新增 `lib/glossary.py`：扁平 ja→zh 词表 + `_meta.aliases` 变体表（人工决策）
+  → 安全检查（丢弃等于规范名、单字、规范名子串的变体）→ 最长匹配归一；
+  `discover_variants` 用「术语出现/不出现」两侧对比打分出候选，只读不写。
+- 新增 `nouns/normalize_variants.py`：`--dry-run`（默认）/`--apply`（`.bak`）/`--discover`。
+- 新增 `eval/text_gate.py`：kana/echo/变体/CPS 计数，超阈值退出 1（可接 CI）。
+- 文档：`docs/glossary-variants.md`；SKILL.md 加命令；README 能力项。
+
+### 行为修正（接口级）
+- 词表拆成扁平映射 + 元数据两份。`_meta` 混在扁平表里会让
+  `find_suspect_nouns._load_known_terms` 抛 `unhashable type: 'dict'`。
+- 别名必须能证明不被误用：第一版把 `圣诞` 当 `三太` 变体，
+  结果「圣诞老人」→「三太老人」；已移出并加回归测试
+  `test_project_aliases_do_not_overreach`。
+
+### 证据
+- EP051（15 次专名出现、15 批）：无词表 2/15 规范、7 种写法；带词表 **15/15**、0 混批；
+  QA 违规 24 → 17，残留假名 5 → 0，回显 1 → 0。
+- 52 集副本：归一 174 cue / 22 文件；变体 197 → **0**，kana 83 → 46，
+  剩 46 条是 ASR 噪声（属 translation 复核类，不扩别名）。
+
+### 测试
+- 1472 → **1511 passed**（+39）：变体表安全过滤/最长匹配/普通词不动/发现器打分、
+  CLI dry-run→apply→幂等、四种闸门与阈值、真实词表不越界。
+
 ## 2026-10-19 — 复核缺口 AI 填充（管线内，默认只分类）
 
 ### 架构变更

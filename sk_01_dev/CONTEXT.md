@@ -1,4 +1,4 @@
-# CONTEXT.md — Subtitle Proofread Skill
+﻿# CONTEXT.md — Subtitle Proofread Skill
 
 ## 项目是什么
 
@@ -42,6 +42,9 @@ scripts/
 │   ├── chinese_utils.py        #   中文常词/繁简映射
 │   ├── japanese_utils.py       #   日文常词/假名检测
 │   ├── english_utils.py        #   英文常词
+│   ├── llm.py                  #   OpenAI 兼容 chat 客户端（JSON 模式/推理开关）
+│   ├── glossary.py             #   系列词表 + 变体归一 + 候选发现（只读表 vs 决策表分离）
+│   ├── review/                 #   复核包：pack/fill/apply/stage/failures（ADR-012）
 │   ├── asr/                    #   ASR 稳定核心 + 插件适配器（2026 路线）
 │       ├── base.py             #     契约：ASRResult/ASRConfig/BackendInfo/Protocol
 │       ├── registry.py         #     自动发现 adapters/*
@@ -80,12 +83,20 @@ scripts/
 │   ├── asr_eval.py             #   P0 全文件 CER/边界
 │   ├── episode_benchmark.py    #   三集 held-out 基准（dev/test、CER/边界/文本分解/归因）
 │   ├── release_gate.py         #   一条命令 gate：CC 标准目标 + 基线回归（退出码 0/1）
+│   ├── text_gate.py            #   译后闸门：kana/echo/变体/CPS（退出码 0/1）
+│   ├── review_fill_eval.py     #   ASR 侧复核对照实验
+│   ├── review_translation_eval.py # 翻译失败注入实验
 │   ├── diagnose_timeline.py    #   无参考的 token/segment 健康度
 │   └── clean_cc_reference.py   #   CC 清洁
 │
 ├── nouns/                      # Phase 3: 专有名词
 │   ├── noun_checker.py         #   名词表对比
-│   └── find_suspect_nouns.py   #   未收录疑似专名搜索
+│   ├── find_suspect_nouns.py   #   未收录疑似专名搜索
+│   ├── extractor.py            #   AI 专名提取（extract→aggregate→apply 闭环）
+│   ├── aggregate.py            #   跨集 running-map 合并
+│   ├── apply_map.py            #   规范名应用（dry-run/apply/emit-mappings）
+│   ├── normalize_variants.py   #   变体归一（dry-run/apply/discover，.bak 备份）
+│   └── validate_glossary.py    #   对照对齐样本验证候选词表
 │
 ├── apply/                      # 批量修复应用
 │   └── apply_fixes.py          #   JSON修复→SRT写入
@@ -145,7 +156,7 @@ scripts/
 ## 测试
 
 ```bash
-cd <skill>/tests && pytest -q    # 1472 tests, ~9s, 无外部依赖
+cd <skill>/tests && pytest -q    # 1509 passed + 2 skipped（项目词表例需 SABU_GLOSSARY_DIR）
 cd <skill> && pytest -q tests --cov --cov-report=term-missing   # 覆盖率 79.0%，矩阵见 docs/test-plan.md
 ```
 
@@ -156,7 +167,7 @@ P0 链路（Whisper 编排/VAD、翻译、专名、OP/ED、编排）已补齐；
 ## 技术路线
 
 2026 技术栈修订提案：`docs/tech-route-2026.md`；决策记录：`docs/adr/005-asr-alignment-stack.md`、`docs/adr/006-stable-asr-core.md`、`docs/adr/007-cue-alignment.md`、`docs/adr/008-qwen3-long-audio-chunking.md`、`docs/adr/009-reference-as-benchmark.md`、`docs/adr/010-asr-first-pipeline.md`、`docs/adr/011-technology-integration-map.md`；
-技术调研：`docs/research-2026-10-tech.md`（翻译提示词/切块/对齐的成熟方案）、`docs/research-2026-10-model-usage.md`（Qwen3-FA 直接对齐/ASR hotwords/FireRedVAD/Mel-Band 用对）、`docs/controlled-experiments.md`（控制变量台账）、`docs/fireredvad-status.md`（FireRedVAD 当前能力/接线/缺口）、`docs/review-ai-fill.md`（复核缺口 AI 填充：契约、路由、守卫、EP001 四组实验）。
+技术调研：`docs/research-2026-10-tech.md`（翻译提示词/切块/对齐的成熟方案）、`docs/research-2026-10-model-usage.md`（Qwen3-FA 直接对齐/ASR hotwords/FireRedVAD/Mel-Band 用对）、`docs/controlled-experiments.md`（控制变量台账）、`docs/fireredvad-status.md`（FireRedVAD 当前能力/接线/缺口）、`docs/review-ai-fill.md`（复核缺口 AI 填充：契约、路由、守卫、EP001–003 实验）、`docs/glossary-variants.md`（专名变体归一 + 质量闸门：安全规则、测试、52 集实测）。
 
 **技术接入总图**（ADR-011）：所有候选技术按接缝分层——Ingest/Separator、AudioEvents（VAD/AED）、
 ASR/FA registry、Ensemble、Alignment/Repair、Evidence/Review、Glossary/Translation、Evaluation。
@@ -204,7 +215,7 @@ P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 
 
 素材现状：**验收作品定为数码宝贝（Digimon Adventure）**，目录 `D:\videos\Animation\TV\数码宝贝`。**EP01/02/03 视频完整（各约 1386s）**；用户人工复核三集视频/CC 均无真实偏移。日文参考：`日语字幕\` 下 S01E01–S01E54 共 54 集 `ja[cc].srt`，已清洁；主故事窗口 `[95,1240]`。01–05 另有中文字幕，只能做参考无关/翻译复用。素材台账 `eval/materials.md`，清单 `eval/manifest.digimon.json`（Qwen3）与 `eval/manifest.digimon.whisper.json`（A/B）。莎莉/阿童木历史素材只保留机制/吞吐回放。
 
-测试：1472 passed / 0 failed；矩阵与剩余缺口见 `docs/test-plan.md`。
+测试：1509 passed / 2 skipped（需 SABU_GLOSSARY_DIR 的项目词表例）/ 0 failed；矩阵与剩余缺口见 `docs/test-plan.md`。
 
 ## 配置
 

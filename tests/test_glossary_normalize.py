@@ -1,4 +1,4 @@
-"""Glossary normalization: reviewed variant table, longest match, no overreach."""
+﻿"""Glossary normalization: reviewed variant table, longest match, no overreach."""
 
 import json
 
@@ -8,6 +8,14 @@ from lib.glossary import (
     Normalizer, build_variant_map, discover_variants, explain_variant_map,
     load_glossary, load_meta, normalize_cues,
 )
+
+def _project_glossary_dir():
+    """Project-specific checks only run when the env points at a real glossary.
+
+    Keeps local absolute paths out of the public repo.
+    """
+    import os
+    return os.environ.get('SABU_GLOSSARY_DIR', '')
 
 GLOSSARY = {
     'サブ': '佐武', 'サブトイチ': '佐武与市', 'イチ': '市',
@@ -143,8 +151,9 @@ def test_discover_variants_ignores_cues_that_already_match():
 def test_project_glossary_files_are_consistent():
     """The shipped 佐武 glossary/meta must stay loadable and safe."""
     import os
-    root = (r'D:\data\local\software\recreation\video\projects'
-            r'\佐武与市捕物控\glossaries')
+    root = _project_glossary_dir()
+    if not root:
+        pytest.skip('set SABU_GLOSSARY_DIR to run the project-glossary test')
     glossary_path = os.path.join(root, 'sabu.series.json')
     meta_path = os.path.join(root, 'sabu.series.meta.json')
     if not (os.path.isfile(glossary_path) and os.path.isfile(meta_path)):
@@ -173,8 +182,9 @@ def test_project_aliases_do_not_overreach():
     ``aliases`` after the measurement; this test keeps them out.
     """
     import os
-    root = (r'D:\data\local\software\recreation\video\projects'
-            r'\佐武与市捕物控\glossaries')
+    root = _project_glossary_dir()
+    if not root:
+        pytest.skip('set SABU_GLOSSARY_DIR to run the project-glossary test')
     glossary_path = os.path.join(root, 'sabu.series.json')
     meta_path = os.path.join(root, 'sabu.series.meta.json')
     if not (os.path.isfile(glossary_path) and os.path.isfile(meta_path)):

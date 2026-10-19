@@ -54,7 +54,8 @@ translated/zh/<EP>.qa.json
 - 日语 SRT/ASS 扫描、乱码检测、时间轴修复；
 - Qwen3-ASR + ForcedAligner（60s 切块）或 legacy Whisper；
 - LLM 翻译：批处理、按批 glossary、ID 协议、QA、问题条 repair；
-- 专名提取/统一、系列词表验证；
+- 专名提取/统一、系列词表验证、**变体归一**（分批翻译漂移用确定性替换收敛）；
+- 译后**质量闸门**：kana 残留 / 回显 / 变体 / CPS 四项计数，超阈值退出 1；
 - 输出中文 SRT + QA 报告，不覆盖源字幕。
 
 ## 环境
