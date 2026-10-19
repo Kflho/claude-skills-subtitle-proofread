@@ -1,16 +1,21 @@
 ---
 name: subtitle-proofread
 description: >
-  Use when the user wants 字幕 handled end to end: transcribe video with Whisper
-  ASR, translate subtitles to Chinese, unify proper nouns across episodes, or
-  proofread existing SRT/ASS. Unfixable items get [???] markers for Aegisub review.
+  Use when the user wants 字幕 handled end to end: Qwen3-ASR/ForcedAligner or
+  legacy Whisper for timing, LLM translation to Chinese, proper-noun unification
+  across episodes, or proofreading existing SRT/ASS. FireRedVAD/AED is currently
+  diagnostic-only (no OP/ED decision consumer yet). Unfixable items get [???]
+  markers for Aegisub review.
 ---
 
 # Subtitle Proofread
 
-3-phase pipeline：扫描（乱码 + VAD语音时间线）→ Whisper 统一修复 → 专名统一 + 交付。无法自动修复的条目写入 `[???]` 标记，在 Aegisub 中审查。
+3-phase pipeline：扫描（乱码 + VAD 语音时间线）→ 时间轴修复（默认 Whisper legacy；
+可选 Qwen3-ASR + ForcedAligner）→ 专名统一 + 交付；可选 LLM 翻译。
+无法自动修复的条目写入 `[???]` 标记，在 Aegisub 中审查。
 
-**资源驱动**：有什么用什么。有视频+Whisper→修复乱码+补全缺字幕；有参考字幕→注入 AI 校对上下文。缺资源也能残血运行——跳过缺失步骤，剩余步骤照常。
+**资源驱动**：有什么用什么。有视频+ASR→修时间轴/补缺字幕；有参考字幕→注入 AI 校对上下文。
+缺资源也能残血运行——跳过缺失步骤，剩余步骤照常。
 
 ## 专名审查（AI 驱动）
 
@@ -121,6 +126,12 @@ python scripts/audio/detect_events.py --wav temp/firered_ep001.wav `
 python scripts/run_all.py --asr qwen3 --audio-hints
 ```
 
+> **FireRedVAD 当前状态（2026-10）**：模型/CLI 可用，但 `--audio-hints` 是
+> **write-only**：只写 `<EP>.audio_hints.json`，生产流程没有读取方；且只在
+> `--asr qwen3` 下触发。token 过滤、VAD concat、AED 边界切块均未通过多集验证。
+> 保留它只为后续 **完整集 OP/ED 翻译** 研究；不要当生产决策。
+> 详见 [docs/fireredvad-status.md](docs/fireredvad-status.md)。
+
 > Whisper 系按用户规则**不下载、不再测试**；本机只保留 whisper.cpp CUDA（路径由 `WHISPER_CLI` 指定）。
 
 ### 跑 pipeline
@@ -139,7 +150,7 @@ git add -A && git commit -m "备份：pipeline前 — $(date +%Y-%m-%d)"
 ```bash
 cd "<project-root>"
 
-# 完整 pipeline（推荐）：扫描 + VAD 语音检测 + Whisper 统一修复
+# 完整 pipeline（推荐）：扫描 + 时间轴修复（Whisper legacy / Qwen3 ASR）
 python "<scripts-dir>/run_all.py" \
   --input-dir "<SUBTITLE_DIR>" \
   --video-dir "<VIDEO_DIR>"
@@ -170,7 +181,7 @@ python "<scripts-dir>/run_all.py" \
 ```
 
 > `--input-dir` 指定字幕子目录（默认 `AI审查后`）。`--lang` 自动检测。
-> `--video-dir` 启用 VAD 语音检测 + Whisper 统一修复（乱码、部分重叠、缺字幕一次处理）。无视频时加 `--skip-whisper` 残血运行。
+> `--video-dir` 启用旧 VAD + Whisper 修复（乱码、部分重叠、缺字幕一次处理）；`--asr qwen3` 会改走 Qwen3-ASR/FA 时间轴路线。无视频时加 `--skip-whisper` 残血运行。
 > `--limit` 只限 Phase 2 修复集数，扫描覆盖全部文件。
 > **VAD 删条默认不写盘**（分级 L1）：先看清单，确认无误再 `--vad-clean-apply`。
 > `--asr qwen3` 用 2026 路线替代 Phase 2 的 Whisper：**默认只改时间码**，文本不动、不删条；
