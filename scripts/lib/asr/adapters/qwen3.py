@@ -288,14 +288,18 @@ class Qwen3WorkerClient:
 
     def transcribe(self, audio_path: str, *, language: str = 'ja',
                    context: str = '', timestamps: bool = True,
+                   chunk_sec: float | None = None,
                    timeout: float | None = None) -> ASRResult:
-        result = self.request({
+        payload = {
             'cmd': 'transcribe',
             'audio': str(audio_path),
             'language': language,
             'context': context,
             'timestamps': bool(timestamps),
-        }, timeout=timeout)
+        }
+        if chunk_sec is not None and float(chunk_sec) > 0:
+            payload['chunk_sec'] = float(chunk_sec)
+        result = self.request(payload, timeout=timeout)
         out = ASRResult.from_dict(result)
         if not out.engine:
             out.engine = 'qwen3'
@@ -317,8 +321,10 @@ class Qwen3ASRBackend:
 
     name = 'qwen3'
 
-    def __init__(self, client: Qwen3WorkerClient | None = None, **kwargs):
+    def __init__(self, client: Qwen3WorkerClient | None = None,
+                 chunk_sec: float = 0.0, **kwargs):
         self.client = client or Qwen3WorkerClient(**kwargs)
+        self.chunk_sec = float(chunk_sec or 0.0)
 
     def available(self) -> bool:
         return self.client.available()
@@ -334,7 +340,7 @@ class Qwen3ASRBackend:
         self.warmup()
         return self.client.transcribe(
             audio_path, language=language, context=context,
-            timestamps=timestamps)
+            timestamps=timestamps, chunk_sec=self.chunk_sec or None)
 
     def align(self, audio_path: str, text: str, *,
               language: str = 'ja') -> AlignResult:
@@ -366,8 +372,10 @@ def build(config: ASRConfig, **kwargs) -> Qwen3ASRBackend:
                         or config.max_new_tokens or 4096),
         request_timeout=(kwargs.get('request_timeout')
                          or config.request_timeout or 1800),
+        chunk_sec=(kwargs.get('chunk_sec')
+                   or config.option('chunk_sec', 0.0)),
         **{k: v for k, v in kwargs.items()
            if k not in {'python_exe', 'asr_model', 'aligner_model',
                         'device', 'dtype', 'max_new_tokens',
-                        'request_timeout'}},
+                        'request_timeout', 'chunk_sec'}},
     )

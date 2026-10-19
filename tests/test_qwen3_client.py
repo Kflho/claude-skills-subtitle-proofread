@@ -50,7 +50,8 @@ FAKE_WORKER = textwrap.dedent(r'''
                     'model': 'fake',
                     'audio_duration': 1.0,
                     'context_hash': 'x',
-                    'meta': {'timestamps': True},
+                    'meta': {'timestamps': True,
+                             'chunk_sec': req.get('chunk_sec')},
                 }}
         elif cmd == 'align':
             res = {'ok': True, 'id': rid, 'result': {
@@ -103,6 +104,10 @@ class TestQwen3WorkerClient:
         assert len(result.tokens) == 2
         assert result.tokens[0].text == 'お前'
         assert result.audio_duration == 1.0
+
+    def test_transcribe_passes_chunk_sec(self, client):
+        result = client.transcribe('a.wav', chunk_sec=30)
+        assert result.meta['chunk_sec'] == 30
 
     def test_align_roundtrip(self, client):
         aligned = client.align('a.wav', 'お前', language='Japanese')

@@ -1,0 +1,764 @@
+{
+  "project": "digimon-adventure",
+  "language": "Japanese",
+  "protocol": "eval/protocol.md",
+  "episodes": [
+    {
+      "id": "EP001",
+      "split": "dev",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\01、漂流？冒険の島！.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E01.WEBRip.ja[cc].srt",
+      "main_window": [
+        95,
+        1240
+      ],
+      "asr_json": "temp/asr/digimon_ep001_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP002",
+      "split": "dev",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\02、爆裂進化！グレイモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E02.WEBRip.ja[cc].srt",
+      "main_window": [
+        95,
+        1233
+      ],
+      "asr_json": "temp/asr/digimon_ep002_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP003",
+      "split": "dev",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\03、蒼き狼！ガルルモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E03.WEBRip.ja[cc].srt",
+      "main_window": [
+        95,
+        1240
+      ],
+      "asr_json": "temp/asr/digimon_ep003_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP004",
+      "split": "dev",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\04、灼熱！バードラモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E04.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep004_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP005",
+      "split": "dev",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\05、電光！カブテリモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E05.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep005_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP006",
+      "split": "dev",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\06、パルモン怒りの進化！.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E06.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep006_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP007",
+      "split": "dev",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\07、咆哮！イッカクモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E07.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep007_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP008",
+      "split": "dev",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\08、闇の使者デビモン！.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E08.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep008_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP009",
+      "split": "dev",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\09、激突！冷凍デジモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E09.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep009_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP010",
+      "split": "dev",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\10、守護者ケンタルモン！.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E10.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep010_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP011",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\11、踴る亡霊！バケモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E11.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep011_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP012",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\12、冒険！パタモンと僕.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E12.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep012_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP013",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\13、エンジェモン覚醒！.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E13.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep013_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP014",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\14、出航・新大陸へ！.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E14.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep014_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP015",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\15、エテモン！悪の花道.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E15.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep015_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP016",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\16、暗黒進化！スカルグレイモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E16.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep016_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP017",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\17、幻船長コカトリモン！.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E17.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep017_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP018",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\18、妖精！ピッコロモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E18.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep018_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP019",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\19、迷宮のナノモン！.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E19.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep019_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP020",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\20、完全体進化！メタルグレイモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E20.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep020_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP021",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\21、コロモン東京大激突！.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E21.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep021_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP022",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\22、ささやく小悪魔ピコデビモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E22.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep022_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP023",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\23、友よ！ワーガルルモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E23.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep023_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP024",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\24、撃破！アトラーカブテリモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E24.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep024_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP025",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\25、眠れる暴君！トノサマゲコモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E25.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep025_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP026",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\26、輝く翼！ガルダモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E26.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep026_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP027",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\27、闇の城ヴァンデモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E27.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep027_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP028",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\28、追撃! 日本へ急げ.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E28.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep028_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP029",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\29、マンモン光が丘大激突！.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E29.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep029_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP030",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\30、デジモン東京大横断！！.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E30.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep030_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP031",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\31、レアモン！東京湾襲撃.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E31.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep031_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP032",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\32、熱いぜ東京タワー！デスメラモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E32.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep032_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP033",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\33、パンプとゴツは渋谷系デジモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E33.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep033_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP034",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\34、運命の絆！テイルモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E34.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep034_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP035",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\35、お台場の妖精！リリモン開花.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E35.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep035_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP036",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\36、結界突破！ズドモンスパーク！.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E36.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep036_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP037",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\37、完全体総進撃！きらめくエンジェウーモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E37.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep037_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP038",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\38、復活！魔王ヴェノムヴァンデモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E38.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep038_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP039",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\39、二大究極進化！闇をぶっとばせ！！.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E39.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep039_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP040",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\40、魔の山の四天王！ダークマスターズ.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E40.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep040_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP041",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\41、荒ぶる海の王！メタルシードラモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E41.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep041_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP042",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\42、沈黙の海底ホエーモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E42.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep042_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP043",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\43、危険な遊戯！ピノッキモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E43.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep043_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP044",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\44、迷いの森のジュレイモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E44.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep044_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP045",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\45、究極体激突！ウォーグレイモンVSメタルガルルモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E45.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep045_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP046",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\46、メタルエテモンの逆襲.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E46.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep046_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP047",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\47、風よ！光よ！サーベルレオモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E47.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep047_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP048",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\48、爆撃指令！ムゲンドラモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E48.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep048_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP049",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\49、さらばヌメモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E49.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep049_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP050",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\50、女の闘い！レディデビモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E50.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep050_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP051",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\51、地獄の道化師ピエモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E51.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep051_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP052",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\52、聖剣士！ホーリーエンジェモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E52.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep052_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP053",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\53、最後の暗黒デジモン.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E53.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep053_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    },
+    {
+      "id": "EP054",
+      "split": "test",
+      "category": "unclassified",
+      "video": "D:\\videos\\Animation\\TV\\数码宝贝\\54、新たな世界.mkv",
+      "reference_srt": "temp\\references\\digimon\\デジモンアドベンチャー.S01E54.WEBRip.ja[cc].srt",
+      "main_window": [
+        95.0,
+        1240.0
+      ],
+      "asr_json": "temp/asr/digimon_ep054_main.qwen3.json",
+      "context": "",
+      "timestamps": true
+    }
+  ],
+  "_note": "Generated from 54 matched episodes; dev=EP001–EP010, test=EP011+. Fix the split before reporting held-out results."
+}

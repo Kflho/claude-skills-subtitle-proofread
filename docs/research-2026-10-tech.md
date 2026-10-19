@@ -44,7 +44,7 @@
 | 做法 | 证据 | 我们现状 | 决定 |
 |---|---|---|---|
 | 术语用 **ja→zh 对照**，不是只给中文名 | gpt-subtrans terminology；EP003 实证 | 原 prompt 只给中文名，`タケル` 被译成「太一」 | **已修**：`load_mappings/load_glossary` 输出 `ja→zh` |
-| 逐条成对输出/禁止并条 | gpt-subtrans | 用 JSON 数组，靠顺序；无显式“禁止并条” | 下一步：prompt 增加“每条单独、不得合并” |
+| 逐条成对输出/禁止并条 | gpt-subtrans | 用 JSON 数组，靠顺序；无显式“禁止并条” | 30 条 A/B：禁止并条规则导致 1 条行长违规、chrF 34.92 vs 纯 pairs 36.69 → **暂不启用**，等 MQM |
 | 场景摘要跨批传递 | gpt-subtrans `<scene>`；VideoLingo summary | 只有前 3 条原文 | 下一步：批间 summary（不是裸 future 2 条；裸 future 消融是负的） |
 | 两阶段直译+反思 | VideoLingo | 只有 QA 后 repair | 下一步：仅对 MQM 问题条做 reflect，不全量 |
 | 术语提取/一致性 | SMART、VideoLingo | glossary 有，跨集 memory 无 | 下一步：series memory |
@@ -76,7 +76,15 @@ Qwen3-ASR 官方本身也按低能量边界切 180s；Qwen3-FA 官方 ≤5min、
 - 我们的空洞 53 个/700s，speech 主导只有 12 个/221s；全量重对齐无收益（ADR-008）。
 - 只对这 12 个窗口重跑 ASR/FA，成本低、风险小；需要保留上下文和边界连续性。
 
-## 3. 优先级（修正版）
+## 3. 全集素材（2026-10 更新）
+
+- 54 个 MKV、54 个日文 CC、108 个中文 ASS（sc/tc）；
+- `scripts/eval/build_manifest.py` 生成 `eval/manifest.digimon.full.json`：
+  **54 集，dev=EP001–010，test=EP011–054**；
+- EP001–003 保留已知 main_window；其余默认 `[95,1240]`，后续按实际 OP/ED 校准；
+- 纪律：dev 上做 prompt/切块选择，test 只做最终报告，不拿 test 调参。
+
+## 4. 优先级（修正版）
 
 1. **翻译术语对照**（已实现）：`ja→zh` 进 prompt；EP003 名字段验证 0 违规。
 2. **时间轴语音边界切块**：先 45/60/90 A/B，再用 AED speech 边界；看 P50/P90/coverage/holes。

@@ -797,6 +797,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--python', default=QWEN_PYTHON or '')
     parser.add_argument('--model', '--asr-model', dest='model', default=None)
     parser.add_argument('--aligner-model', default=ALIGNER_MODEL)
+    parser.add_argument('--chunk-sec', type=float, default=0.0,
+                        help='Qwen3 ASR chunk length (0 = worker default/60s)')
     parser.add_argument('--device', default=ASR_DEVICE)
     parser.add_argument('--dtype', default=ASR_DTYPE)
     parser.add_argument('--work-dir', default='temp/benchmark')
@@ -838,7 +840,8 @@ def main(argv: list[str] | None = None) -> int:
             python=args.python or '',
             device=args.device,
             dtype=args.dtype,
-            options={'whisper_model': WHISPER_MODEL},
+            options={'whisper_model': WHISPER_MODEL,
+                     'chunk_sec': args.chunk_sec},
         )
         router = ASRRouter(engine=args.engine, fallback='none',
                            config=config)
