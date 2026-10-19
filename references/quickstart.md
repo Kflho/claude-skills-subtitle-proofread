@@ -74,6 +74,10 @@ python scripts/video_to_zh.py \
 
 只想“先出能看的中文粗剪”可用 Qwen3；更在意识别文本可走 Whisper 旧路径。
 
+> 2026-10 复核：3×60s 片段里 Qwen3 的日文 CER 反而更低（.110/.131/.115 vs
+> Whisper .118/.178/.153），但中文 chrF/QA Whisper 略好或持平；Qwen3 出现较长 cue
+> 和行长违规。**样本小，未做整集 A/B，不能据此切换默认。**
+
 ## 3. 整条 pipeline（修复 + 翻译）
 
 ```bash
