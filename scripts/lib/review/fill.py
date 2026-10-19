@@ -1,25 +1,27 @@
 #!/usr/bin/env python3
-"""Fill review-pack gaps with an OpenAI-compatible LLM, then guard the result.
+"""Fill review packs with an OpenAI-compatible LLM, then guard the result.
 
-Only **routable** gaps are sent (``pack.route`` != ``keep``): the pack already
-decided where the audio can settle something.  The model may therefore only
-choose inside a bounded action space:
+Who gets asked (see ``lib/review/pack.py``):
+- ``kind=translation`` — QA-flagged lines (Japanese residue, echo/untranslated,
+  empty, glossary miss, CPS). This is the failure class the automatic repair
+  pass cannot clear, and rewriting one line is the intended fix.
+- ``kind=asr_repair`` with ``route=text`` (a readable ASR sentence of
+  comparable length) or ``route=delete`` (very short unmatched cue).
 
-====================  ======================================================
-route                 allowed decisions
-====================  ======================================================
-``time``              ``keep`` / ``set_time``
-``text``              ``keep`` / ``replace_text``
-``delete``            ``keep`` / ``delete_line``
-====================  ======================================================
+Timing is **not** the model's job.  ``route=time`` cues are never sent: the
+experiment in ``sk_01_dev/docs/review-ai-fill.md`` shows model-driven boundary
+moves follow ASR bias and make correct cues worse; the L0 rules own the
+timeline.  (The external post-processing protocol in the research links makes
+the same choice: the model must not write times.)
 
-Anything outside that set is rejected and the cue stays as it is.  On top of
-that every decision is validated (boundary sanity, script preservation, length
-sanity, no overlap) before it can reach the SRT, and the applier walks back a
-decision that would damage a neighbour.
+Every decision is validated before it can reach the SRT:
+- action must be allowed for the item's route *and* for its kind policy;
+- ``replace_text`` must stay in the item's language (Japanese for ASR items,
+  no kana for Chinese translation items), length-sane, non-empty;
+- ``delete_line`` only for short or poorly matched cues.
 
-A rejected decision is *not* handed to a human: the item is marked
-``rejected`` with a reason and stays ``keep``.
+A rejected decision is not handed to a human: the item is marked ``rejected``
+with a reason and stays ``keep``.
 """
 
 from __future__ import annotations
@@ -34,10 +36,13 @@ MAX_SHIFT_S = 8.0
 MIN_DURATION_S = 0.3
 MAX_DURATION_S = 12.0
 BATCH_SIZE = 15
+MAX_BATCH_ITEMS = 40
+MAX_BATCH_CHARS = 4000
 MAX_TEXT_CHARS = 100
+MAX_RETRIES = 1
 
 ROUTE_ACTIONS = {
-    'time': ('set_time',),
+    'time': ('set_time',),          # kept for validation, never dispatched
     'text': ('replace_text',),
     'delete': ('delete_line',),
 }
@@ -46,31 +51,41 @@ _KANA = re.compile(r'[\u3040-\u30ff]')
 _CJK = re.compile(r'[\u3400-\u9fff]')
 _ASCII_WORD = re.compile(r'^[A-Za-z0-9 .,!?\'"\-]+$')
 
-SYSTEM_PROMPT = """你是日语字幕修复流程里的复核模型。管线已经把能自动修的 cue 修完，
-剩下的条目里只有「有证据可判」的会发给你，每条带 route 字段说明这条靠什么证据：
+SYSTEM_PROMPT = """你是字幕修复流程的复核模型。你只在自动流程判失败时才被调用，
+任务是把那一条修好，或者在无法确定时保留原样。只输出一个 JSON 对象。
 
-- route=time   文本与 ASR 匹配得上（similarity ≥ 0.5），但边界整体偏移；
-               可用证据：start_error_ms / end_error_ms（正=字幕晚于语音）、
-               suggested.new_start/new_end（匹配段边界）、asr_window（窗口内听到的语音）。
-               只能选 "keep" 或 "set_time"。
-- route=text   文本与 ASR 匹配度够、且 ASR 句子长度可比；
-               可用证据：asr_text、length_ratio、asr_window.text。
-               只能选 "keep" 或 "replace_text"。
-- route=delete 极短、无可用匹配的 cue（噪声/重复行候选）。只能选 "keep" 或 "delete_line"。
+输入里每条都有：
+- id：本次请求内的编号，输出必须与输入一一对应，**每个 id 恰好出现一次**；
+- kind：translation（中文字幕被 QA 判失败）或 asr_repair（日文字幕与语音不一致）；
+- route：允许你做的动作类别；
+- text：当前字幕；source_text（translation）是日文原句；
+- failure（translation）：japanese_residual 残留假名 / echo 未翻译 / empty 空行 /
+  glossary_miss 专名不一致 / too_long 或 cps 过长；
+- glossary_misses：必须使用的规范译名；
+- context：前后各两条，用来判断这句话在说什么；
+- asr_text / local_similarity / length_ratio（asr_repair）：语音侧证据。
+
+动作（严格按 kind + route）：
+- translation：只能 "keep" 或 "replace_text"。replacement 必须是**中文**，
+  不含假名，长度不超过一行字幕（一般 ≤20 字），保留 glossary 里的规范译名。
+- asr_repair + route=text：只能 "keep" 或 "replace_text"，replacement 是**日文**，
+  长度与原句接近（0.4–2.2 倍）。
+- asr_repair + route=delete：只能 "keep" 或 "delete_line"。
+- 时间轴不由你决定：不要输出任何时间字段。
 
 判断规则：
-- 拿不准就 "keep"；字幕卡、歌词、人名写法、语气差异、ASR 听错 → "keep"。
-- set_time：new_start/new_end 用 suggested 或按 asr_window 的 speech_start/speech_end
-  推算，单位秒，时长 0.3–12 秒，位移不超过 8 秒。
-- replace_text：replacement 必须是日文、语义与原文相当、长度与原文接近；
-  不要翻译，不要加说明。ASR 只听到半句就不要用它替换整句。
-- delete_line：只在原文明显是噪声/重复时才删。
+- 拿不准 → "keep"。字幕卡、歌词、人名写法、语气/方言差异、QA 误报 → "keep"。
+- 原文已是对的（包括「假名里其实没有日文词」的情况）→ "keep"。
+- 不要翻译整段、不要合并/拆分、不要加解释或编号。
+- 每条 why 写你依据的字段（例如 "japanese_residual + source_text"）。
 
-输出格式（只输出这个 JSON，不要解释）：
-{"decisions":[{"id":0,"decision":"keep","why":"..."},
-              {"id":1,"decision":"set_time","new_start":12.9,"new_end":14.2,"why":"..."},
-              {"id":2,"decision":"replace_text","replacement":"…","why":"..."},
-              {"id":3,"decision":"delete_line","why":"..."}]}"""
+格式（唯一输出，无 markdown、无前后说明）：
+{"decisions":[
+  {"id":0,"decision":"keep","why":"字幕卡，原文正确"},
+  {"id":1,"decision":"replace_text","replacement":"快来这边！","why":"japanese_residual"},
+  {"id":2,"decision":"delete_line","why":"纯噪声，长度 1"}
+]}
+"""
 
 
 def _clip(text: str, limit: int = MAX_TEXT_CHARS) -> str:
@@ -83,30 +98,62 @@ def _prompt_payload(items: list[dict]) -> str:
     for item in items:
         context = item.get('context') or {}
         window = item.get('asr_window') or {}
-        rows.append({
+        row = {
             'id': item['id'],
+            'kind': item.get('kind') or 'asr_repair',
             'route': item.get('route'),
-            'route_reason': _clip(item.get('route_reason'), 60),
-            'time': f"{item.get('start')} --> {item.get('end')}",
             'text': _clip(item.get('text')),
-            'asr_text': _clip(item.get('asr_text')),
-            'asr_window': {
-                'text': _clip(window.get('text'), 60),
-                'speech_start': window.get('speech_start'),
-                'speech_end': window.get('speech_end'),
-                'speech_seconds': window.get('speech_seconds'),
-            },
-            'similarity': item.get('similarity'),
-            'local_similarity': item.get('local_similarity'),
-            'window_shift': item.get('window_shift'),
-            'length_ratio': item.get('length_ratio'),
-            'start_err_ms': item.get('start_error_ms'),
-            'end_err_ms': item.get('end_error_ms'),
-            'suggested': item.get('suggested') or {},
             'prev': [_clip(c.get('text'), 40) for c in context.get('prev') or []],
             'next': [_clip(c.get('text'), 40) for c in context.get('next') or []],
-        })
+        }
+        if row['kind'] == 'translation':
+            row.update({
+                'source_text': _clip(item.get('source_text')),
+                'failure': item.get('failure'),
+                'glossary_misses': list(item.get('glossary_misses') or [])[:6],
+            })
+        else:
+            row.update({
+                'asr_text': _clip(item.get('asr_text')),
+                'local_similarity': item.get('local_similarity'),
+                'length_ratio': item.get('length_ratio'),
+                'route_reason': _clip(item.get('route_reason'), 60),
+                'asr_window': {
+                    'text': _clip(window.get('text'), 60),
+                    'speech_seconds': window.get('speech_seconds'),
+                },
+            })
+        rows.append(row)
     return json.dumps(rows, ensure_ascii=False)
+
+
+def _batch_cost(items: list[dict]) -> int:
+    total = 0
+    for item in items:
+        total += len(str(item.get('text') or ''))
+        total += len(str(item.get('source_text') or ''))
+        total += len(str(item.get('asr_text') or ''))
+        for side in ('prev', 'next'):
+            total += sum(len(str(c.get('text') or ''))
+                         for c in (item.get('context') or {}).get(side) or [])
+    return total
+
+
+def _make_batches(items: list[dict], *, max_items: int = MAX_BATCH_ITEMS,
+                  max_chars: int = MAX_BATCH_CHARS) -> list[list[dict]]:
+    """Character-budget batching: ids alone are a poor size proxy."""
+    batches, current, cost = [], [], 0
+    for item in items:
+        item_cost = _batch_cost([item])
+        if current and (len(current) >= max_items
+                        or cost + item_cost > max_chars):
+            batches.append(current)
+            current, cost = [], 0
+        current.append(item)
+        cost += item_cost
+    if current:
+        batches.append(current)
+    return batches
 
 
 def _extract_json_object(text: str) -> dict | None:
@@ -144,6 +191,14 @@ def _has_japanese(text: str) -> bool:
     return bool(_KANA.search(text) or _CJK.search(text))
 
 
+def _allowed_for(item: dict, allowed_actions) -> set | None:
+    """Per-kind policy: ASR gaps and translation failures are gated apart."""
+    if isinstance(allowed_actions, dict):
+        kind = str(item.get('kind') or 'asr_repair')
+        return allowed_actions.get(kind, allowed_actions.get('asr_repair', set()))
+    return allowed_actions
+
+
 def validate_decision(item: dict, decision: dict,
                       allow_rewrite: bool = True,
                       allowed_actions: set | None = None
@@ -167,6 +222,7 @@ def validate_decision(item: dict, decision: dict,
     if action not in allowed:
         return None, f'{action} not allowed for route {route!r}'
 
+    kind = str(item.get('kind') or 'asr_repair')
     text = str(item.get('text') or '')
     seconds = item.get('seconds') or {}
     cue_start = float(seconds.get('start') or 0.0)
@@ -204,9 +260,14 @@ def validate_decision(item: dict, decision: dict,
             return None, 'replace_text without replacement'
         if len(replacement) > max(16, int(len(text) * 2.2) + 8):
             return None, 'replace_text: replacement far longer than cue'
-        if len(replacement) < max(2, int(len(text) * 0.35)):
+        floor = 1 if kind == 'translation' else max(2, int(len(text) * 0.35))
+        if len(replacement) < floor:
             return None, 'replace_text: replacement much shorter than cue'
-        if _has_japanese(text) and not _has_japanese(replacement):
+        if kind == 'translation':
+            from lib.translation.qa import count_kana
+            if count_kana(replacement):
+                return None, 'replace_text: translation still contains kana'
+        elif _has_japanese(text) and not _has_japanese(replacement):
             return None, 'replace_text: replacement dropped Japanese'
         if _ASCII_WORD.match(replacement) and len(replacement.split()) > 5:
             return None, 'replace_text: latin-only replacement'
@@ -221,9 +282,10 @@ def validate_decision(item: dict, decision: dict,
 
 def _apply_decisions(pack: dict, decisions: list[dict],
                      allow_rewrite: bool = True,
-                     allowed_actions: set | None = None) -> dict:
+                     allowed_actions: set | dict | None = None) -> dict:
     by_id = {item['id']: item for item in pack.get('items') or []}
-    stats = {'filled': 0, 'rejected': 0, 'unknown_id': 0}
+    stats = {'filled': 0, 'rejected': 0, 'unknown_id': 0, 'duplicate_id': 0}
+    seen = set()
     for decision in decisions:
         try:
             item_id = int(decision.get('id'))
@@ -233,11 +295,15 @@ def _apply_decisions(pack: dict, decisions: list[dict],
         if item is None:
             stats['unknown_id'] += 1
             continue
+        if item_id in seen:
+            stats['duplicate_id'] += 1
+            continue
+        seen.add(item_id)
         if str(item.get('decision') or '').strip():
             continue  # already decided (filled earlier or by a previous run)
         normalized, reason = validate_decision(
             item, decision, allow_rewrite=allow_rewrite,
-            allowed_actions=allowed_actions)
+            allowed_actions=_allowed_for(item, allowed_actions))
         if normalized is None:
             item['rejected'] = reason
             item['decision'] = 'keep'
@@ -256,24 +322,41 @@ def _apply_decisions(pack: dict, decisions: list[dict],
     return stats
 
 
+def _ask(chat, batch: list[dict], log) -> list[dict] | None:
+    messages = [
+        {'role': 'system', 'content': SYSTEM_PROMPT},
+        {'role': 'user', 'content': _prompt_payload(batch)},
+    ]
+    content, error = chat(messages)
+    if error:
+        print(f'[review] batch failed: {error}', file=log)
+        return None
+    data = _extract_json_object(content)
+    decisions = (data or {}).get('decisions')
+    if not isinstance(decisions, list):
+        print('[review] batch: no decisions array', file=log)
+        return None
+    return decisions
+
+
 def fill_pack(pack: dict, *, chat=None, batch_size: int = BATCH_SIZE,
               max_items: int | None = None, include_all: bool = False,
-              allow_rewrite: bool = True, allowed_actions: set | None = None,
+              allow_rewrite: bool = True, allowed_actions: set | dict | None = None,
               log=sys.stderr) -> dict:
     """Fill routable gaps in ``pack`` in place.  Returns fill counters.
 
     ``chat`` is injectable (tests): it takes a list of messages and returns
-    ``(content, error)``.  Defaults to ``lib.llm.call_chat``.
+    ``(content, error)``.  Defaults to ``lib.llm.call_chat`` (JSON mode).
     """
     source = (pack_mod.pending_items(pack) if include_all
               else pack_mod.routable_items(pack))
     pending = list(source)
     if max_items is not None:
         pending = pending[:max_items]
-    total = {'filled': 0, 'rejected': 0, 'unknown_id': 0,
-             'batches': 0, 'failed_batches': 0,
-             'sent': len(pending), 'skipped_unroutable':
-                 len(pack_mod.pending_items(pack)) - len(source)}
+    total = {'filled': 0, 'rejected': 0, 'unknown_id': 0, 'duplicate_id': 0,
+             'batches': 0, 'failed_batches': 0, 'retries': 0,
+             'sent': len(pending),
+             'skipped_unroutable': len(pack_mod.pending_items(pack)) - len(source)}
     if not pending:
         return total
 
@@ -281,34 +364,38 @@ def fill_pack(pack: dict, *, chat=None, batch_size: int = BATCH_SIZE,
         from lib.llm import call_chat
 
         def chat(messages):
-            content = call_chat(messages, temperature=0.0, max_tokens=2048)
+            content = call_chat(messages, temperature=0.1, max_tokens=2048,
+                                json_mode=True)
             return content, ('' if content else 'empty response')
 
-    for offset in range(0, len(pending), batch_size):
-        batch = pending[offset:offset + batch_size]
-        messages = [
-            {'role': 'system', 'content': SYSTEM_PROMPT},
-            {'role': 'user', 'content': _prompt_payload(batch)},
-        ]
-        content, error = chat(messages)
+    for batch in _make_batches(pending, max_items=batch_size):
         total['batches'] += 1
-        if error:
+        decisions = _ask(chat, batch, log)
+        if decisions is None:
             total['failed_batches'] += 1
-            print(f'[review] batch {total["batches"]} failed: {error}',
-                  file=log)
-            continue
-        data = _extract_json_object(content)
-        decisions = (data or {}).get('decisions')
-        if not isinstance(decisions, list):
-            total['failed_batches'] += 1
-            print(f'[review] batch {total["batches"]}: no decisions array',
-                  file=log)
             continue
         counted = _apply_decisions(pack, decisions,
                                    allow_rewrite=allow_rewrite,
                                    allowed_actions=allowed_actions)
-        for key in ('filled', 'rejected', 'unknown_id'):
+        for key in ('filled', 'rejected', 'unknown_id', 'duplicate_id'):
             total[key] += counted[key]
+
+        # ID completeness: re-ask once for the cues the model skipped.
+        decided = {int(d.get('id')) for d in decisions
+                   if str(d.get('id', '')).lstrip('-').isdigit()}
+        missing = [i for i in batch if i['id'] not in decided]
+        if missing and total['retries'] < MAX_RETRIES:
+            total['retries'] += 1
+            total['batches'] += 1
+            retry_decisions = _ask(chat, missing, log)
+            if retry_decisions is None:
+                total['failed_batches'] += 1
+                continue
+            counted = _apply_decisions(pack, retry_decisions,
+                                       allow_rewrite=allow_rewrite,
+                                       allowed_actions=allowed_actions)
+            for key in ('filled', 'rejected', 'unknown_id', 'duplicate_id'):
+                total[key] += counted[key]
 
     pack['stats'] = pack_mod.stats(pack)
     return total

@@ -33,7 +33,8 @@ REPORT_STEP = '2'
 
 
 def find_packs(scan_dir: str) -> list[str]:
-    return sorted(glob.glob(os.path.join(scan_dir, '*.ai_pack.json')))
+    return sorted(glob.glob(os.path.join(scan_dir, '*.ai_pack.json')) +
+                  glob.glob(os.path.join(scan_dir, '*.zh_pack.json')))
 
 
 def _report_entries(pack: dict, outcomes: list[dict]) -> list[dict]:
@@ -68,17 +69,32 @@ def _report_entries(pack: dict, outcomes: list[dict]) -> list[dict]:
 def run_review_stage(project_dir: str, *, scan_dir: str | None = None,
                      fill: bool = True, chat=None, dry_run: bool = False,
                      update_report: bool = True, max_items: int | None = None,
-                     allowed_actions: set | None = None,
+                     allowed_actions: dict | set | None = None,
+                     attach_failures: bool = True,
                      log=sys.stderr) -> dict:
     """Run the fill+apply stage over every pack in ``project_dir``."""
-    if allowed_actions is None:
-        from lib.config import REVIEW_ACTIONS
-        allowed_actions = set(REVIEW_ACTIONS)
     scan_dir = scan_dir or os.path.join(project_dir, 'temp', 'scans')
+    if allowed_actions is None:
+        from lib.config import REVIEW_ACTIONS, REVIEW_TRANSLATION_ACTIONS
+        allowed_actions = {
+            'asr_repair': set(REVIEW_ACTIONS),
+            'translation': set(REVIEW_TRANSLATION_ACTIONS),
+        }
+    if attach_failures:
+        try:
+            from lib.review.failures import attach_to_packs
+            added = attach_to_packs(project_dir, scan_dir)
+            if added:
+                print(f'[review] {len(added)} translation pack(s) from QA',
+                      file=log)
+        except Exception as exc:  # never kill the run for a missing QA dir
+            print(f'[review] translation failures skipped: {exc}', file=log)
     summary = {
         'episodes': 0, 'packs': 0, 'gaps': 0, 'filled': 0, 'applied': 0,
         'rejected': 0, 'kept': 0, 'undecided': 0, 'errors': [],
-        'allowed_actions': sorted(allowed_actions),
+        'allowed_actions': ({k: sorted(v) for k, v in allowed_actions.items()}
+                            if isinstance(allowed_actions, dict)
+                            else sorted(allowed_actions)),
         'details': [],
     }
     paths = find_packs(scan_dir)
@@ -113,8 +129,9 @@ def run_review_stage(project_dir: str, *, scan_dir: str | None = None,
         summary['kept'] += result['kept']
 
         pack_mod.save_pack(path, pack)
+        suffix = 'zh' if path.endswith('.zh_pack.json') else 'ai'
         log_path = pack_mod.applied_path(
-            scan_dir, str(pack.get('episode') or 'unknown'))
+            scan_dir, str(pack.get('episode') or 'unknown'), suffix=suffix)
         try:
             with open(log_path, 'w', encoding='utf-8', newline='\n') as handle:
                 json.dump({

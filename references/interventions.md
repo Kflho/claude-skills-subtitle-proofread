@@ -32,32 +32,37 @@ UnicodeEncodeError: 'gbk' codec can't encode character '✅'
 
 ---
 
-## Phase 2: Review Pack（管线内自动，无人工）
+## Phase 2/3: Review Pack（管线内自动，无人工）
 
-**Trigger**: `[asr] review pack: temp/scans/<EP>.ai_pack.json (N gaps, M routable)`
+**Trigger**: `[review] ... pack(s): N gaps, M filled, K applied`
 
-这条链路**不需要人工**，也不需要单独命令：`run_all` 在 fix 之后直接跑
-`step_review_fill`。包里有两种条目：
+这条链路**不需要人工**，也不需要单独命令：`run_all` 在 fix / translate 之后直接跑
+`step_review_fill`。包里有两类条目：
 
-- `route != keep`（time / text / delete）：证据够判，按 15 条一批问 LLM；
-- `route == keep`：ASR 与原文不一致但没有可比证据，直接判 keep，**不花 token**。
+| kind | 来源 | 默认动作 |
+|---|---|---|
+| `translation` | `translated/zh/<EP>.qa.json` 里自动 repair 没清掉的失败（`japanese_residual` / `echo` / `empty` / `glossary_miss` / `too_long` / `cps`） | `replace_text`（改写为中文） |
+| `asr_repair` | 对齐后仍无可信判据的文本/删条候选（`route=text/delete`） | `keep` 只分类 |
 
-**默认只分类**：`REVIEW_ACTIONS=keep` 时 `set_time` / `replace_text` / `delete_line`
-会被校验器拒绝（这几种改动在 EP001 实测会把正确字幕改坏，见
-`sk_01_dev/docs/review-ai-fill.md`）。需要写权时：
+时间轴**不进模型**：`route=time` 只作为 L0 修复的证据，不发送。
+
+**策略**（`lib/config.py`）：
 
 ```bash
-# 允许删噪声 / 允许改时间与文本
-REVIEW_ACTIONS=keep,delete          python scripts/run_all.py ...
+# 默认：ASR 侧只分类；translation 可改写
+# 需要放开 ASR 侧写权时（实测会改坏，慎用）
 REVIEW_ACTIONS=keep,delete,rewrite  python scripts/run_all.py ...
+# 关闭 translation 改写
+REVIEW_TRANSLATION_ACTIONS=keep     python scripts/run_all.py ...
 ```
 
 **产出**：
 
 | 文件 | 内容 |
 |---|---|
-| `temp/scans/<EP>.ai_pack.json` | 缺口 + 证据 + `route` + 决定（唯一真相源） |
-| `temp/scans/<EP>.ai_applied.json` | 逐条结果：applied / rejected / kept + 原因 |
+| `temp/scans/<EP>.ai_pack.json` | ASR 缺口 + 证据 + `route` + 决定 |
+| `temp/scans/<EP>.zh_pack.json` | QA 失败条目：日文原句 + 现译文 + `failure` + 决定 |
+| `temp/scans/<EP>.{ai,zh}_applied.json` | 逐条结果：applied / rejected / kept + 原因 |
 | `reports/问题解决报告.md` | 只记真实改动（✅ 改、🗑️ 删），keep 不写 |
 
 **被拒/失败的处理**：条目标 `keep + rejected 原因`，**不产生人工待办**。

@@ -678,22 +678,27 @@ def test_step_review_fill_applies_decisions(tmp_path):
 
     scans = tmp_path / 'temp' / 'scans'
     scans.mkdir(parents=True)
-    srt = tmp_path / 'EP001.srt'
+    zh_dir = tmp_path / 'translated' / 'zh'
+    zh_dir.mkdir(parents=True)
+    srt = zh_dir / 'EP001.srt'
     srt.write_text("1\n00:00:05,000 --> 00:00:06,000\nおまえなにしてんだ\n\n",
                    encoding='utf-8')
-    _write_json(scans / 'EP001.ai_pack.json', {
-        'schema_version': 1, 'kind': 'review_pack', 'episode': 'EP001',
+    # translation packs are the ones allowed to rewrite by default
+    _write_json(scans / 'EP001.zh_pack.json', {
+        'schema_version': 2, 'kind': 'review_pack', 'episode': 'EP001',
         'srt': str(srt), 'items': [{
-            'id': 0, 'cue_index': 0, 'start': '00:00:05,000',
+            'id': 0, 'cue_index': 0, 'kind': 'translation', 'route': 'text',
+            'start': '00:00:05,000', 'end': '00:00:06,000',
             'seconds': {'start': 5.0, 'end': 6.0},
-            'text': 'おまえなにしてんだ',
-            'decision': 'replace_text', 'replacement': 'お前何してんだよ',
+            'text': 'おまえなにしてんだ', 'source_text': 'おまえなにしてんだ',
+            'failure': ['japanese_residual'],
+            'decision': 'replace_text', 'replacement': '你这混蛋在干什么',
         }],
     })
 
     assert run_all.step_review_fill(str(tmp_path), 'ja') is True
-    assert 'お前何してんだよ' in srt.read_text(encoding='utf-8')
-    applied = json.loads((scans / 'EP001.ai_applied.json')
+    assert '你这混蛋在干什么' in srt.read_text(encoding='utf-8')
+    applied = json.loads((scans / 'EP001.zh_applied.json')
                          .read_text(encoding='utf-8'))
     assert applied['summary']['applied'] == 1
 

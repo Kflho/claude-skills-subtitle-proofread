@@ -37,6 +37,10 @@ KIND = 'review_pack'
 
 DECISIONS = ('keep', 'set_time', 'replace_text', 'delete_line')
 ROUTES = ('time', 'text', 'delete', 'keep')
+# Only these routes are dispatched to the review model.  ``time`` is evidence
+# for the L0 planner, not a model task: measured boundary rewrites follow ASR
+# bias and make correct cues worse (docs/review-ai-fill.md).
+MODEL_ROUTES = ('text', 'delete')
 
 CONTEXT_SPAN = 2
 MAX_CONTEXT_CHARS = 80
@@ -297,7 +301,8 @@ def stats(pack: dict, cues: int | None = None, auto: int | None = None) -> dict:
     out = {
         'cues': cues if cues is not None else pack.get('stats', {}).get('cues', 0),
         'gaps': len(items),
-        'routed': sum(n for r, n in by_route.items() if r != 'keep'),
+        'routed': sum(n for r, n in by_route.items() if r in MODEL_ROUTES),
+        'timed': by_route.get('time', 0),
         'routes': by_route,
         'decided': len(filled) - len(rejected),
         'kept': by_decision.get('keep', 0),
@@ -320,8 +325,8 @@ def pending_items(pack: dict) -> list[dict]:
 
 
 def routable_items(pack: dict) -> list[dict]:
-    """Undecided gaps that carry evidence a decision could use."""
-    return [i for i in pending_items(pack) if i.get('route') != 'keep']
+    """Undecided gaps the review model is asked about (text / delete routes)."""
+    return [i for i in pending_items(pack) if i.get('route') in MODEL_ROUTES]
 
 
 def save_pack(path: str, pack: dict) -> str:
@@ -347,9 +352,9 @@ def load_pack(path: str) -> dict | None:
     return data
 
 
-def pack_path(scan_dir: str, episode: str) -> str:
-    return os.path.join(scan_dir, f'{episode}.ai_pack.json')
+def pack_path(scan_dir: str, episode: str, suffix: str = 'ai') -> str:
+    return os.path.join(scan_dir, f'{episode}.{suffix}_pack.json')
 
 
-def applied_path(scan_dir: str, episode: str) -> str:
-    return os.path.join(scan_dir, f'{episode}.ai_applied.json')
+def applied_path(scan_dir: str, episode: str, suffix: str = 'ai') -> str:
+    return os.path.join(scan_dir, f'{episode}.{suffix}_applied.json')

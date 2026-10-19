@@ -121,19 +121,21 @@ scripts/
    `Qwen3-ASR + FA` 设计（ASR-first），VAD/AED 只做提示。旧流程是工程实现，
    不是规范；必要时重设计。见 `docs/adr/010-asr-first-pipeline.md`。
 
-8. **Review 阶梯（管线内自填，无人工队列）**: L0 自动（高置信）→ 其余缺口写
-   `temp/scans/<EP>.ai_pack.json`（schema v2，含证据 + `route`）→ review 阶段
-   按 15 条一批问 LLM → 决策校验 → 逐条应用 + 回滚 → `<EP>.ai_applied.json`。
-   没有工作单交接、没有转换脚本、不新造人工队列；keep 不进报告，只进计数。
-   默认 `REVIEW_ACTIONS=keep`（只分类）：EP001 实测给改写权 48 条改动 47 条变差、
-   给删条权误删 8–9 条真台词；路由把 275 条压到 100 条（-64%），质量零变化。
-   阈值与实验见 `docs/review-ai-fill.md`，决策见 ADR-012。split 仍不自动应用。
+8. **Review 阶梯（管线内自填，无人工队列）**: AI 只在**检测器判失败**时接入。
+   ① `translation`（QA：`japanese_residual`/`echo`/`empty`/`glossary_miss`/`too_long`/`cps`）
+   → `<EP>.zh_pack.json`，默认允许改写为中文；② `asr_repair`（ASR 与原文分歧）
+   → `<EP>.ai_pack.json`，只有 `route=text/delete` 会问模型，**时间轴不进模型**
+   （`route=time` 只做 L0 证据），默认 `REVIEW_ACTIONS=keep` 只分类。
+   决策经 route×kind 白名单 + 数值/语言校验 + 逐条回滚，结果写 `<EP>.{ai,zh}_applied.json`；
+   keep 不进报告。实测：translation 30 条注入全清、0 误伤；ASR 侧给权 47/48 变差，
+   所以只分类。阈值/提示词/实验见 `docs/review-ai-fill.md`，决策见 ADR-012。
 
-9. **LLM 只在两个阶段出现**: 翻译（唯一必须）与 review 分类（默认不给写权）。
+9. **LLM 只在两个阶段出现**: 翻译（必须）与复核（检测器判失败的条目）。
    无传统 MT/百度 fallback（已移除）。用用户已配置的**国内** LLM
    （`~/.claude/settings.json` 的 DeepSeek，`LLM_MODEL=deepseek-v4-pro`，已实测）。
    成本原则：优先免费/本地；需要 token 时**只接受国内服务**，国外服务暂不配置。
-   review 阶段默认 100 条/集 ≈ 7 次调用 ≈ 20 s；云 ASR 国内可选但不默认，国外不纳入。
+   复核一个集：translation 28–30 条（2 批）+ ASR 40–60 条（3–4 批）≈ 10–20 s；
+   云 ASR 国内可选但不默认，国外不纳入。
 
 10. **技术只通过接缝接入**: 所有候选技术（ASR/FA/VAD/AED/分离/翻译/云/双引擎等）
     必须在 `docs/adr/011-technology-integration-map.md` 的接缝里有位置；可选能力默认

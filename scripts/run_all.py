@@ -868,7 +868,13 @@ def step_review_fill(project_dir, lang='ja', target_dir=None, dry_run=False):
 
     scan_dir = os.path.join(project_dir, 'temp', 'scans')
     packs = [f for f in os.listdir(scan_dir)] if os.path.isdir(scan_dir) else []
-    if not any(f.endswith('.ai_pack.json') for f in packs):
+    qa_dir = os.path.join(project_dir, 'translated', 'zh')
+    has_qa = any(f.endswith('.qa.json') for f in os.listdir(qa_dir)) \
+        if os.path.isdir(qa_dir) else False
+    # translation-QA failures are collected into their own packs by the stage,
+    # so run it even when only a zh QA report exists.
+    if not any(f.endswith(('.ai_pack.json', '.zh_pack.json')) for f in packs) \
+            and not has_qa:
         return True
 
     try:
@@ -887,6 +893,8 @@ def step_review_fill(project_dir, lang='ja', target_dir=None, dry_run=False):
         print(f'[review] stage failed: {exc}', file=sys.stderr)
         return False
 
+    if not summary.get('packs'):
+        return True
     for detail in summary.get('details', []):
         stats = detail.get('stats') or {}
         print(f"[review] {detail.get('episode')}: {detail.get('gaps')} gaps, "

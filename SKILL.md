@@ -360,11 +360,14 @@ export LLM_BASE_URL='https://api.deepseek.com/v1'
 > 翻译是**必须调用 LLM 的阶段**，用用户已配置的国内 key（`~/.claude/settings.json`
 > 的 `LLM_API_KEY`/`LLM_BASE_URL`/`LLM_MODEL`；DeepSeek，Claude Code 自动注入）。
 > 成本策略：优先免费/本地；需要 token 时只接受国内服务，国外服务暂不配置。
-> **字幕复核缺口在管线内自填**（ADR-012）：`fix_by_asr` 把自动修不掉的 cue 写成
-> `temp/scans/<EP>.ai_pack.json`，review 阶段按 15 条一批问 LLM 并应用结果；
-> **默认 `REVIEW_ACTIONS=keep` 只分类**（不改时间/文本、不删条——EP001 实测改写会稳定改坏），
-> 需要写权时显式 `REVIEW_ACTIONS=keep,delete,rewrite`。详见
-> [sk_01_dev/docs/review-ai-fill.md](sk_01_dev/docs/review-ai-fill.md)（开发文档）。
+> **字幕复核缺口在管线内自填**（ADR-012）：分两类、按失败类型处置。
+> ① **QA 判失败**（`japanese_residual` 残留假名 / `echo` 未翻译 / `empty` /
+> `glossary_miss` / `too_long` / `cps`）：自动 repair 没清掉的条目写进
+> `temp/scans/<EP>.zh_pack.json`，AI 译成中文并逐条校验（不得含假名），
+> 默认允许改写；EP001–03 注入残留实验 28/30/29 条全清、0 误伤。
+> ② **ASR 与原文分歧**：只有带可比证据的文本/删条候选会问模型，时间轴不进模型；
+> 默认 `REVIEW_ACTIONS=keep` 只分类（实测给权会把正确字幕改坏）。
+> 详见 [sk_01_dev/docs/review-ai-fill.md](sk_01_dev/docs/review-ai-fill.md)（开发文档）。
 > Review 之外的专名/润色不新增 LLM 调用（走 agent 工作单或并入翻译 prompt）；
 > 无 key 时明确失败/保留原文，不回退机翻。
 > AI 润色为**可选**：Pipeline 末尾交互提问。需要 `LLM_API_KEY` 环境变量。无 key 时降级为 AI 助理自行润色（⚠️ 高 token 消耗，7.5 万 cue）。

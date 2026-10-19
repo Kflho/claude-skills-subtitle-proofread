@@ -29,7 +29,7 @@ from lib.config import (
 
 def call_chat(messages, api_key=None, model=None, base_url=None,
               temperature=0.1, max_tokens=None, timeout=120, retries=2,
-              delay=1.0):
+              delay=1.0, json_mode=False):
     """Call an OpenAI-compatible chat API. Returns content string or None.
 
     Args:
@@ -37,6 +37,9 @@ def call_chat(messages, api_key=None, model=None, base_url=None,
         api_key/model/base_url: fall back to lib.config env/defaults.
         max_tokens: fall back to LLM_MAX_TOKENS (config).
         retries: number of additional attempts after the first failure.
+        json_mode: request ``response_format={"type": "json_object"}`` (the
+            review stage parses JSON; without it some models wrap the payload
+            in prose or fences).
 
     ⚠️ 推理模型（deepseek-flash / deepseek-v4-pro）默认关闭思考
     （LLM_REASONING_EFFORT，默认 'none'）。不关的话思考 token 会吃光
@@ -57,6 +60,8 @@ def call_chat(messages, api_key=None, model=None, base_url=None,
         'temperature': temperature,
         'max_tokens': max_tokens or LLM_MAX_TOKENS,
     }
+    if json_mode:
+        body['response_format'] = {'type': 'json_object'}
     if LLM_REASONING_EFFORT:
         body['reasoning_effort'] = LLM_REASONING_EFFORT
     data = json.dumps(body).encode('utf-8')

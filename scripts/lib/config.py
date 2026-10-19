@@ -92,6 +92,13 @@ LLM_REASONING_EFFORT = os.environ.get('LLM_REASONING_EFFORT', 'none')
 REVIEW_ACTIONS = tuple(
     a.strip() for a in os.environ.get('REVIEW_ACTIONS', 'keep').split(',')
     if a.strip())
+# Translation-QA failures (Japanese residue, echo, glossary miss, CPS) are the
+# failures the automatic repair pass could not clear; rewriting one line is the
+# intended fix there, so this stage defaults to allow it.
+REVIEW_TRANSLATION_ACTIONS = tuple(
+    a.strip() for a in os.environ.get(
+        'REVIEW_TRANSLATION_ACTIONS', 'keep,rewrite').split(',')
+    if a.strip())
 REVIEW_ALLOW_REWRITE = 'rewrite' in REVIEW_ACTIONS
 REVIEW_ALLOW_DELETE = 'delete' in REVIEW_ACTIONS
 

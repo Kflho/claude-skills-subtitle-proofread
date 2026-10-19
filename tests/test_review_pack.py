@@ -1,4 +1,4 @@
-"""Review pack: routing, evidence, stats and round-trip (v2 artifact)."""
+﻿"""Review pack: routing, evidence, stats and round-trip (v2 artifact)."""
 
 import json
 
@@ -59,7 +59,8 @@ def test_routes_gaps_by_the_evidence_they_carry():
 
     routes = [i['route'] for i in pack['items']]
     assert routes == ['time', 'text', 'delete']
-    assert pack['stats']['routed'] == 3
+    assert pack['stats']['routed'] == 2      # time is not dispatched
+    assert pack['stats']['timed'] == 1
     assert pack['stats']['auto'] == 4
     assert pack['items'][0]['suggested']['new_start'] == 4.6
     assert pack['items'][1]['suggested']['new_text'] == 'なんだと！'
@@ -139,7 +140,7 @@ def test_pack_roundtrip_pending_and_routable(tmp_path):
     loaded = pack_mod.load_pack(path)
 
     assert pack_mod.pending_items(loaded) == loaded['items']
-    assert len(pack_mod.routable_items(loaded)) == 1
+    assert pack_mod.routable_items(loaded) == []   # time route: L0 only
 
     loaded['items'][0]['decision'] = 'keep'
     assert pack_mod.pending_items(loaded) == []

@@ -28,7 +28,19 @@
   ADR-012。路由把 275 条压到 100 条（-64%），质量零变化。
 
 ### 测试
-- 1469 → **1472 passed**（新增 `test_review_pack/fill/apply`，主流程测试同步改契约）。
+- 1469 → **1480 passed**（新增 `test_review_pack/fill/apply/failures`，主流程测试同步改契约）。
+- 新增离线全链路测试：QA 判残留 → pack → 假 chat 填充 → apply → 重跑 QA = 0。
+- 启发式台账（每个阈值的依据 + 对应测试）见 `docs/review-ai-fill.md` §4。
+
+### 修正（同日，用户指出触发条件错）
+- AI 的接入点是**检测器判失败**，不是「ASR 和字幕不一致」。新增
+  `lib/review/failures.py`：QA 的 `japanese_residual`/`echo`/`empty`/`glossary_miss`/
+  `too_long`/`cps` → `<EP>.zh_pack.json`，默认允许改写为中文。
+  实测 EP001–03 各注入 30 条残留 → 28/30/29 条全清、kana 归零、注入集外 0 改动。
+- 时间轴移出模型动作：`route=time` 不再发送（实测模型写时间 47/48 变差；
+  外部字幕后处理协议同样规定模型不得写时间）。
+- 提示词 v2：JSON 模式、≤40 条/≤4000 字批量、ID 缺失补问一次、few-shot、
+  `why` 必写依据；翻译相似度 0.716/0.764/0.690 → 0.757/0.765/0.706。
 
 ### 避坑
 - 主故事窗口的 ASR 缓存是**窗口内时间**（从 0 开始），CC 是集时间码；不补
