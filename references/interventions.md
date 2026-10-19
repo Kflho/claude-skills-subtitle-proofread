@@ -32,6 +32,39 @@ UnicodeEncodeError: 'gbk' codec can't encode character '✅'
 
 ---
 
+## Phase 2: Review Pack（管线内自动，无人工）
+
+**Trigger**: `[asr] review pack: temp/scans/<EP>.ai_pack.json (N gaps, M routable)`
+
+这条链路**不需要人工**，也不需要单独命令：`run_all` 在 fix 之后直接跑
+`step_review_fill`。包里有两种条目：
+
+- `route != keep`（time / text / delete）：证据够判，按 15 条一批问 LLM；
+- `route == keep`：ASR 与原文不一致但没有可比证据，直接判 keep，**不花 token**。
+
+**默认只分类**：`REVIEW_ACTIONS=keep` 时 `set_time` / `replace_text` / `delete_line`
+会被校验器拒绝（这几种改动在 EP001 实测会把正确字幕改坏，见
+`sk_01_dev/docs/review-ai-fill.md`）。需要写权时：
+
+```bash
+# 允许删噪声 / 允许改时间与文本
+REVIEW_ACTIONS=keep,delete          python scripts/run_all.py ...
+REVIEW_ACTIONS=keep,delete,rewrite  python scripts/run_all.py ...
+```
+
+**产出**：
+
+| 文件 | 内容 |
+|---|---|
+| `temp/scans/<EP>.ai_pack.json` | 缺口 + 证据 + `route` + 决定（唯一真相源） |
+| `temp/scans/<EP>.ai_applied.json` | 逐条结果：applied / rejected / kept + 原因 |
+| `reports/问题解决报告.md` | 只记真实改动（✅ 改、🗑️ 删），keep 不写 |
+
+**被拒/失败的处理**：条目标 `keep + rejected 原因`，**不产生人工待办**。
+没有「待人工复核」队列是设计目标，不是遗漏。
+
+---
+
 ## Phase 2: AI Fragment Completion
 
 **Trigger**: Pipeline output `[ai-review] N pending`

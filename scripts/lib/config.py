@@ -80,6 +80,21 @@ LLM_BASE_URL_DEFAULT = 'https://api.deepseek.com/v1'
 LLM_MAX_TOKENS       = int(os.environ.get('LLM_MAX_TOKENS', '') or 8192)
 LLM_REASONING_EFFORT = os.environ.get('LLM_REASONING_EFFORT', 'none')
 
+# Review stage: which decisions may actually touch the subtitles?
+#   'keep'                 (default) triage only — the model classifies, nothing
+#                          is rewritten or deleted;
+#   'keep,delete'          also allow removing noise cues;
+#   'keep,delete,rewrite'  also allow boundary moves and text replacement.
+# EP001 experiments (sk_01_dev/docs/review-ai-fill.md): rewrites driven by ASR
+# evidence moved correct cues AWAY from the CC standard (47/48 changed cues
+# worse, P90 0 → 1692 ms) and delete decisions removed 8–9 real short lines.
+# So the safe default is triage; the other rights are opt-in only.
+REVIEW_ACTIONS = tuple(
+    a.strip() for a in os.environ.get('REVIEW_ACTIONS', 'keep').split(',')
+    if a.strip())
+REVIEW_ALLOW_REWRITE = 'rewrite' in REVIEW_ACTIONS
+REVIEW_ALLOW_DELETE = 'delete' in REVIEW_ACTIONS
+
 
 def apply_llm_params(body, max_tokens=None):
     """给自建 LLM 请求体补上推理模型所需的参数。

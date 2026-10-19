@@ -669,19 +669,33 @@ def test_step_ai_review_without_pending_fragments(tmp_path, capsys):
     assert 'No pending AI review entries' in capsys.readouterr().err
 
 
-def test_step_ai_review_counts_asr_worklist(tmp_path, capsys):
+def test_step_review_fill_no_packs(tmp_path):
+    assert run_all.step_review_fill(str(tmp_path), 'ja') is True
+
+
+def test_step_review_fill_applies_decisions(tmp_path):
+    import json
+
     scans = tmp_path / 'temp' / 'scans'
     scans.mkdir(parents=True)
-    _write_json(scans / 'EP001.asr_review.json', {
-        'episode': 'EP001',
-        'items': [{'decision': ''}, {'decision': 'keep'}],
+    srt = tmp_path / 'EP001.srt'
+    srt.write_text("1\n00:00:05,000 --> 00:00:06,000\nおまえなにしてんだ\n\n",
+                   encoding='utf-8')
+    _write_json(scans / 'EP001.ai_pack.json', {
+        'schema_version': 1, 'kind': 'review_pack', 'episode': 'EP001',
+        'srt': str(srt), 'items': [{
+            'id': 0, 'cue_index': 0, 'start': '00:00:05,000',
+            'seconds': {'start': 5.0, 'end': 6.0},
+            'text': 'おまえなにしてんだ',
+            'decision': 'replace_text', 'replacement': 'お前何してんだよ',
+        }],
     })
 
-    assert run_all.step_ai_review(str(tmp_path), 'ja') is True
-    err = capsys.readouterr().err
-    assert 'ASR worklist: 1 decisions' in err
-    assert 'EP001: 1 pending' in err
-    assert 'ai_review_fixes.json' in err
+    assert run_all.step_review_fill(str(tmp_path), 'ja') is True
+    assert 'お前何してんだよ' in srt.read_text(encoding='utf-8')
+    applied = json.loads((scans / 'EP001.ai_applied.json')
+                         .read_text(encoding='utf-8'))
+    assert applied['summary']['applied'] == 1
 
 
 def test_apply_ai_checklists_without_dir(tmp_path, capsys):

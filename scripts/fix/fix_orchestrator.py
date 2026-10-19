@@ -101,71 +101,6 @@ def attach_audio_hints(wav: str, out_dir: str, episode: str,
 
 
 # ═══════════════════════════════════════════════════════════════
-# ASR review worklist (Review ladder L1/L2 hand-off)
-# ═══════════════════════════════════════════════════════════════
-
-def build_asr_review_worklist(episode: str, cues: list, alignments: list,
-                              review: list, srt_path: str = '') -> dict:
-    """Turn non-auto repairs into a machine-readable AI review worklist.
-
-    The agent (or an LLM) fills ``decision`` per item and writes the result
-    to ``ai_review_fixes.json``; ``apply_fixes`` understands the actions
-    ``set_time`` / ``replace_text`` / ``delete_line``.  No extra LLM call is
-    made here (ADR-011): this is the hand-off that replaces a 272-line
-    manual queue.
-    """
-    by_index = {a.cue_index: a for a in alignments}
-    items = []
-    for p in review:
-        al = by_index.get(p.cue_index)
-        cue = cues[p.cue_index] if 0 <= p.cue_index < len(cues) else {}
-        start_error = getattr(al, 'start_error', None) if al else None
-        end_error = getattr(al, 'end_error', None) if al else None
-        items.append({
-            'cue_index': p.cue_index,
-            'start': format_tc(p.cue_start),
-            'end': format_tc(p.cue_end),
-            'text': p.old_text or cue.get('text', ''),
-            'asr_text': getattr(al, 'asr_text', '') if al else '',
-            'action': p.action,
-            'confidence': p.confidence,
-            'similarity': round(p.similarity, 3),
-            'start_error_ms': (None if start_error is None
-                               else round(1000 * start_error, 1)),
-            'end_error_ms': (None if end_error is None
-                             else round(1000 * end_error, 1)),
-            'reasons': list(p.reasons),
-            'suggested': {
-                'new_start': (None if p.new_start is None
-                              else round(p.new_start, 3)),
-                'new_end': (None if p.new_end is None
-                            else round(p.new_end, 3)),
-                'new_text': p.new_text,
-            },
-            # Filled by the agent:
-            'decision': '',      # keep | fix_time | replace_text | delete | split
-            'new_start': '',
-            'new_end': '',
-            'replacement': '',
-            'note': '',
-        })
-    return {
-        'schema_version': 1,
-        'episode': episode,
-        'srt': srt_path,
-        'instructions': (
-            'Fill decision per item: keep / fix_time / replace_text / delete / '
-            'split. fix_time needs new_start+new_end (seconds or SRT timecode); '
-            'replace_text needs replacement. Then write fixes for '
-            'run_all/apply_fixes: fix_time -> action=set_time with start=item.start, '
-            'new_start/new_end; replace_text -> action=replace_text with '
-            'start=item.start, replacement; delete -> action=delete_line with '
-            'start=item.start. Put them in temp/scans/ai_review_fixes.json.'),
-        'items': items,
-    }
-
-
-# ═══════════════════════════════════════════════════════════════
 # Fixer — thin orchestrator
 # ═══════════════════════════════════════════════════════════════
 
@@ -607,32 +542,26 @@ class Fixer:
             write_srt(self._srt_path, new_cues)
 
         review = [p for p in plan if not p.auto]
-        review_path = os.path.join(self._temp_dir,
-                                   f'{self.episode}.asr_review.json')
-        try:
-            payload = build_asr_review_worklist(
-                self.episode, cues, aligned.alignments, review,
-                srt_path=self._srt_path)
-            with open(review_path, 'w', encoding='utf-8') as handle:
-                json.dump(payload, handle, ensure_ascii=False, indent=2)
-            if review:
-                print(f'[asr] AI review worklist: {review_path} '
-                      f'({len(review)} items)', file=sys.stderr)
-        except OSError as exc:
-            print(f'[asr] review worklist write failed: {exc}',
-                  file=sys.stderr)
-        try:
-            if review:
-                upsert_entries(self._report_path, step='2', entries=[
-                    {'ep': self.episode,
-                     'time': format_tc(p.cue_start),
-                     'original': p.old_text[:120],
-                     'corrected': f'（P2 {p.action}：{p.confidence}）',
-                     'status': '⬜'}
-                    for p in review
-                ])
-        except Exception as exc:
-            print(f'[asr] report write failed: {exc}', file=sys.stderr)
+        if review:
+            # One pack per episode carries every gap to the review stage
+            # (fill + verified apply, see lib/review).  No report ⬜ queue:
+            # the stage decides, applies and records what happened.
+            try:
+                from lib.review import pack as review_pack
+                payload = review_pack.build_pack(
+                    self.episode, new_cues, aligned.alignments, review,
+                    srt_path=self._srt_path,
+                    generator={'engine': aligned.engine,
+                               'model': aligned.model},
+                    auto_count=stats['auto'],
+                    segments=getattr(result, 'segments', None))
+                pack_file = review_pack.save_pack(
+                    review_pack.pack_path(self._temp_dir, self.episode), payload)
+                routed = payload['stats'].get('routed', 0)
+                print(f'[asr] review pack: {pack_file} ({len(review)} gaps, '
+                      f'{routed} routable)', file=sys.stderr)
+            except (OSError, ImportError) as exc:
+                print(f'[asr] review pack write failed: {exc}', file=sys.stderr)
 
         print(f'[asr] {applied} fixes from {stats["auto"]} auto candidates, '
               f'{len(review)} review', file=sys.stderr)

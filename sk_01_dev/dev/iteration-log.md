@@ -5,6 +5,37 @@
 >
 > **记录规则**：只记架构/流程/接口级变更（新增/删除/重命名脚本、工作流顺序调整、报告格式变更）。不记修 bug、调参数、加 flag 等正常开发活动。
 
+## 2026-10-19 — 复核缺口 AI 填充（管线内，默认只分类）
+
+### 架构变更
+- 新增 `scripts/lib/review/`：`pack.py`（缺口 + 证据 + route）、`fill.py`（批量问 LLM +
+  动作白名单 + 数值校验）、`apply.py`（逐条应用 + 邻接/空行/重复校验 + 回滚）、
+  `stage.py`（fill → apply → 审计日志 → 报告）。
+- 产出文件重设计：`temp/scans/<EP>.ai_pack.json`（schema v2）取代
+  `<EP>.asr_review.json`；新增 `<EP>.ai_applied.json`；报告只记真实改动。
+- 删除 `scripts/apply/asr_review_to_fixes.py`（转换接口）与 `build_asr_review_worklist`；
+  `run_all` 在 fix 之后直接跑 `step_review_fill`，`--apply-ai-review` / `--resume` 复用同一步。
+- 新增 `REVIEW_ACTIONS`（默认 `keep`）与 `lib/review/pack.route_item` 的证据路由；
+  配置文件 `lib/config.py`。
+
+### 行为修正（接口级）
+- `fix_by_asr` 的 review 条目不再写报告 ⬜，改为写包；条目只在 `apply` 后进报告。
+- 默认不给模型写权：EP001 实测改写 48 条改动 47 条变差（P90 0 → 1692 ms）、
+  删条权误删 8–9 条真台词；只分类时 0 应用 0 伤害。
+
+### 证据
+- 新增 `scripts/eval/review_fill_eval.py` + `docs/review-ai-fill.md`（EP001 四组实验）；
+  ADR-012。路由把 275 条压到 100 条（-64%），质量零变化。
+
+### 测试
+- 1469 → **1472 passed**（新增 `test_review_pack/fill/apply`，主流程测试同步改契约）。
+
+### 避坑
+- 主故事窗口的 ASR 缓存是**窗口内时间**（从 0 开始），CC 是集时间码；不补
+  `--audio-offset 95` 的话所有 cue 都像「匹配不上」，实验会得到假结论。
+- 让模型看「建议值」等于让它执行证据；建议值本身不合格时（整句 → 2 字片段），
+  先在包里挡住，别指望提示词纠正。
+
 ## 2026-10-18 — 测试收尾 2（whisper_utils / episode_workflow / reuse / eval）
 
 ### 架构变更

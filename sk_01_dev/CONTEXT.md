@@ -121,19 +121,19 @@ scripts/
    `Qwen3-ASR + FA` 设计（ASR-first），VAD/AED 只做提示。旧流程是工程实现，
    不是规范；必要时重设计。见 `docs/adr/010-asr-first-pipeline.md`。
 
-8. **Review 阶梯**: L0 自动（高置信）→ L1 AI 批审（工作单）→ L2 AI 复核 →
-   L3 人工残留（目标 ≤5%，附片段/理由）。复用 `ai_fragments_<EP>.json`、
-   `ai_review_fixes.json`、`auto_classify`，不新造人工队列；不把 review
-   从一个文件挪到另一个文件冒充优化。
-   ASR 工作单 `<EP>.asr_review.json`（含 `srt` 路径）由
-   `scripts/apply/asr_review_to_fixes.py` 转成 `ai_review_fixes.json`；
-   split 不自动应用。自动分级与 gate 三档计数仍未做。
+8. **Review 阶梯（管线内自填，无人工队列）**: L0 自动（高置信）→ 其余缺口写
+   `temp/scans/<EP>.ai_pack.json`（schema v2，含证据 + `route`）→ review 阶段
+   按 15 条一批问 LLM → 决策校验 → 逐条应用 + 回滚 → `<EP>.ai_applied.json`。
+   没有工作单交接、没有转换脚本、不新造人工队列；keep 不进报告，只进计数。
+   默认 `REVIEW_ACTIONS=keep`（只分类）：EP001 实测给改写权 48 条改动 47 条变差、
+   给删条权误删 8–9 条真台词；路由把 275 条压到 100 条（-64%），质量零变化。
+   阈值与实验见 `docs/review-ai-fill.md`，决策见 ADR-012。split 仍不自动应用。
 
-9. **翻译全部 LLM（唯一确定使用 LLM 的阶段）**: 无传统 MT/百度 fallback（已移除）。
-   翻译用用户已配置的**国内** LLM（`~/.claude/settings.json` 的 DeepSeek，
-   `LLM_MODEL=deepseek-v4-pro`，已实测）。成本原则：优先免费/本地；需要 token 时
-   **只接受国内服务**，国外服务暂不配置。翻译以外的阶段不新增 LLM 调用
-   （Review L1/L2 = 本 skill agent 工作单）；云 ASR 国内可选但不默认，国外不纳入。
+9. **LLM 只在两个阶段出现**: 翻译（唯一必须）与 review 分类（默认不给写权）。
+   无传统 MT/百度 fallback（已移除）。用用户已配置的**国内** LLM
+   （`~/.claude/settings.json` 的 DeepSeek，`LLM_MODEL=deepseek-v4-pro`，已实测）。
+   成本原则：优先免费/本地；需要 token 时**只接受国内服务**，国外服务暂不配置。
+   review 阶段默认 100 条/集 ≈ 7 次调用 ≈ 20 s；云 ASR 国内可选但不默认，国外不纳入。
 
 10. **技术只通过接缝接入**: 所有候选技术（ASR/FA/VAD/AED/分离/翻译/云/双引擎等）
     必须在 `docs/adr/011-technology-integration-map.md` 的接缝里有位置；可选能力默认
@@ -143,7 +143,7 @@ scripts/
 ## 测试
 
 ```bash
-cd <skill>/tests && pytest -q    # 1435 tests, ~9s, 无外部依赖
+cd <skill>/tests && pytest -q    # 1472 tests, ~9s, 无外部依赖
 cd <skill> && pytest -q tests --cov --cov-report=term-missing   # 覆盖率 79.0%，矩阵见 docs/test-plan.md
 ```
 
@@ -154,13 +154,14 @@ P0 链路（Whisper 编排/VAD、翻译、专名、OP/ED、编排）已补齐；
 ## 技术路线
 
 2026 技术栈修订提案：`docs/tech-route-2026.md`；决策记录：`docs/adr/005-asr-alignment-stack.md`、`docs/adr/006-stable-asr-core.md`、`docs/adr/007-cue-alignment.md`、`docs/adr/008-qwen3-long-audio-chunking.md`、`docs/adr/009-reference-as-benchmark.md`、`docs/adr/010-asr-first-pipeline.md`、`docs/adr/011-technology-integration-map.md`；
-技术调研：`docs/research-2026-10-tech.md`（翻译提示词/切块/对齐的成熟方案）、`docs/research-2026-10-model-usage.md`（Qwen3-FA 直接对齐/ASR hotwords/FireRedVAD/Mel-Band 用对）、`docs/controlled-experiments.md`（控制变量台账）、`docs/fireredvad-status.md`（FireRedVAD 当前能力/接线/缺口）。
+技术调研：`docs/research-2026-10-tech.md`（翻译提示词/切块/对齐的成熟方案）、`docs/research-2026-10-model-usage.md`（Qwen3-FA 直接对齐/ASR hotwords/FireRedVAD/Mel-Band 用对）、`docs/controlled-experiments.md`（控制变量台账）、`docs/fireredvad-status.md`（FireRedVAD 当前能力/接线/缺口）、`docs/review-ai-fill.md`（复核缺口 AI 填充：契约、路由、守卫、EP001 四组实验）。
 
 **技术接入总图**（ADR-011）：所有候选技术按接缝分层——Ingest/Separator、AudioEvents（VAD/AED）、
 ASR/FA registry、Ensemble、Alignment/Repair、Evidence/Review、Glossary/Translation、Evaluation。
 当前**未接入**：FireRedVAD/AED（仅 provider/CLI）、Silero/TEN、RoFormer、云 ASR、
 跨引擎一致性、LLM 可读性、OP/ED 指纹、切片重对齐、chunk 选择、glossary→ASR context、
-Review 自动分级/auto-AI-human 计数。可选能力默认 null，新增不改流程。
+Review 自动分级/auto-AI-human 计数（已由 `lib/review` 的 pack 路由 + `stats` 提供，
+见 ADR-012）。可选能力默认 null，新增不改流程。
 **说话人/VibeVoice 已由用户删除（2026-10）**，不再保留接缝或计划。
 
 **翻译链路**（`docs/translation-architecture.md`）：`translate_srt.py`（批处理/术语）
@@ -201,7 +202,7 @@ P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 
 
 素材现状：**验收作品定为数码宝贝（Digimon Adventure）**，目录 `D:\videos\Animation\TV\数码宝贝`。**EP01/02/03 视频完整（各约 1386s）**；用户人工复核三集视频/CC 均无真实偏移。日文参考：`日语字幕\` 下 S01E01–S01E54 共 54 集 `ja[cc].srt`，已清洁；主故事窗口 `[95,1240]`。01–05 另有中文字幕，只能做参考无关/翻译复用。素材台账 `eval/materials.md`，清单 `eval/manifest.digimon.json`（Qwen3）与 `eval/manifest.digimon.whisper.json`（A/B）。莎莉/阿童木历史素材只保留机制/吞吐回放。
 
-测试：1435 passed / 0 failed / 79.0% 覆盖；矩阵与剩余缺口见 `docs/test-plan.md`。
+测试：1472 passed / 0 failed；矩阵与剩余缺口见 `docs/test-plan.md`。
 
 ## 配置
 

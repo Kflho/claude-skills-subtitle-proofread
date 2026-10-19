@@ -155,7 +155,7 @@ Evaluation
 |---|---|---|
 | CC 边界标准 + 三集基准 | ✅ | `episode_benchmark` |
 | release gate（目标 + 回归） | ✅ | `release_gate.py` |
-| auto/AI/human 三档计数 | ⬜ | gate 指标 |
+| auto/AI/human 三档计数 | ✅ pack stats：auto/routed/kept/rejected/applied（ADR-012） | gate 指标 |
 | 跨引擎 A/B（逐 cue） | 🟡 只有整集报告 | gate/评测 |
 | 成本/RTF/显存回归 | 🟡 有 RTF，无成本/显存 | gate |
 | 三模式编排（asr-first/text-only/evaluation） | 🟡 只有 flag，未分模式 | run_all |

@@ -849,36 +849,49 @@ def step_ai_review(project_dir, lang, target_dir=None):
         print(f'  then run: python run_all.py --lang {lang} --apply-ai-review',
               file=sys.stderr)
 
-    # ASR-first route: non-auto repairs are written as per-episode worklists
-    # (Review ladder L1/L2).  These are decisions, not human review.
-    asr_pending = []
-    for fname in sorted(os.listdir(scan_dir)):
-        if not fname.endswith('.asr_review.json'):
-            continue
-        json_path = os.path.join(scan_dir, fname)
-        data = _load_json_lenient(json_path, label='asr-review')
-        if not data:
-            continue
-        items = data.get('items', [])
-        pending = [i for i in items if not i.get('decision')]
-        if pending:
-            asr_pending.append((data.get('episode', fname), len(pending),
-                                json_path))
-    if asr_pending:
-        total_asr = sum(count for _, count, _ in asr_pending)
-        print(f'\n[ai-review] ASR worklist: {total_asr} decisions across '
-              f'{len(asr_pending)} episode(s)', file=sys.stderr)
-        for ep, count, path in asr_pending:
-            print(f'  {ep}: {count} pending → {path}', file=sys.stderr)
-        print('  Claude: fill "decision" per item (keep/fix_time/replace_text/'
-              'delete), then run: python scripts/apply/asr_review_to_fixes.py '
-              '--scans-dir temp/scans', file=sys.stderr)
-        print('  It writes temp/scans/ai_review_fixes.json; then rerun --resume.',
-              file=sys.stderr)
-
-    if total_entries == 0 and not asr_pending:
+    if total_entries == 0:
         print('[ai-review] No pending AI review entries.', file=sys.stderr)
 
+    return True
+
+
+def step_review_fill(project_dir, lang='ja', target_dir=None, dry_run=False):
+    """Fill review packs and apply them — inside the pipeline, no hand-off.
+
+    ``fix_by_asr`` writes ``temp/scans/<EP>.ai_pack.json`` with the gaps it
+    could not fix automatically.  This step asks the review model for a
+    decision per gap, applies the decisions with per-cue verification, and
+    writes ``<EP>.ai_applied.json``.  Gaps the model keeps (or whose decision
+    fails verification) stay as they are — there is no human queue.
+    """
+    from lib.config import LLM_API_KEY
+
+    scan_dir = os.path.join(project_dir, 'temp', 'scans')
+    packs = [f for f in os.listdir(scan_dir)] if os.path.isdir(scan_dir) else []
+    if not any(f.endswith('.ai_pack.json') for f in packs):
+        return True
+
+    try:
+        from lib.review.stage import run_review_stage
+    except ImportError as exc:
+        print(f'[review] stage unavailable: {exc}', file=sys.stderr)
+        return False
+
+    do_fill = bool(LLM_API_KEY)
+    if not do_fill:
+        print('[review] LLM_API_KEY 未设置 — 工作单不填充，只应用已填写的决定',
+              file=sys.stderr)
+    try:
+        summary = run_review_stage(project_dir, fill=do_fill, dry_run=dry_run)
+    except Exception as exc:  # review must not kill the pipeline
+        print(f'[review] stage failed: {exc}', file=sys.stderr)
+        return False
+
+    for detail in summary.get('details', []):
+        stats = detail.get('stats') or {}
+        print(f"[review] {detail.get('episode')}: {detail.get('gaps')} gaps, "
+              f"applied {detail.get('applied')}, rejected {detail.get('rejected')}, "
+              f"kept {stats.get('kept', 0)}", file=sys.stderr)
     return True
 
 
@@ -1285,6 +1298,8 @@ Examples:
         print(f'\n{"─"*40}', file=sys.stderr)
         print('  Apply AI review fixes (fast)', file=sys.stderr)
         print(f'{"─"*40}', file=sys.stderr)
+        # Review packs first (fill + verified apply), then the noun/oped fixes.
+        step_review_fill(project_dir, resolved_lang, target_dir=target_dir)
         # Apply JSON-based AI fixes (proper nouns, oped)
         step_apply_all(project_dir, resolved_lang, target_dir=target_dir)
         # Apply per-episode AI review checklists (L2.5 fragments)
@@ -1328,12 +1343,16 @@ Examples:
                                       audio_hints=args.audio_hints)
 
         step_ai_review(project_dir, resolved_lang, target_dir=target_dir)
+        step_review_fill(project_dir, resolved_lang, target_dir=target_dir)
     else:
         print(f'\n{"─"*40}', file=sys.stderr)
         print('  Phase 2/3: SKIPPED (--resume: AI review done, re-running Phase 3 only)',
               file=sys.stderr)
         print(f'{"─"*40}', file=sys.stderr)
         processed = None
+        # Resume exists to finish the review stage: fill/apply any pack that
+        # is still open (and apply decisions already written).
+        step_review_fill(project_dir, resolved_lang, target_dir=target_dir)
 
     # ═══════════════════════════════════════════════════════════════
     # Phase 3: Unify + Deliver
