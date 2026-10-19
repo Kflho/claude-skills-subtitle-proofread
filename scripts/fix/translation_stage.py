@@ -22,6 +22,7 @@ TRANSLATOR = SCRIPTS_DIR / 'translate_srt.py'
 GLOSSARY_CANDIDATES = (
     'temp/nouns/noun_mappings.json',
     'temp/scans/noun_mappings.json',
+    'glossaries/digimon.series.json',
     'noun_mappings.json',
 )
 

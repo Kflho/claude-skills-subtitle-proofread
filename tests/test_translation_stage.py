@@ -36,6 +36,14 @@ def test_find_glossary(tmp_path):
     assert found and found.endswith('noun_mappings.json')
 
 
+def test_find_glossary_falls_back_to_series_glossary(tmp_path):
+    (tmp_path / 'glossaries').mkdir()
+    (tmp_path / 'glossaries' / 'digimon.series.json').write_text(
+        '{"アグモン": "亚古兽"}', encoding='utf-8')
+    found = find_glossary(str(tmp_path))
+    assert found and found.endswith('digimon.series.json')
+
+
 def test_build_command_contains_contract(tmp_path):
     cmd = build_command('in.srt', 'out.srt', 'g.json', 'zh',
                         qa_report='qa.json', max_chars=14, max_cps=9)

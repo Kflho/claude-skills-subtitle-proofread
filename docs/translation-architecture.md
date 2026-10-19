@@ -121,7 +121,12 @@ QA（每条）：
 2. `translate_srt.py`：`--max-chars/--max-cps/--qa-report/--repair`；
    `--repair` 只重译 QA 标出的条，不动其他条。
    **glossary prompt 用 `ja→zh` 对照**（不是只给中文名）：EP003 名字段 30 条
-   0 违规，`タケル→阿武` 正确（旧 prompt 会译成「太一」）。
+   0 违规，`タケル→阿岳` 正确（旧 prompt 会译成「太一」）。
+3. **series glossary**：`glossaries/digimon.series.json`，18 个词条，
+   用 54 集日文 CC + 简体中文 ASS 的 14,605 个时间对齐 cue 对验证；
+   `scripts/nouns/validate_glossary.py` 只保留“日文出现 + 中文出现 + 同对出现”的词条。
+   采用现有中文字幕的 `タケル→阿岳`、`ヒカリ→小光`、`デジモン→数码宝贝`，
+   不采用我先前手填的「阿武」。EP003 名字段复测 0 违规。
 3. `fix/translation_stage.py`：源 SRT 发现、glossary 发现、输出
    `translated/zh/<EP>.srt` + `<EP>.qa.json`；失败不致命；dry-run。
 4. `run_all --translate`：修复/统一之后、交付之前执行，不覆盖源字幕。
@@ -143,8 +148,8 @@ run_all --target-dir <project> --input-dir . --lang ja --skip-whisper --translat
 | EP003 | 317 | 7（4 日语残留 + 1 回显 + 3 行长） | **0** | 首轮后剩 1 条角色名错译 |
 
 EP003 的根因不是模型不会翻，而是 **repair prompt 只给了中文译名、没给 ja→zh 对照**：
-`タケル` 被译成「太一」，给完整 `タケル→阿武` 映射后修复到 0。这条已写进代码与测试。
-初始翻译 prompt 也已改成 `ja→zh` 对照；EP003 名字段（30 条）复测 0 违规，`阿武` 正确。
+`タケル` 被译成「太一」，给完整 `タケル→阿岳` 映射后修复到 0。这条已写进代码与测试。
+初始翻译 prompt 也已改成 `ja→zh` 对照；EP003 名字段（30 条）复测 0 违规，`阿岳` 正确。
 
 prompt A/B（EP001 前 30 条，23 个对齐对，chrF）：
 
@@ -162,7 +167,7 @@ prompt A/B（EP001 前 30 条，23 个对齐对，chrF）：
 | 维度 | 结果 |
 |---|---|
 | 准确/不漏译 | 10/10 可接受；无关键错译 |
-| 术语/人名 | EP003 修复后 `タケル→阿武` 正确；EP001 汉字名保持 |
+| 术语/人名 | EP003 修复后 `タケル→阿岳` 正确；EP001 汉字名保持 |
 | 长度/CPS | 抽检 10 条均正常 |
 | 主要小问题 | EP002 cue150「日本？丈 なんだそれ？」译成「日本？阿丈，你在说什么？」略增解释，但语义成立 |
 

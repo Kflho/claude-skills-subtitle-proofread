@@ -7,11 +7,11 @@
 
 ```text
 python -m pytest -q
-1418 passed in ~9s           # 无网络、无模型、无真实项目依赖
+1420 passed in ~9s           # 无网络、无模型、无真实项目依赖
 coverage: 79.9% (15,105 statements)
 ```
 
-本轮 **+41 tests**（1377 → 1418）：ASR review 工作单/`set_time`/AI review 列表、AudioHints 契约与主流程接线、翻译 QA/阶段/repair/chrF/时间轴、review 转换器、全集 manifest、ASR chunk_sec/边界切块。
+本轮 **+43 tests**（1377 → 1420）：ASR review 工作单/`set_time`/AI review 列表、AudioHints 契约与主流程接线、翻译 QA/阶段/repair/chrF/时间轴、review 转换器、全集 manifest、ASR chunk_sec/边界切块、series glossary 验证。
 覆盖率 79.7% → 79.8%，0 failed。
 
 新增/扩展测试文件：
@@ -37,6 +37,8 @@ coverage: 79.9% (15,105 statements)
 | `test_build_manifest.py`（新） | 视频/CC 集号映射、dev/test split、已知 main_window、asr_json 命名 |
 | `test_qwen3_client.py`（扩展） | `chunk_sec` / `chunk_boundaries` 透传到 worker payload |
 | `test_aed_chunk.py`（新） | AED speech gap 选切点；无 gap 回退固定目标 |
+| `test_nouns_validate_glossary.py`（新） | 日文/中文同现验证；无证据词条丢弃；集号解析 |
+| `test_translation_stage.py`（扩展） | series glossary 发现回退 |
 
 ### 覆盖率按目录（本轮 vs 上轮）
 
@@ -44,7 +46,7 @@ coverage: 79.9% (15,105 statements)
 |---|---:|---:|---:|---|
 | `scripts/lib`（含子目录） | 3,810 | **86.3%** | 85.8% | 翻译 QA/chrF/时间轴；ASR 边界切块；AudioHints 契约/provider |
 | `scripts/fix` | 3,216 | **77.5%** | 78.0% | 翻译阶段/repair + AudioHints provider；whisper_pipeline 81% |
-| `scripts/nouns` | 2,424 | **67.2%** | 67.2% | `auto_classify` / `auto_clean_glossary` 仍 0%（旧入口） |
+| `scripts/nouns` | 2,500 | **67.7%** | 67.2% | series glossary 证据验证；`auto_classify` / `auto_clean_glossary` 仍 0%（旧入口） |
 | `scripts` 根 | 2,123 | **66.7%** | 65.7% | run_all 96%、translate_srt 85%、polish_zh 99% |
 | `scripts/asr` | 613 | **94.9%** | 95.0% | worker 边界切块/CLI |
 | `scripts/reuse` | 389 | **97.9%** | 97.9% | align 96%、apply 98%、common 100% |
@@ -53,7 +55,7 @@ coverage: 79.9% (15,105 statements)
 | `scripts/eval` | 1,164 | **87.8%** | 90.3% | release gate；benchmark；全集 manifest；AED 切块实验 |
 | `scripts/ass` | 313 | **86.3%** | 86.3% | CLI main 已测 |
 | `scripts/utils` | 285 | **80.4%** | 80.4% | — |
-| **合计** | **15,213** | **79.8%** | 79.9% | — |
+| **合计** | **15,289** | **79.8%** | 79.9% | — |
 
 ### 做得好的部分
 

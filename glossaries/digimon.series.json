@@ -1,0 +1,30 @@
+{
+  "_comment": "Digimon Adventure series glossary, validated against aligned Japanese CC + Simplified Chinese ASS (54 episodes, 14605 cue pairs). Names follow the existing Chinese subtitles (e.g. タケル→阿岳, ヒカリ→小光), not an invented mapping.",
+  "_validation": {
+    "episodes": 54,
+    "cue_pairs": 14605,
+    "kept": 18,
+    "dropped": {
+      "デジヴァイス": "no aligned pair with a stable Chinese term",
+      "サーバ大陸": "no aligned pair with a stable Chinese term"
+    }
+  },
+  "八神太一": "八神太一",
+  "武之内空": "武之内空",
+  "石田ヤマト": "石田大和",
+  "泉光子郎": "泉光子郎",
+  "太刀川ミミ": "太刀川美美",
+  "城戸丈": "城户丈",
+  "アグモン": "亚古兽",
+  "ガブモン": "加布兽",
+  "ピヨモン": "比丘兽",
+  "テントモン": "甲虫兽",
+  "パルモン": "巴鲁兽",
+  "ゴマモン": "哥玛兽",
+  "パタモン": "巴达兽",
+  "テイルモン": "迪路兽",
+  "デジモン": "数码宝贝",
+  "ファイル島": "文件岛",
+  "タケル": "阿岳",
+  "ヒカリ": "小光"
+}
