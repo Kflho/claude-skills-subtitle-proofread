@@ -481,6 +481,8 @@ judge-refiner）、IWSLT 2026 Subtitling（长度/压缩约束）、gpt-subtrans
 - **全量 glossary pairs 伤翻译流畅度/名字**（实测「石田阿和」）；只注入本批出现的
   术语后 chrF 回到 40.61、QA 0 → **错在“整本 glossary 塞进每个 batch”，不是术语对照本身**。
   已把 `_glossary_for_batch` 接进 `translate_file`。
+- 多集：EP002 前 30 条 QA 0；EP003 前 30 条 1 条 glossary miss（デジモン 被意译），
+  repair 后 0。协议/过滤可泛化。
 - **官方长音频直出明显更差**（P50 1882ms、P90 4148ms、coverage .297）：60s 切块
   不是“skill 把效果搞坏”，反而是必要控制。
 - **VAD concat 多集不成立**：EP002 CER .258→.503、EP003 .270→.606，coverage 也崩；
