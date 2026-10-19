@@ -27,7 +27,7 @@ python scripts/run_all.py \
   --video-dir "<视频目录>" \
   --lang ja \
   --asr qwen3 \
-  --asr-python ".venv-qwen/Scripts/python.exe" \
+  --asr-python "<qwen-python>" \
   --translate
 ```
 
@@ -62,8 +62,8 @@ translated/zh/<EP>.qa.json
 
 - Python 3.12+、ffmpeg；
 - LLM：`LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`；
-- Qwen3 路线：`.venv-qwen` + `models/Qwen3-ASR-1.7B` + `models/Qwen3-ForcedAligner-0.6B`；
-- 本机绝对路径/配置不写入仓库，由维护者本地保存。
+- Qwen3 路线：`<qwen-python>` + `<models-dir>/Qwen3-ASR-1.7B` + `<models-dir>/Qwen3-ForcedAligner-0.6B`；
+- 本机路径/密钥不写入仓库：同步后在 harness 副本运行 `scripts/harness/init_local.py --force`，写入 `local.json`。
 
 ## 已知限制
 

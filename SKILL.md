@@ -14,9 +14,13 @@ description: >
 - **使用**：任何字幕任务开始前先按本文件流程走，不凭记忆直接改字幕。
 - **开发**：修改本仓库任何 pipeline/工具/文档前也先重读「行为分级」「运行」「错误恢复」，
   **先找现有实现**（`oped_fixer`、`apply_map`、`run_all`、`references/*`），不要另写一套。
-- 本 skill 通过 junction 安装到 DSH：
-  `C:\Users\54238\.agents\skills\subtitle-proofread` → 本仓库，改完即指向同一份文件；
-  frontmatter 描述变更需新会话/重新加载后才会反映到 skill 目录。
+- **开发与 harness 分离**：本仓库是唯一开发源；harness 读取的是**同步副本**
+  （`~/.agents/skills/subtitle-proofread`），不要用 junction 指向仓库。
+  改完运行 `python scripts/harness/sync_skill.py --dry-run` 预览，再去掉
+  `--dry-run` 同步；描述变更需新会话/重新加载才生效。
+- **本机路径与密钥只写在 harness 副本的 `local.json`**：同步后在副本里运行
+  `python scripts/harness/init_local.py --force`（自动从环境/`~/.claude/settings.json`
+  读取模型目录、Qwen venv、Whisper、ffmpeg、LLM 端点）。仓库里不保存这些。
 
 3-phase pipeline：扫描（乱码 + VAD 语音时间线）→ 时间轴修复（默认 Whisper legacy；
 可选 Qwen3-ASR + ForcedAligner）→ 专名统一 + 交付；可选 LLM 翻译。
@@ -86,7 +90,7 @@ python "<scripts-dir>/eval/text_gate.py" --zh-dir "<中文翻译>" \
 > 词边界 + 忽略大小写；扁平词表同时加 `Sabu → 佐武` 供 `--mappings` 预替换。
 > 闸门加 `--max-latin 0` 检查英文残留；两条线必须落到同一个 canonical
 > （佐武实测：拉丁残留 178 → 0，23 个共同角色写法一致）。
-> 设计见 `sk_01_dev/docs/glossary-variants.md`。
+> 设计见 `references/design/glossary-variants.md`。
 
 **语境审查 agent**（专名是否符合作品世界 + 语体）：
 
@@ -107,7 +111,7 @@ python "<scripts-dir>/nouns/context_review.py" ... --mode style-fix
 > 实测（EP051，300 条）：**在 system prompt 里加风格块没有可测收益**（加与不加
 > 现代语/方言命中 9–10、语体标准差 0.096–0.102），所以没有 `--style` 开关；
 > 有效路径是「检测 → 定向改写 → 约束校验」（52 集：85 条 → 接受 69、命中 70→0）。
-> 设计见 `sk_01_dev/docs/style-context.md`。
+> 设计见 `references/design/style-context.md`。
 
 **OP/ED 与固定台词统一**（复用 `fix/oped_fixer.py`，不另造聚类）：
 
@@ -128,7 +132,7 @@ python "<scripts-dir>/nouns/context_review.py" ... --mode oped \
   --out-dir "<项目>/temp/oped_textkeyed"
 ```
 
-> 设计见 `sk_01_dev/docs/oped-fixed-lines.md`。
+> 设计见 `references/design/oped-fixed-lines.md`。
 
 **scope**：`global` = 跨全集；`per_episode` = 仅该集；`auto` = episodes ≥ 2 取 global。
 
@@ -201,13 +205,13 @@ python scripts/video_to_zh.py \
 
 ### 可选模型资产（不随 skill 分发）
 
-模型在 `models/`（gitignored）；本机绝对路径/版本由维护者本地保存，skill 不写死。速查：
+模型不在仓库里；路径来自 harness 副本的 `local.json`（`scripts/harness/init_local.py` 写入，`paths.models_dir`）。下表是目录结构示例：
 
 | 模型 | 路径 | 调用 |
 |---|---|---|
-| FireRedVAD/AED | `models/FireRedVAD/{VAD,Stream-VAD,AED}` | `.venv-qwen` + `fireredvad`；`scripts/audio/detect_events.py` |
-| Mel-Band RoFormer | `models/MelBandRoformer/*.safetensors` | 仅权重；运行时未接线 |
-| Qwen3-ASR/FA | `models/Qwen3-ASR-*`, `models/Qwen3-ForcedAligner-0.6B` | `.venv-qwen` worker |
+| FireRedVAD/AED | `<models-dir>/FireRedVAD/{VAD,Stream-VAD,AED}` | `<qwen-python>` + `fireredvad`；`scripts/audio/detect_events.py` |
+| Mel-Band RoFormer | `<models-dir>/MelBandRoformer/*.safetensors` | 仅权重；运行时未接线 |
+| Qwen3-ASR/FA | `<models-dir>/Qwen3-ASR-*`, `<models-dir>/Qwen3-ForcedAligner-0.6B` | `<qwen-python>` worker |
 
 ```powershell
 # FireRedVAD/AED → AudioHints JSON（16k mono wav）
@@ -444,7 +448,7 @@ export LLM_BASE_URL='https://api.deepseek.com/v1'
 > 默认允许改写；EP001–03 注入残留实验 28/30/29 条全清、0 误伤。
 > ② **ASR 与原文分歧**：只有带可比证据的文本/删条候选会问模型，时间轴不进模型；
 > 默认 `REVIEW_ACTIONS=keep` 只分类（实测给权会把正确字幕改坏）。
-> 详见 [sk_01_dev/docs/review-ai-fill.md](sk_01_dev/docs/review-ai-fill.md)（开发文档）。
+> 详见 [references/design/review-ai-fill.md](references/design/review-ai-fill.md)（开发文档）。
 > Review 之外的专名/润色不新增 LLM 调用（走 agent 工作单或并入翻译 prompt）；
 > 无 key 时明确失败/保留原文，不回退机翻。
 > AI 润色为**可选**：Pipeline 末尾交互提问。需要 `LLM_API_KEY` 环境变量。无 key 时降级为 AI 助理自行润色（⚠️ 高 token 消耗，7.5 万 cue）。

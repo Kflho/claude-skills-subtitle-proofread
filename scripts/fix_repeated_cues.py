@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Whisper 重复检测 + 切片修复 — 独立后处理脚本。
 
 检测连续高度相似的 cue（Whisper 幻觉重复），切片音频重跑 Whisper 修复。

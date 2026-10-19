@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Normalize reviewed proper-noun variants in Chinese subtitles.
 
 The glossary (`--glossary`) is the flat ja→zh map used by translation; the

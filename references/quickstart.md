@@ -88,7 +88,7 @@ python scripts/run_all.py \
   --video-dir "<视频目录>" \
   --lang ja \
   --asr qwen3 \
-  --asr-python ".venv-qwen/Scripts/python.exe" \
+  --asr-python "<qwen-python>" \
   --translate
 ```
 
@@ -125,6 +125,6 @@ QA 里优先看：
 ## 6. 失败时
 
 - 缺 API key：`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`。
-- 缺 Qwen 环境：确认 `.venv-qwen` 和 `--asr-python`。
+- 缺 Qwen 环境：确认 `local.json` 的 `paths.qwen_python` 和 `--asr-python`。
 - 路径报错：`--target-dir` 用绝对路径。
 - 更多命令：[translation.md](translation.md)、[full-mode.md](full-mode.md)。

@@ -12,14 +12,31 @@ Usage:
 
 import os
 
+from lib.local_config import pick
+
+# ═══════════════════════════════════════════════════════════════
+# Machine-local paths (harness local.json; env overrides)
+# ═══════════════════════════════════════════════════════════════
+
+MODELS_DIR = pick('MODELS_DIR', 'paths', 'models_dir', default='') or os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    'models')
+FFMPEG_BIN = pick('FFMPEG_BIN', 'paths', 'ffmpeg', default='ffmpeg')
+
+
+def _local_model(name: str, fallback: str) -> str:
+    candidate = os.path.join(MODELS_DIR, name)
+    return candidate if os.path.isdir(candidate) else fallback
+
+
 # ═══════════════════════════════════════════════════════════════
 # Whisper / ASR
 # ═══════════════════════════════════════════════════════════════
 
-WHISPER_CLI        = os.environ.get('WHISPER_CLI', '')
-WHISPER_MODEL       = os.environ.get('WHISPER_MODEL', '')
-WHISPER_RETRY_MODEL = os.environ.get('WHISPER_RETRY_MODEL', '')
-WHISPER_BACKEND     = os.environ.get('WHISPER_BACKEND', '').strip()
+WHISPER_CLI        = pick('WHISPER_CLI', 'paths', 'whisper_cli')
+WHISPER_MODEL       = pick('WHISPER_MODEL', 'paths', 'whisper_model')
+WHISPER_RETRY_MODEL = pick('WHISPER_RETRY_MODEL', 'paths', 'whisper_retry_model')
+WHISPER_BACKEND     = pick('WHISPER_BACKEND', 'whisper_backend', default='').strip()
 
 # ═══════════════════════════════════════════════════════════════
 # Qwen3-ASR / ForcedAligner (2026 技术路线；默认仍未启用)
@@ -29,7 +46,8 @@ WHISPER_BACKEND     = os.environ.get('WHISPER_BACKEND', '').strip()
 # 把默认切到 qwen3。Qwen3 依赖装在独立 venv，通过 worker JSON lines
 # 调用；主环境不 import torch/qwen-asr。
 ASR_ENGINE          = os.environ.get('ASR_ENGINE', 'whisper').strip().lower()
-ASR_MODEL           = os.environ.get('ASR_MODEL', 'Qwen/Qwen3-ASR-1.7B')
+ASR_MODEL           = pick('ASR_MODEL', 'paths', 'asr_model') or _local_model(
+    'Qwen3-ASR-1.7B', 'Qwen/Qwen3-ASR-1.7B')
 ASR_DEVICE          = os.environ.get('ASR_DEVICE', 'cuda:0')
 ASR_DTYPE           = os.environ.get('ASR_DTYPE', 'bfloat16')
 ASR_MAX_NEW_TOKENS  = int(os.environ.get('ASR_MAX_NEW_TOKENS', '') or 4096)
@@ -45,10 +63,11 @@ ASR_GLOBAL_OFFSET   = (os.environ.get('ASR_GLOBAL_OFFSET', '').strip().lower()
                        in {'1', 'true', 'yes', 'on'})
 
 ALIGNER_ENGINE      = os.environ.get('ALIGNER_ENGINE', 'qwen3').strip().lower()
-ALIGNER_MODEL       = os.environ.get('ALIGNER_MODEL', 'Qwen/Qwen3-ForcedAligner-0.6B')
+ALIGNER_MODEL       = pick('ALIGNER_MODEL', 'paths', 'aligner_model') or _local_model(
+    'Qwen3-ForcedAligner-0.6B', 'Qwen/Qwen3-ForcedAligner-0.6B')
 
 # 独立 venv 的 python.exe；空串时客户端退回 sys.executable
-QWEN_PYTHON         = os.environ.get('QWEN_PYTHON', '')
+QWEN_PYTHON         = pick('QWEN_PYTHON', 'paths', 'qwen_python')
 
 
 def resolve_qwen_python():
@@ -59,9 +78,12 @@ def resolve_qwen_python():
 # LLM API (LLM_* 优先，POLISH_* 为旧名向后兼容)
 # ═══════════════════════════════════════════════════════════════
 
-LLM_API_KEY   = os.environ.get('LLM_API_KEY', '') or os.environ.get('POLISH_API_KEY', '')
-LLM_MODEL     = os.environ.get('LLM_MODEL', '') or os.environ.get('POLISH_MODEL', '')
-LLM_BASE_URL  = os.environ.get('LLM_BASE_URL', '') or os.environ.get('POLISH_BASE_URL', '')
+LLM_API_KEY   = (pick('LLM_API_KEY', 'llm', 'api_key')
+                 or os.environ.get('POLISH_API_KEY', ''))
+LLM_MODEL     = (pick('LLM_MODEL', 'llm', 'model')
+                 or os.environ.get('POLISH_MODEL', ''))
+LLM_BASE_URL  = (pick('LLM_BASE_URL', 'llm', 'base_url')
+                 or os.environ.get('POLISH_BASE_URL', ''))
 
 # Hardcoded defaults for LLM (used when env var is empty and CLI arg not given)
 LLM_MODEL_DEFAULT    = 'deepseek-flash'

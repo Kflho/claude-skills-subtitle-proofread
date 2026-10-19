@@ -1,4 +1,4 @@
-﻿# CONTEXT.md — Subtitle Proofread Skill
+# CONTEXT.md — Subtitle Proofread Skill
 
 ## 项目是什么
 

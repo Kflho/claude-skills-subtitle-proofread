@@ -1,4 +1,4 @@
-﻿"""Project-level multi-source consistency (EN route + JA route share one name set).
+"""Project-level multi-source consistency (EN route + JA route share one name set).
 
 Skipped unless ``SABU_GLOSSARY_DIR`` points at the project's glossaries dir,
 because these assertions only make sense against the real corpus.

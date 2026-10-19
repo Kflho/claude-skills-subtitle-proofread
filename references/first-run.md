@@ -78,7 +78,7 @@ print(json.dumps(report, ensure_ascii=False, indent=2))
       "backend_id": "whisper-cpp",
       "installed": true,
       "version": "v1.7.2",
-      "path": "D:/software/video/whisper-cublas-12.4.0-bin-x64/whisper-cli.exe"
+      "path": "<whisper-cli>"
     },
     "faster-whisper": {
       "backend_id": "faster-whisper",
@@ -143,7 +143,7 @@ print(json.dumps(report, ensure_ascii=False, indent=2))
 
 **whisper.cpp 用户**：
 > 请提供以下路径：
-> - whisper.cpp 可执行文件（如 `D:/.../whisper-cli.exe`）
+> - whisper.cpp 可执行文件（路径由 `local.json` 提供）
 > - 主模型文件（推荐 kotoba-whisper-v2.0 q5_0 量化版，`.bin` 格式）
 > - 备用模型文件（主模型失败时切换，可与主模型相同）
 
@@ -151,14 +151,14 @@ print(json.dumps(report, ensure_ascii=False, indent=2))
 
 ```bash
 export WHISPER_BACKEND='whisper-cpp'
-export WHISPER_CLI='D:/software/video/whisper-cublas-12.4.0-bin-x64/whisper-cli.exe'
-export WHISPER_MODEL='D:/software/video/whisper-cublas-12.4.0-bin-x64/models/ggml-kotoba-whisper-v2.0-q5_0.bin'
-export WHISPER_RETRY_MODEL='D:/software/video/whisper-cublas-12.4.0-bin-x64/models/ggml-large-v3-q5_0.bin'
+export WHISPER_CLI='<whisper-cli>'
+export WHISPER_MODEL='<whisper-model>'
+export WHISPER_RETRY_MODEL='<whisper-retry-model>'
 ```
 
 **faster-whisper 用户**：
 > 请提供模型路径（CTranslate2 格式目录，或 HuggingFace 模型 ID）：
-> - 本地路径如 `D:/models/faster-whisper-kotoba-v2.0`
+> - 本地模型目录写在 `local.json` 的 `paths.models_dir`
 > - 或 HuggingFace ID 如 `kotoba-tech/kotoba-whisper-v2.0`
 
 写入 CLAUDE.md：

@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Gate a translation run: kana residue, echo, leftover variants, CPS.
 
 This is the "did the normalization actually work" check, meant to run after

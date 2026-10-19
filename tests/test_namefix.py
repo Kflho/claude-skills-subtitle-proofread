@@ -1,4 +1,4 @@
-﻿"""Reading-level ASR name repair: fixes homophones, leaves ordinary words."""
+"""Reading-level ASR name repair: fixes homophones, leaves ordinary words."""
 
 import pytest
 

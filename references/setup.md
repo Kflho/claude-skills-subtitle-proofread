@@ -1,11 +1,28 @@
 # 环境设置（当前版本）
 
-> 首次使用或换机器时执行。**本机绝对路径/密钥不写进 skill，也不进 GitHub。**
+> 仓库只放代码和文档；**机器路径、模型目录、venv、密钥都不进仓库**。
+> harness 用的是同步副本，本机信息写在副本的 `local.json`。
+
+## 0. 开发 → 同步 → 初始化
+
+```bash
+# 1) 在开发仓库里改完
+python scripts/harness/sync_skill.py --dry-run   # 预览会同步哪些文件
+python scripts/harness/sync_skill.py             # 同步到 ~/.agents/skills/<name>
+
+# 2) 在 harness 副本里生成/更新本机配置
+cd ~/.agents/skills/subtitle-proofread
+python scripts/harness/init_local.py --check     # 只检查
+python scripts/harness/init_local.py --force     # 写入 local.json
+```
+
+`local.json` 的解析顺序：**环境变量 > local.json > 内置默认**。
+`SKILL_LOCAL_CONFIG` 可指向另一个 local.json（测试/多机）。
 
 ## 1. 基础
 
 - Python 3.12+
-- ffmpeg（在 PATH）
+- ffmpeg（PATH 或 `local.json: paths.ffmpeg`）
 - `PYTHONIOENCODING=utf-8`（Windows 防乱码）
 
 ```bash
@@ -15,22 +32,16 @@ ffmpeg -version
 
 ## 2. LLM（翻译/repair 必需）
 
-使用任意 OpenAI 兼容 `/chat/completions` 端点：
+任意 OpenAI 兼容 `/chat/completions` 端点。`init_local.py` 会从
+`~/.claude/settings.json` 的 `env` 读取 `LLM_*` 写入 `local.json`；
 
 ```bash
 export LLM_API_KEY="<your-key>"
-export LLM_BASE_URL="https://api.deepseek.com/v1"   # 默认
-export LLM_MODEL="deepseek-v4-pro"                  # 以你的配置为准
+export LLM_BASE_URL="https://api.deepseek.com/v1"
+export LLM_MODEL="deepseek-flash"
 ```
 
-Windows PowerShell 可从已有配置文件读取，但**不要打印/提交 key**：
-
-```powershell
-$s = Get-Content "$env:USERPROFILE\.claude\settings.json" -Raw | ConvertFrom-Json
-$env:LLM_API_KEY = $s.env.LLM_API_KEY
-$env:LLM_BASE_URL = $s.env.LLM_BASE_URL
-$env:LLM_MODEL = $s.env.LLM_MODEL
-```
+环境变量优先于 `local.json`，适合临时覆盖。不要打印/提交 key。
 
 验证：
 
@@ -40,15 +51,19 @@ python scripts/translate_srt.py --input EP001.srt --output /tmp/test.srt --dry-r
 
 ## 3. Qwen3-ASR / ForcedAligner（可选，时间轴主路线）
 
-- 独立 venv：`.venv-qwen`（torch + qwen-asr + fireredvad）；
-- 模型目录：`models/Qwen3-ASR-1.7B`、`models/Qwen3-ForcedAligner-0.6B`；
-- 通过 `.venv-qwen/Scripts/python.exe` 启动 worker，不污染主环境。
+路径全部来自 `local.json`：
+
+| 字段 | 含义 |
+|---|---|
+| `paths.qwen_python` | 独立 venv 的 python（torch + qwen-asr + fireredvad） |
+| `paths.models_dir` | 模型根目录（含 `Qwen3-ASR-1.7B`、`Qwen3-ForcedAligner-0.6B`） |
+| `paths.asr_model` / `paths.aligner_model` | 可选覆盖；空则用 models_dir 下的默认名 |
 
 ```bash
 python scripts/run_all.py \
   --input-dir "<字幕目录>" --video-dir "<视频目录>" \
   --lang ja --asr qwen3 \
-  --asr-python ".venv-qwen/Scripts/python.exe" \
+  --asr-python "<qwen-python>" \
   --translate
 ```
 
@@ -56,9 +71,9 @@ python scripts/run_all.py \
 
 ## 4. FireRedVAD（可选，当前仅诊断）
 
-- `.venv-qwen` + `fireredvad 0.0.2`；
-- 权重：`models/FireRedVAD/{VAD,Stream-VAD,AED}`；
-- 输出 hints，但默认流程**不消费**；只在 OP/ED 预研/诊断用。
+- `<qwen-python>` + `fireredvad 0.0.2`；
+- 权重：`<models-dir>/FireRedVAD/{VAD,Stream-VAD,AED}`；
+- 输出 hints，默认流程**不消费**，仅 OP/ED 预研/诊断。
 
 ```bash
 python scripts/audio/detect_events.py \
@@ -68,8 +83,9 @@ python scripts/audio/detect_events.py \
 
 ## 5. Legacy Whisper（可选）
 
-本机已有 whisper.cpp CUDA 时，`WHISPER_CLI`/`WHISPER_MODEL` 由本地配置提供；
-不在 skill 中写死路径。没有 Whisper 也能用 `--skip-whisper` + Qwen/仅翻译。
+`paths.whisper_cli` / `paths.whisper_model` / `paths.whisper_retry_model`
+由 `local.json` 提供（环境变量可临时覆盖）。没有 Whisper 也能用
+`--skip-whisper` + Qwen/仅翻译。
 
 ## 6. Python 依赖（可选增强）
 
@@ -83,18 +99,24 @@ python -c "import jieba"     # 中文分词
 
 ## 7. 本机配置 / 隐私
 
-所有绝对路径、模型路径、API 配置只写**项目 `CLAUDE.md`** 或
-`~/.claude/settings.json`；**脚本代码里不硬编码用户路径/密钥**。
-初始化向导负责收集这些路径；普通用户按上面 1–6 节配置即可。
-
-本机软件版本、模型绝对路径、API 配置来源由维护者本地保存，**不随 skill 分发**；
-普通用户按上面 1–6 节配置即可。新会话需要恢复本机配置时，读维护者本地的
-`sk_01_dev/LOCAL_ENV.md`（不在 GitHub）。
+- 所有绝对路径、模型路径、API 配置只写 **harness 副本的 `local.json`**
+  （或临时环境变量）；仓库、SKILL.md、references 里不出现机器路径/密钥。
+- `sync_skill.py` 不会覆盖目标里的 `local.json`；换机器重新跑
+  `init_local.py --force` 即可。
+- `local.json` 含密钥，只在本机保存，不要提交/分享。
 
 ## 8. 快速验证
+
+仓库里（需要测试依赖）：
 
 ```bash
 python -m pytest -q tests
 ```
 
-期望全绿；有失败先修环境，不要继续跑 pipeline。
+harness 副本里：
+
+```bash
+python scripts/harness/init_local.py --check
+```
+
+期望全绿/无 problems；有失败先修环境，不要继续跑 pipeline。

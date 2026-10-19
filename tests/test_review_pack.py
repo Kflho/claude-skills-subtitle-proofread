@@ -1,4 +1,4 @@
-﻿"""Review pack: routing, evidence, stats and round-trip (v2 artifact)."""
+"""Review pack: routing, evidence, stats and round-trip (v2 artifact)."""
 
 import json
 

@@ -10,3 +10,7 @@ coverage.xml
 
 # 本机配置（绝对路径、API 来源）：只在本机保存，不随仓库分发
 sk_01_dev/LOCAL_ENV.md
+
+# harness 本机配置（含密钥，绝不入库）
+local.json
+SYNCED.json
