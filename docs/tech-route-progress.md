@@ -412,8 +412,9 @@ judge-refiner）、IWSLT 2026 Subtitling（长度/压缩约束）、gpt-subtrans
 - 45s：CER .357、P90 3464ms、可靠 P90 643ms、coverage .456；
 - 60s：CER .371、P90 1897ms、可靠 P90 **424ms**、coverage .418；
 - 90s：CER .371、P90 2218ms、可靠 P90 705ms、collapse gap 72s、RTF .087；
-- 结论：**保留 60s 固定切块**；45/90 都不如 60 的时间轴。下一步用 AED speech 边界
-  替换固定切点，而不是继续调 chunk 长度。
+- 结论：**保留 60s 固定切块**；45/90 都不如 60 的时间轴。
+- AED speech 边界（EP001）：CER .349 / P50 113ms / coverage .461 变好，但
+  P90 2792ms、可靠 P90 720ms 变差 → **不上线**；先修 speech 区间噪声/只在长 gap 切。
 
 ## 1. 状态总览
 
