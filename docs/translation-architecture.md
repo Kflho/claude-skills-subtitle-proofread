@@ -117,8 +117,11 @@ QA（每条）：
 
 1. `lib/translation/qa.py`：覆盖率、日语残留、回显、glossary 命中、行长/CPS；
    汉字人名（武之内空/泉光子郎）不误判为回显。
+   另含 chrF guardrail 与时间轴漂移检查。
 2. `translate_srt.py`：`--max-chars/--max-cps/--qa-report/--repair`；
    `--repair` 只重译 QA 标出的条，不动其他条。
+   **glossary prompt 用 `ja→zh` 对照**（不是只给中文名）：EP003 名字段 30 条
+   0 违规，`タケル→阿武` 正确（旧 prompt 会译成「太一」）。
 3. `fix/translation_stage.py`：源 SRT 发现、glossary 发现、输出
    `translated/zh/<EP>.srt` + `<EP>.qa.json`；失败不致命；dry-run。
 4. `run_all --translate`：修复/统一之后、交付之前执行，不覆盖源字幕。
@@ -141,6 +144,7 @@ run_all --target-dir <project> --input-dir . --lang ja --skip-whisper --translat
 
 EP003 的根因不是模型不会翻，而是 **repair prompt 只给了中文译名、没给 ja→zh 对照**：
 `タケル` 被译成「太一」，给完整 `タケル→阿武` 映射后修复到 0。这条已写进代码与测试。
+初始翻译 prompt 也已改成 `ja→zh` 对照；EP003 名字段（30 条）复测 0 违规，`阿武` 正确。
 
 30 条 EP001/EP002 样本在 20 字/12 CPS 下均为 0 违规；当前主要问题不是
 “普遍超长”，而是少量漏译/超长/角色名错译，**只修问题条**比整批重试更合适。

@@ -153,7 +153,8 @@ P0 链路（Whisper 编排/VAD、翻译、专名、OP/ED、编排）已补齐；
 
 ## 技术路线
 
-2026 技术栈修订提案：`docs/tech-route-2026.md`；决策记录：`docs/adr/005-asr-alignment-stack.md`、`docs/adr/006-stable-asr-core.md`、`docs/adr/007-cue-alignment.md`、`docs/adr/008-qwen3-long-audio-chunking.md`、`docs/adr/009-reference-as-benchmark.md`、`docs/adr/010-asr-first-pipeline.md`、`docs/adr/011-technology-integration-map.md`。
+2026 技术栈修订提案：`docs/tech-route-2026.md`；决策记录：`docs/adr/005-asr-alignment-stack.md`、`docs/adr/006-stable-asr-core.md`、`docs/adr/007-cue-alignment.md`、`docs/adr/008-qwen3-long-audio-chunking.md`、`docs/adr/009-reference-as-benchmark.md`、`docs/adr/010-asr-first-pipeline.md`、`docs/adr/011-technology-integration-map.md`；
+技术调研：`docs/research-2026-10-tech.md`（翻译提示词/切块/对齐的成熟方案）。
 
 **技术接入总图**（ADR-011）：所有候选技术按接缝分层——Ingest/Separator、AudioEvents（VAD/AED）、
 ASR/FA registry、Ensemble、Alignment/Repair、Evidence/Review、Glossary/Translation、Evaluation。

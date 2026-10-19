@@ -380,6 +380,22 @@ judge-refiner）、IWSLT 2026 Subtitling（长度/压缩约束）、gpt-subtrans
 **未完成**：未来上下文/series memory、10 条 MQM 抽检、baseline vs +future 的对照。
 默认翻译输出未改，等 ablation 通过再切换。
 
+## 0.13 技术调研（2026-10）：切块与翻译提示词
+
+**翻译提示词**（gpt-subtrans / VideoLingo / SMART）：
+- 成熟方案用“逐条 Original/Translation 成对 + 禁止并条 + summary/scene + terminology（term::canonical）+
+  retry 指令”；VideoLingo 是“直译→反思→自由翻译”两阶段。
+- 我们缺的最关键一项是 **ja→zh 术语对照**：旧 prompt 只给中文名，EP003 把 `タケル` 译成「太一」。
+  已改为 `ja→zh`；EP003 名字段 30 条复测 0 违规、`阿武` 正确。
+- 下一项：prompt 加“每条单独、不得合并” + 批间 summary；不要裸塞未来上下文（消融负）。
+
+**时间轴**（omniASR / Qwen3-ASR/FA / ADR-008）：
+- VAD/静音边界切块是成熟做法；Qwen3-FA 长块会塌缩，我们把 180s 改成 60s 有实测依据，
+  但 60s 固定不是理论最优。
+- 优先：45/60/90 A/B → FireRedVAD speech 边界切块 → speech-aware mapping → 12 个
+  speech 主导空洞的短窗重对齐。
+- 证据/结论：`docs/research-2026-10-tech.md`。
+
 ## 1. 状态总览
 
 | 阶段 | 内容 | 状态 | 验收 |

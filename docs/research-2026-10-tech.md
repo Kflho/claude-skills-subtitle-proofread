@@ -1,0 +1,86 @@
+# 技术调研：时间轴与翻译提示词（2026-10）
+
+> 目的：在写代码前确认“这些做法有成熟方案支撑”，避免拍脑袋。
+> 结论先行：**翻译提示词最该补的是“源→目标术语对照 + 场景上下文”**；
+> **时间轴最该做的是 VAD/语音边界切块 + 定向短窗重对齐**，不是再换 ASR 模型。
+
+## 1. 翻译提示词：成熟项目怎么做
+
+### 1.1 gpt-subtrans / llm-subtrans
+
+来源：<https://github.com/machinewrapped/gpt-subtrans>，
+`instructions/instructions (english to chinese).txt`、`docs/translation-flow.md`。
+
+它的 prompt 结构：
+
+- **逐条编号 + Original/Translation 成对输出**，不是裸 JSON 字符串数组；
+- 明确“每条必须单独翻译，合并会导致时间轴错位”；
+- 每批输出 `<summary>`（本批摘要）和 `<scene>`（场景摘要），供下一批使用；
+- 提供 `terminology` 块，格式 `term::canonical form`，要求“术语表里的形式必须一致”；
+- retry 指令专门处理“漏条/并条”；
+- 名字表按用户偏好拼写；不审查脏话；不即兴加戏。
+
+### 1.2 VideoLingo
+
+来源：<https://github.com/Huanshere/VideoLingo>，`core/prompts.py`、`core/_4_2_translate.py`。
+
+它的 prompt 结构：
+
+- Role / Task / Context Information / Content Summary / Points to Note / Style；
+- `<previous_content>` + `<subsequent_content>` + 整段摘要 + 术语；
+- **两阶段**：先 “faithful direct translation”，再 “reflect + free translation”；
+- 输出 JSON dict，保留 `origin`/`direct`/`reflect`/`free`，便于对齐与校验；
+- 明确“不空行、不加解释、不给观众看的注释”；
+- 术语提取 ≤15 条，避免 prompt 膨胀。
+
+### 1.3 学术证据
+
+- SMART / Breaking Babel（arXiv:2609.38660）：长片字幕需要 series-level memory、
+  术语/风格一致、约束校验、judge-refiner；SubMQM 七维 19 类错误。
+- IWSLT 2026 Subtitling Track：字幕系统普遍做长度/压缩约束。
+
+### 1.4 对我们的结论
+
+| 做法 | 证据 | 我们现状 | 决定 |
+|---|---|---|---|
+| 术语用 **ja→zh 对照**，不是只给中文名 | gpt-subtrans terminology；EP003 实证 | 原 prompt 只给中文名，`タケル` 被译成「太一」 | **已修**：`load_mappings/load_glossary` 输出 `ja→zh` |
+| 逐条成对输出/禁止并条 | gpt-subtrans | 用 JSON 数组，靠顺序；无显式“禁止并条” | 下一步：prompt 增加“每条单独、不得合并” |
+| 场景摘要跨批传递 | gpt-subtrans `<scene>`；VideoLingo summary | 只有前 3 条原文 | 下一步：批间 summary（不是裸 future 2 条；裸 future 消融是负的） |
+| 两阶段直译+反思 | VideoLingo | 只有 QA 后 repair | 下一步：仅对 MQM 问题条做 reflect，不全量 |
+| 术语提取/一致性 | SMART、VideoLingo | glossary 有，跨集 memory 无 | 下一步：series memory |
+| 未来上下文裸塞 | 我们的消融 | 43.33→36.25，负 | **不做** |
+
+## 2. 时间轴：切块/对齐的成熟做法
+
+### 2.1 VAD/静音边界切块是标准做法
+
+来源：omniASR-server `audio_chunker.py`
+
+- 明确写 “VAD-based segmentation — split at natural pauses”；
+- 找不到静音时回退为带 overlap 的切块；
+- 参数：max 35s、target 30s、min silence 0.3s、search window 5s。
+
+Qwen3-ASR 官方本身也按低能量边界切 180s；Qwen3-FA 官方 ≤5min、参考 180s。
+我们的 ADR-008 已实测：180s 内部切块时间戳塌缩，自切 60s 后 RTF/零时长改善。
+所以“60s 固定”不是理论最优，**用语音边界替代固定 60s 是合理下一步**。
+
+### 2.2 对齐范围也应该是语音区
+
+- 强制对齐/字幕对齐的输入应当是 speech 区；BGM/唱歌 token 会把 cue 拉偏。
+- FireRedVAD 三集实证：正文 music 占 59.6–78%，singing 8–9%；
+  空洞里只有 12/53 是 speech 主导 → 用 AED 过滤“音乐空洞”合理。
+- 但 **不能门控删条**；只用于对齐范围/证据。
+
+### 2.3 定向短窗重对齐
+
+- 我们的空洞 53 个/700s，speech 主导只有 12 个/221s；全量重对齐无收益（ADR-008）。
+- 只对这 12 个窗口重跑 ASR/FA，成本低、风险小；需要保留上下文和边界连续性。
+
+## 3. 优先级（修正版）
+
+1. **翻译术语对照**（已实现）：`ja→zh` 进 prompt；EP003 名字段验证 0 违规。
+2. **时间轴语音边界切块**：先 45/60/90 A/B，再用 AED speech 边界；看 P50/P90/coverage/holes。
+3. **翻译 prompt 补“逐条/禁止并条”与批间 summary**：成熟项目都有；先小样本 A/B。
+4. **speech-aware mapping**：只对齐 speech 区 token；看 P50/P90/漏对白。
+5. **12 个 speech 空洞的短窗重对齐**。
+6. 两阶段 reflect/series memory/MQM 抽检（质量，不只看 QA）。

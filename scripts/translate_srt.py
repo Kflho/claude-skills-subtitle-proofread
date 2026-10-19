@@ -215,7 +215,9 @@ def load_glossary(path):
         elif len(cells) == 1 and len(cells[0]) >= 2:
             terms.add(cells[0])
 
-    glossary_str = ', '.join(sorted(terms)) if terms else ''
+    pairs = [f'{ja}→{zh}' for ja, zh in sorted(ja_to_zh.items())]
+    single_terms = sorted(terms - set(ja_to_zh.values()))
+    glossary_str = ', '.join(pairs + single_terms)
     return glossary_str, ja_to_zh
 
 
@@ -240,7 +242,10 @@ def load_mappings(path):
     # 把 prompt 撑长且语义混乱 —— 实测可让模型放弃翻译、整批原样回显日文。
     ja_to_zh = {k: v for k, v in raw.items()
                 if v and not str(k).startswith('_')}
-    glossary_str = ', '.join(sorted(set(ja_to_zh.values()))) if ja_to_zh else ''
+    # Prompt wants source→target pairs, not a bag of Chinese names: a name
+    # list without the Japanese side lets the model map タケル to 太一.
+    glossary_str = ', '.join(f'{ja}→{zh}' for ja, zh in
+                             sorted(ja_to_zh.items())) if ja_to_zh else ''
     return glossary_str, ja_to_zh
 
 

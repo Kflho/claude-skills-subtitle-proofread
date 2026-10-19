@@ -108,7 +108,7 @@ def test_load_mappings_filters_metadata_and_empty_values(tmp_path):
     glossary, mapping = tr.load_mappings(str(path))
 
     assert mapping == {'サリー': '莎莉', 'アトム': '阿童木'}
-    assert glossary == '莎莉, 阿童木'
+    assert glossary == 'アトム→阿童木, サリー→莎莉'
     assert '_comment' not in glossary
 
 
@@ -129,7 +129,7 @@ def test_load_glossary_skips_header_but_keeps_mapping(tmp_path):
 
     # 表头不能被当成一条 日语→中文 映射（踩坑 #17）
     assert mapping == {'サリー': '莎莉', 'アトム': '阿童木'}
-    assert glossary == '莎莉, 阿童木'
+    assert glossary == 'アトム→阿童木, サリー→莎莉'
 
 
 def test_load_glossary_ignores_count_tables(tmp_path):
