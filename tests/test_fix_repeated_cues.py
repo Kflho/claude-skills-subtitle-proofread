@@ -50,3 +50,22 @@ def test_detect_similar_groups_short_input():
 
 def test_char_set_ignores_punctuation_and_space():
     assert _char_set('あ、い。う 1！') == {'あ', 'い', 'う', '1'}
+
+def test_qwen_result_to_segs_normalises_worker_output():
+    from fix_repeated_cues import qwen_result_to_segs
+
+    result = {'segments': [{'text': 'おはよう', 'start': 1.2, 'end': 2.4},
+                           {'text': ' ', 'start': 2.4, 'end': 2.5}],
+              'text': 'おはよう'}
+    assert qwen_result_to_segs(result) == [
+        {'text': 'おはよう', 'start_s': 1.2, 'end_s': 2.4}]
+
+    fallback = qwen_result_to_segs({'text': 'はい', 'audio_duration': 3.0})
+    assert fallback == [{'text': 'はい', 'start_s': 0.0, 'end_s': 3.0}]
+    assert qwen_result_to_segs({}) == []
+
+
+def test_qwen_result_to_segs_tolerates_missing_times():
+    from fix_repeated_cues import qwen_result_to_segs
+    segs = qwen_result_to_segs({'segments': [{'text': 'あ'}]})
+    assert segs == [{'text': 'あ', 'start_s': 0.0, 'end_s': 0.0}]

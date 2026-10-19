@@ -21,7 +21,9 @@ Usage:
 
 import argparse
 import difflib
+import json
 import os
+import subprocess
 import sys
 import tempfile
 
@@ -32,7 +34,10 @@ from lib.whisper_utils import (
     filter_low_confidence, format_tc, write_srt, parse_srt, to_seconds,
 )
 from lib.project_utils import find_video
-from lib.config import WHISPER_CLI, WHISPER_MODEL
+from lib.config import (
+    ALIGNER_MODEL, ASR_DEVICE, ASR_DTYPE, ASR_MODEL, WHISPER_CLI,
+    WHISPER_MODEL,
+)
 
 setup_windows_utf8()
 
@@ -113,11 +118,104 @@ def detect_similar_groups(cues, similarity_threshold=0.85, min_group_size=2):
 
 
 # ═══════════════════════════════════════════════════════════════
+# Qwen3-ASR worker (persistent; model loads once per run)
+# ═══════════════════════════════════════════════════════════════
+
+WORKER_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             'asr', 'qwen3_worker.py')
+
+
+def resolve_qwen_paths():
+    """(python, asr_model, aligner) — prefer the repo's local models/venv."""
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    python = os.environ.get('QWEN_PYTHON', '')
+    if not python:
+        candidate = os.path.join(repo, '.venv-qwen', 'Scripts', 'python.exe')
+        python = candidate if os.path.isfile(candidate) else sys.executable
+    asr = ASR_MODEL
+    if asr == 'Qwen/Qwen3-ASR-1.7B':
+        local = os.path.join(repo, 'models', 'Qwen3-ASR-1.7B')
+        asr = local if os.path.isdir(local) else asr
+    aligner = ALIGNER_MODEL
+    if aligner == 'Qwen/Qwen3-ForcedAligner-0.6B':
+        local = os.path.join(repo, 'models', 'Qwen3-ForcedAligner-0.6B')
+        aligner = local if os.path.isdir(local) else aligner
+    return python, asr, aligner
+
+
+def qwen_result_to_segs(result: dict) -> list[dict]:
+    """Normalise worker output to ``[{text,start_s,end_s}]`` (slice-relative)."""
+    result = result or {}
+    segs = []
+    for seg in result.get('segments') or []:
+        text = str(seg.get('text') or '').strip()
+        if text:
+            segs.append({'text': text, 'start_s': float(seg.get('start') or 0.0),
+                         'end_s': float(seg.get('end') or 0.0)})
+    if not segs and result.get('text'):
+        segs = [{'text': str(result['text']).strip(), 'start_s': 0.0,
+                 'end_s': float(result.get('audio_duration') or 0.0)}]
+    return segs
+
+
+class QwenSliceClient:
+    """One long-lived ``qwen3_worker.py`` process; one request per slice."""
+
+    def __init__(self, lang='ja'):
+        python, asr, aligner = resolve_qwen_paths()
+        self._lang = 'Japanese' if lang == 'ja' else lang
+        self._req_id = 0
+        self._proc = subprocess.Popen(
+            [python, WORKER_SCRIPT, '--asr', asr, '--aligner', aligner,
+             '--device', ASR_DEVICE, '--dtype', ASR_DTYPE],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True, encoding='utf-8', bufsize=1)
+
+    def transcribe(self, wav_path: str) -> list[dict]:
+        if self._proc.poll() is not None:
+            return []
+        self._req_id += 1
+        rid = str(self._req_id)
+        request = {'cmd': 'transcribe', 'id': rid, 'audio': wav_path,
+                   'language': self._lang, 'timestamps': True}
+        try:
+            self._proc.stdin.write(json.dumps(request) + '\n')
+            self._proc.stdin.flush()
+        except (BrokenPipeError, OSError):
+            return []
+        while True:
+            line = self._proc.stdout.readline()
+            if not line:
+                return []
+            try:
+                response = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if str(response.get('id')) != rid:
+                continue
+            if not response.get('ok'):
+                return []
+            return qwen_result_to_segs(response.get('result') or {})
+
+    def close(self):
+        try:
+            if self._proc.poll() is None:
+                self._proc.stdin.write('{"cmd":"shutdown"}\n')
+                self._proc.stdin.flush()
+        except (BrokenPipeError, OSError):
+            pass
+        try:
+            self._proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            self._proc.kill()
+
+
+# ═══════════════════════════════════════════════════════════════
 # 切片修复
 # ═══════════════════════════════════════════════════════════════
 
 def fix_group(group_indices, cues, video_path, lang='ja',
-              context_window=1, dry_run=False):
+              context_window=1, dry_run=False, engine='whisper', qwen=None):
     """Slice audio, re-run Whisper, replace original cues for a repeated group.
 
     Args:
@@ -161,8 +259,11 @@ def fix_group(group_indices, cues, video_path, lang='ja',
         print(f'    [WARN] audio extraction failed: {e}')
         return cues, {'error': str(e)}
 
-    segs = run_whisper(slice_path, WHISPER_CLI, WHISPER_MODEL, language=lang)
-    kept, discarded = filter_low_confidence(segs)
+    if engine == 'qwen3' and qwen is not None:
+        kept = qwen.transcribe(slice_path)
+    else:
+        segs = run_whisper(slice_path, WHISPER_CLI, WHISPER_MODEL, language=lang)
+        kept, discarded = filter_low_confidence(segs)
 
     # Map Whisper output back to absolute timeline
     new_cues = []
@@ -226,7 +327,7 @@ def fix_group(group_indices, cues, video_path, lang='ja',
 # ═══════════════════════════════════════════════════════════════
 
 def process_one(srt_path, video_path, lang='ja', similarity_threshold=0.85,
-                min_group_size=2, dry_run=False):
+                min_group_size=2, dry_run=False, engine='whisper', qwen=None):
     """Process a single SRT file. Returns (changed, reports)."""
     cues = parse_srt(srt_path, mark_garbled=False)
     if not cues:
@@ -250,7 +351,7 @@ def process_one(srt_path, video_path, lang='ja', similarity_threshold=0.85,
     reports = []
     for indices in groups:
         cues, report = fix_group(indices, cues, video_path, lang,
-                                 dry_run=dry_run)
+                                 dry_run=dry_run, engine=engine, qwen=qwen)
         reports.append(report)
         if not dry_run and 'error' not in report:
             total_fixed += report.get('original_count', 0)
@@ -276,12 +377,16 @@ def main():
                         help='Min consecutive similar cues to trigger (default: 2)')
     parser.add_argument('--dry-run', action='store_true',
                         help='Preview only, do not modify files')
+    parser.add_argument('--engine', choices=('whisper', 'qwen3'), default='whisper',
+                        help='Slice re-transcription engine (qwen3 = persistent worker)')
     args = parser.parse_args()
 
-    if not WHISPER_CLI or not WHISPER_MODEL:
-        print('ERROR: WHISPER_CLI and WHISPER_MODEL env vars required.',
-              file=sys.stderr)
+    if args.engine == 'whisper' and (not WHISPER_CLI or not WHISPER_MODEL):
+        print('ERROR: WHISPER_CLI and WHISPER_MODEL env vars required '
+              'for --engine whisper.', file=sys.stderr)
         sys.exit(1)
+
+    qwen = QwenSliceClient(args.lang) if args.engine == 'qwen3' else None
 
     # Single file mode
     if args.srt:
@@ -291,7 +396,8 @@ def main():
         print(f'{os.path.basename(args.srt)}:')
         changed, reports = process_one(
             args.srt, args.video, args.lang,
-            args.similarity, args.min_group, args.dry_run)
+            args.similarity, args.min_group, args.dry_run,
+            engine=args.engine, qwen=qwen)
         if not changed:
             print('  no similar groups found')
         sys.exit(0)
@@ -324,7 +430,8 @@ def main():
         print(f'{fname}:')
         changed, reports = process_one(
             srt_path, video_path, args.lang,
-            args.similarity, args.min_group, args.dry_run)
+            args.similarity, args.min_group, args.dry_run,
+            engine=args.engine, qwen=qwen)
         if changed:
             total_changed += 1
             total_groups += len(reports)
