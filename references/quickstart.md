@@ -27,7 +27,33 @@ python scripts/translate_srt.py \
 - `--repair` 只修 QA 标出的条；建议保留，失败不会阻断。
 - 默认 10 条一批；不要改成整集一批（实测更差）。
 
-## 2. 整条 pipeline（修复 + 翻译）
+## 2. 只有视频 → 中文（一键，粗剪）
+
+```bash
+python scripts/video_to_zh.py \
+  --video-dir "<视频目录>" \
+  --output-dir "<输出目录>" \
+  --engine qwen3 \
+  --mappings glossaries/digimon.series.json
+```
+
+输出：
+
+```text
+<输出目录>/ja/<EP>.srt      # Qwen3 转写
+<输出目录>/ja/<EP>.asr.json
+<输出目录>/zh/<EP>.srt      # 中文
+<输出目录>/zh/<EP>.qa.json
+```
+
+说明：
+
+- 内部只串现有工具：`qwen3_transcribe.py`（或 `--engine whisper`）→ `translate_srt.py`；
+- Qwen3 转写是句子级，**断句/分行不等于最终字幕**；先看 QA，再做 cue 级人工/后续处理；
+- raw ASR 文本可能有错（`水田→水電`），翻译会继承；这是视频直出的质量上限，不是模型不会；
+- OP/ED 仍未覆盖。
+
+## 3. 整条 pipeline（修复 + 翻译）
 
 ```bash
 python scripts/run_all.py \
@@ -44,7 +70,7 @@ python scripts/run_all.py \
 - `--translate`：输出 `translated/zh/<EP>.srt` + `<EP>.qa.json`，不覆盖源字幕。
 - `--audio-hints`：FireRedVAD 诊断 JSON，当前**没有决策消费者**，默认不要依赖。
 
-## 3. 看结果
+## 4. 看结果
 
 ```text
 translated/zh/<EP>.srt      # 中文
@@ -62,14 +88,14 @@ QA 里优先看：
 | `max_chars` / `max_cps` | 行长/阅读速度 |
 | `timing` | 时间轴漂移（应为 0） |
 
-## 4. 已知边界
+## 5. 已知边界
 
-- 输入是**已有日文字幕**；只有视频、没有源字幕时，当前不是一键出中文。
+- **视频→中文已接**，但 Qwen3 转写是句子级、raw ASR 有错；输出是粗剪，需看 QA/后续断句。
 - 主窗口 `EPxxx.main.srt` 不含 OP/ED；OP/ED 翻译尚未接入。
 - FireRedVAD 目前只做诊断/预研；OP/ED 消费者未完成。
 - 长集异常先看 QA，不要直接全量重翻。
 
-## 5. 失败时
+## 6. 失败时
 
 - 缺 API key：`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`。
 - 缺 Qwen 环境：确认 `.venv-qwen` 和 `--asr-python`。

@@ -103,6 +103,17 @@ python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json \
 **第一次用先看 [references/quickstart.md](references/quickstart.md)**：已有日文字幕 →
 中文 / 整条 pipeline 的最短命令、输出、QA 字段和已知边界。
 
+只有视频时，一键粗剪：
+
+```bash
+python scripts/video_to_zh.py \
+  --video-dir "<视频目录>" --output-dir "<输出目录>" \
+  --engine qwen3 --mappings glossaries/digimon.series.json
+```
+
+输出 `<输出目录>/ja/<EP>.srt`（Qwen3 转写）+ `<输出目录>/zh/<EP>.srt`（中文）+ QA。
+注意：ASR 是句子级、raw text 有错；这是粗剪，不是最终字幕。
+
 ### 环境设置
 
 首次使用 → [references/setup.md](references/setup.md)（环境变量、Python 依赖、API 密钥、git 备份铁律）

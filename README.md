@@ -1,14 +1,19 @@
 # Subtitle Proofread
 
-字幕校对 + 日语→中文翻译 skill。面向**已有日文字幕**的动画/剧集项目：
-校对乱码/时间轴、统一专名、LLM 翻译、QA/repair。
+字幕校对 + 日语→中文翻译 skill。支持：
+**已有日文字幕**校对/翻译，或**只有视频**的一键粗剪（Qwen3 转写 → LLM 翻译 → QA）。
 
-> 当前边界：不是“只有视频一键出中文字幕”的成品工具；输入需要日文 SRT/ASS。
-> OP/ED 歌词翻译尚未接入。FireRedVAD 仅诊断/预研。
+> 当前边界：视频一键出的是句子级粗剪，不是最终字幕；OP/ED 尚未接入。
+> FireRedVAD 仅诊断/预研。
 
 ## 快速上手
 
 ```bash
+# 只有视频 → 日文 SRT → 中文 SRT
+python scripts/video_to_zh.py \
+  --video-dir "<视频目录>" --output-dir "<输出目录>" \
+  --engine qwen3 --mappings glossaries/digimon.series.json
+
 # 只翻译已有日文字幕
 python scripts/translate_srt.py \
   --input EP001.srt --output 中文/EP001.srt \
@@ -31,6 +36,7 @@ python scripts/run_all.py \
 ```text
 translated/zh/<EP>.srt
 translated/zh/<EP>.qa.json
+# 视频直出：<output>/ja/<EP>.srt + <output>/zh/<EP>.srt + qa.json
 ```
 
 详细步骤：[references/quickstart.md](references/quickstart.md) ·
@@ -54,7 +60,7 @@ translated/zh/<EP>.qa.json
 
 ## 已知限制
 
-- 只处理已有源字幕；视频直出尚未接入；
+- 视频直出已接，但 ASR 是句子级、raw text 有错，输出是粗剪；
 - OP/ED 翻译未完成；
 - FireRedVAD 当前只写诊断 hints，没有决策消费者；
 - 整集翻译后请先看 QA，残留/术语问题按报告修。
