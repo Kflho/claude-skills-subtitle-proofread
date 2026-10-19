@@ -97,6 +97,27 @@ python "<scripts-dir>/nouns/context_review.py" ... --mode style-fix
 > 有效路径是「检测 → 定向改写 → 约束校验」（52 集：85 条 → 接受 69、命中 70→0）。
 > 设计见 `sk_01_dev/docs/style-context.md`。
 
+**OP/ED 与固定台词统一**（复用 `fix/oped_fixer.py`，不另造聚类）：
+
+```bash
+# 1) 现有工具出跨集候选（只读）
+python "<scripts-dir>/fix/oped_fixer.py" "<中文目录>" --lang zh \
+  -o temp/scans/oped_fixes.json --ai-review temp/scans/oped_ai_review.json
+
+# 2) 填 canonical：_meta.fixed_lines 优先，其余走语境审查 agent
+python "<scripts-dir>/nouns/context_review.py" --project "<项目>" \
+  --glossary ... --meta ... --mode oped \
+  --candidates "<项目>/temp/scans/oped_ai_review.json" \
+  --report "<项目>/temp/oped_filled.json"
+
+# 3) 完整统一走文本键控（写副本；按时间桶只统一 ~35/95，文本键控残留 0）
+python "<scripts-dir>/nouns/context_review.py" ... --mode oped \
+  --candidates "<项目>/temp/oped_filled.json" --apply-text-keyed \
+  --out-dir "<项目>/temp/oped_textkeyed"
+```
+
+> 设计见 `sk_01_dev/docs/oped-fixed-lines.md`。
+
 **scope**：`global` = 跨全集；`per_episode` = 仅该集；`auto` = episodes ≥ 2 取 global。
 
 **续跑/失败**：大项目先 `--status` 确认无 ⚠ 再聚合；中断用 `--resume`。

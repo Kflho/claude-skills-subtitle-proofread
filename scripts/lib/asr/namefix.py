@@ -126,28 +126,24 @@ def _has_katakana(text: str) -> bool:
     return any('\u30a1' <= ch <= '\u30fa' or ch == 'ー' for ch in str(text or ''))
 
 
-def fix_text(text: str, entries: list[NameEntry], tokenizer=None,
-             allow_surfaces=frozenset(), near_miss: bool = False):
-    """Return ``(new_text, hits)``; never mutates the input string.
+def propose_repairs(text: str, entries: list[NameEntry], tokenizer=None,
+                    allow_surfaces=frozenset(), near_miss: bool = False):
+    """Return repair proposals *without* applying them.
 
-    ``allow_surfaces`` lists non-katakana surfaces that are known ASR
-    mishearings.  Everything else must contain katakana to be rewritten, which
-    keeps ordinary kanji words untouched (a bare 「位置」 must never become
-    「市」; only the 「サブト位置」 window may).
-
-    ``near_miss`` is off by default: one-mora substitutions measured 10 hits
-    but several damaged real words (バカ野→バカ, サブ君→佐武).  Exact reading
-    matches already cover the dominant error class.
+    Same matching rules as before, but the caller can send the proposals to the
+    context-review agent first.  A match is only a *hypothesis*: even an exact
+    reading can be a common word (位置/イチ, サブ in a loanword), so the pipeline
+    treats proposals as candidates, never as final text.
     """
     text = str(text or '')
     if not text or not entries:
-        return text, []
+        return []
     allow = {str(s) for s in (allow_surfaces or ())}
     if tokenizer is None:
         from janome.tokenizer import Tokenizer
         tokenizer = Tokenizer()
     tokens = list(tokenizer.tokenize(text))
-    spans = []          # (char_start, char_end, surface, reading)
+    spans = []          # (char_start, char_end, surface, token, reading)
     cursor = 0
     for token in tokens:
         surface = token.surface
@@ -163,7 +159,7 @@ def fix_text(text: str, entries: list[NameEntry], tokenizer=None,
         for reading in entry.readings:
             index.setdefault(reading, entry)
 
-    hits = []
+    proposals = []
     used = set()
     for i in range(len(spans)):
         for width in (3, 2, 1):
@@ -182,13 +178,11 @@ def fix_text(text: str, entries: list[NameEntry], tokenizer=None,
             entry = index.get(reading)
             distance = 0
             if entry is not None:
-                # a kanji surface only qualifies when it is a known mishearing
                 if not _has_katakana(surface) and surface not in allow:
                     continue
             if entry is None:
                 if not near_miss:
                     continue
-                # one-mora substitution only for katakana spans of some length
                 if not _has_katakana(surface):
                     continue
                 if not (_has_kanji(surface) or len(reading) >= MIN_NEAR_LEN):
@@ -205,21 +199,36 @@ def fix_text(text: str, entries: list[NameEntry], tokenizer=None,
             if surface == entry.canonical_ja:
                 continue
             start, end = window[0][0], window[-1][1]
-            hits.append({'start': start, 'end': end, 'from': surface,
-                         'to': entry.canonical_ja, 'reading': reading,
-                         'distance': distance})
+            proposals.append({'start': start, 'end': end, 'from': surface,
+                              'to': entry.canonical_ja, 'reading': reading,
+                              'distance': distance,
+                              'context': text})
             used.update(range(i, j))
             break
+    return sorted(proposals, key=lambda p: p['start'])
 
-    if not hits:
-        return text, []
+
+def apply_repairs(text: str, repairs: list[dict]) -> str:
+    """Apply approved proposals to one line (idempotent for the same set)."""
+    if not repairs:
+        return text
     out, pos = [], 0
-    for hit in sorted(hits, key=lambda h: h['start']):
+    for hit in sorted(repairs, key=lambda h: h['start']):
         out.append(text[pos:hit['start']])
         out.append(hit['to'])
         pos = hit['end']
     out.append(text[pos:])
-    return ''.join(out), hits
+    return ''.join(out)
+
+
+def fix_text(text: str, entries: list[NameEntry], tokenizer=None,
+             allow_surfaces=frozenset(), near_miss: bool = False):
+    """Backwards-compatible helper: propose + apply (no AI in the loop)."""
+    text = str(text or '')
+    proposals = propose_repairs(text, entries, tokenizer=tokenizer,
+                               allow_surfaces=allow_surfaces,
+                               near_miss=near_miss)
+    return apply_repairs(text, proposals), proposals
 
 
 def fix_cues(cues: list, entries: list[NameEntry], tokenizer=None,

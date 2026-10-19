@@ -42,8 +42,7 @@ NEAR_PROMPT = """你在做字幕的「语境审查」。先读作品档案，再
 只输出 JSON：
 {{"decisions":[{{"id":0,"verdict":"promote|reject|uncertain","canonical":"规范中文名","reason":"依据"}}]}}"""
 
-STYLE_PROMPT = """你在做字幕的「语境审查」（语体）。作品档案：
-{profile}
+STYLE_PROMPT = """你在做字幕的「语境审查」（语体）。作品档案：{profile}
 
 待审条目（id、集、cue、中文）：
 {items}
@@ -173,6 +172,67 @@ def review_style(items: list, profile_brief: str, *, chat=None,
                            'suggestion': str(decision.get('suggestion') or '')[:200]})
             flags.append(merged)
     return flags
+
+
+NAME_REPAIR_PROMPT = """你在做「专名修复」的语境审查。作品档案：
+{profile}
+
+下面每条是 ASR 转写里疑似被听错的片段。字段：
+id、context（整句原文）、from（原文片段）、to（拟替换成的规范名）、
+reading（片段读音）、distance（读音距离，0=同音，1=一个音之差）。
+
+判断规则：
+1. 只有当它确实是这部作品里的人名/固定称名，且替换后句子通顺时才 "accept"；
+2. 普通词、别的人名、同音异义词、语法不通 → "reject"；
+3. 证据不足（一句里孤立出现、上下文看不出在说人）→ "uncertain"。
+
+只输出 JSON：
+{{"decisions":[{{"id":0,"verdict":"accept|reject|uncertain","reason":"依据"}}]}}"""
+
+
+def review_name_repairs(items: list, profile_brief: str, *, chat=None,
+                        batch_size: int = 12) -> list[dict]:
+    """Adjudicate ASR name-repair proposals (exact *and* near-match)."""
+    if chat is None:
+        from lib.llm import call_chat
+
+        def chat(messages):
+            text = call_chat(messages, temperature=0.1, max_tokens=1200,
+                             json_mode=True)
+            return text, ('' if text else 'empty response')
+
+    rows = []
+    for index, item in enumerate(items):
+        row = dict(item)
+        row['id'] = index
+        rows.append(row)
+
+    decisions = []
+    for chunk in _batch(rows, batch_size):
+        payload = [{'id': r['id'], 'context': r.get('context'),
+                    'from': r.get('from'), 'to': r.get('to'),
+                    'reading': r.get('reading'),
+                    'distance': r.get('distance')} for r in chunk]
+        data = _call(chat, NAME_REPAIR_PROMPT.format(
+            profile=profile_brief,
+            items=json.dumps(payload, ensure_ascii=False)), payload)
+        if not data:
+            continue
+        for decision in data.get('decisions') or []:
+            try:
+                idx = int(decision.get('id'))
+            except (TypeError, ValueError):
+                continue
+            if not (0 <= idx < len(rows)):
+                continue
+            verdict = str(decision.get('verdict') or '').strip().lower()
+            if verdict not in ('accept', 'reject', 'uncertain'):
+                continue
+            merged = dict(rows[idx])
+            merged.update({'verdict': verdict,
+                           'reason': str(decision.get('reason') or '')[:300]})
+            decisions.append(merged)
+    return decisions
 
 
 def apply_approvals(meta_path: str, decisions: list[dict], glossary: dict) -> dict:
