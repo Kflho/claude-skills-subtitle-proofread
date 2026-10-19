@@ -643,6 +643,43 @@ class Fixer:
             source='asr', applied=applied, ai_review=len(review),
             details=details)
 
+    def _asr_context_text(self) -> str:
+        """Hotwords/context for the ASR model (Qwen3 system message).
+
+        Prefer an explicit ASR_CONTEXT_FILE, then the validated series
+        glossary.  The previous code passed an empty context, which made
+        proper nouns (柳対一/竹ノ内空) appear even when the model supports
+        hotword conditioning.
+        """
+        from lib.config import ASR_CONTEXT_FILE
+        candidates = []
+        if ASR_CONTEXT_FILE:
+            candidates.append(ASR_CONTEXT_FILE)
+        candidates += [
+            os.path.join(self._session.project_dir, 'glossaries',
+                         'digimon.series.json'),
+            os.path.join(self._session.project_dir, 'temp', 'nouns',
+                         'noun_mappings.json'),
+        ]
+        for path in candidates:
+            if not path or not os.path.isfile(path):
+                continue
+            try:
+                if path.endswith('.json'):
+                    data = json.load(open(path, encoding='utf-8'))
+                    terms = [k for k in data if not str(k).startswith('_')]
+                else:
+                    terms = [line.strip() for line in
+                             open(path, encoding='utf-8')
+                             if line.strip() and not line.startswith('#')]
+            except (OSError, json.JSONDecodeError):
+                continue
+            terms = [t for t in terms if t][:40]
+            if terms:
+                return ('Japanese ASR. Hotwords: '
+                        + ', '.join(terms) + '.')
+        return ''
+
     def _transcribe_for_alignment(self, engine: str = None):
         """Extract audio and run the configured ASR route (None on failure)."""
         video = self._video_path
@@ -668,6 +705,7 @@ class Fixer:
                            qwen_python=self._asr_python or None)
         try:
             return router.transcribe(audio, language=self.target_lang,
+                                     context=self._asr_context_text(),
                                      timestamps=True)
         except Exception as exc:
             print(f'[asr] transcription failed: {exc}', file=sys.stderr)

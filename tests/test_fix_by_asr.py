@@ -36,6 +36,21 @@ def project(tmp_path):
     return tmp_path
 
 
+def test_asr_context_uses_series_glossary(project):
+    gloss = project / 'glossaries'
+    gloss.mkdir()
+    (gloss / 'digimon.series.json').write_text(json.dumps({
+        '_comment': 'skip me',
+        'アグモン': '亚古兽',
+        'タケル': '阿岳',
+    }, ensure_ascii=False), encoding='utf-8')
+    fixer = Fixer('EP001', str(project), srt_dir=str(project))
+    context = fixer._asr_context_text()
+    assert 'Japanese ASR. Hotwords:' in context
+    assert 'アグモン' in context and 'タケル' in context
+    assert '_comment' not in context
+
+
 def test_fix_by_asr_applies_time_fix_only(project):
     fixer = Fixer('EP001', str(project), srt_dir=str(project))
     result = make_result([
