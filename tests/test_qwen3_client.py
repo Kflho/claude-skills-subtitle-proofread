@@ -110,6 +110,10 @@ class TestQwen3WorkerClient:
         result = client.transcribe('a.wav', chunk_sec=30)
         assert result.meta['chunk_sec'] == 30
 
+    def test_transcribe_chunk_sec_zero_disables_chunking(self, client):
+        result = client.transcribe('a.wav', chunk_sec=0)
+        assert result.meta['chunk_sec'] == 0
+
     def test_transcribe_passes_chunk_boundaries(self, client):
         result = client.transcribe('a.wav', chunk_boundaries=[10.5, 20.0])
         assert result.meta['chunk_boundaries'] == [10.5, 20.0]

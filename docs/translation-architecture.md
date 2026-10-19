@@ -120,6 +120,10 @@ QA（每条）：
    另含 chrF guardrail 与时间轴漂移检查。
 2. `translate_srt.py`：`--max-chars/--max-cps/--qa-report/--repair`；
    `--repair` 只重译 QA 标出的条，不动其他条。
+   **输出协议改为 `{"id": n, "translation": "..."}`**：裸 JSON 字符串数组在模型并条时
+   会静默错位（EP003 cue14 实证）；现在按 id 回填，缺 id/重复 id 整批重试。
+   **glossary 按批过滤**：只注入本批出现的术语；全量 18 条注入会把 chrF 从 40.61
+   压到 36.69，并出现「石田阿和」这类错名。
    **glossary prompt 用 `ja→zh` 对照**（不是只给中文名）：EP003 名字段 30 条
    0 违规，`タケル→阿岳` 正确（旧 prompt 会译成「太一」）。
 3. **series glossary**：`glossaries/digimon.series.json`，18 个词条，

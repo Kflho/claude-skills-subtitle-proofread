@@ -11,8 +11,8 @@ python -m pytest -q
 coverage: 79.9% (15,105 statements)
 ```
 
-本轮 **+46 tests**（1377 → 1423）：ASR review 工作单/`set_time`/AI review 列表、AudioHints 契约与主流程接线、翻译 QA/阶段/repair/chrF/时间轴、review 转换器、全集 manifest、ASR chunk_sec/边界切块、series glossary 验证、CC→FA 分组/遮罩、ASR hotwords context。
-覆盖率 79.7% → 79.2%，0 failed（新增两个 CC→FA 实验脚本，main 未全测）。
+本轮 **+51 tests**（1377 → 1428）：ASR review 工作单/`set_time`/AI review 列表、AudioHints 契约与主流程接线、翻译 QA/阶段/repair/chrF/时间轴、review 转换器、全集 manifest、ASR chunk_sec/边界切块、series glossary 验证、CC→FA 分组/遮罩、ASR hotwords context、VAD speech-only 拼接、翻译 id 协议。
+覆盖率 79.7% → 78.9%，0 failed（新增 CC→FA/VAD 实验脚本，main 未全测）。
 
 新增/扩展测试文件：
 
@@ -38,6 +38,7 @@ coverage: 79.9% (15,105 statements)
 | `test_qwen3_client.py`（扩展） | `chunk_sec` / `chunk_boundaries` 透传到 worker payload |
 | `test_aed_chunk.py`（新） | AED speech gap 选切点；无 gap 回退固定目标 |
 | `test_nouns_validate_glossary.py`（新） | 日文/中文同现验证；无证据词条丢弃；集号解析 |
+| `test_vad_concat_asr.py`（新） | speech 段合并、拼接映射、时间回填 |
 | `test_translation_stage.py`（扩展） | series glossary 发现回退 |
 
 ### 覆盖率按目录（本轮 vs 上轮）
@@ -47,15 +48,15 @@ coverage: 79.9% (15,105 statements)
 | `scripts/lib`（含子目录） | 3,810 | **86.3%** | 85.8% | 翻译 QA/chrF/时间轴；ASR 边界切块；AudioHints 契约/provider |
 | `scripts/fix` | 3,236 | **77.4%** | 78.0% | 翻译阶段/repair + AudioHints provider + ASR context hotwords |
 | `scripts/nouns` | 2,500 | **67.7%** | 67.2% | series glossary 证据验证；`auto_classify` / `auto_clean_glossary` 仍 0%（旧入口） |
-| `scripts` 根 | 2,123 | **66.7%** | 65.7% | run_all 96%、translate_srt 85%、polish_zh 99% |
+| `scripts` 根 | 2,149 | **66.9%** | 65.7% | run_all 96%、translate_srt 85%、polish_zh 99% |
 | `scripts/asr` | 613 | **94.9%** | 95.0% | worker 边界切块/CLI |
 | `scripts/reuse` | 389 | **97.9%** | 97.9% | align 96%、apply 98%、common 100% |
 | `scripts/scan` | 372 | **94.6%** | 94.6% | scan_all/VAD/CLI 补齐 |
 | `scripts/apply` | 504 | **96.4%** | 100.0% | main/ASS/繁→简 + ASR review 转换器 |
-| `scripts/eval` | 1,334 | **79.8%** | 90.3% | release gate；benchmark；manifest；CC→FA 分组/单 cue 实验 |
+| `scripts/eval` | 1,454 | **76.4%** | 90.3% | release gate；benchmark；manifest；CC→FA/VAD concat 实验 |
 | `scripts/ass` | 313 | **86.3%** | 86.3% | CLI main 已测 |
 | `scripts/utils` | 285 | **80.4%** | 80.4% | — |
-| **合计** | **15,479** | **79.2%** | 79.9% | — |
+| **合计** | **15,625** | **78.9%** | 79.9% | — |
 
 ### 做得好的部分
 

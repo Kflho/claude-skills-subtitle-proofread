@@ -64,6 +64,14 @@ def test_build_system_prompt_language_specific_rules():
     assert 'JSON' in ru
 
 
+def test_glossary_for_batch_filters_absent_terms():
+    mapping = {'アグモン': '亚古兽', 'タケル': '阿岳'}
+    cues = [{'text': 'アグモン、行こう'}]
+    assert tr._glossary_for_batch('', mapping, cues) == 'アグモン→亚古兽'
+    assert tr._glossary_for_batch('', mapping, [{'text': 'おはよう'}]) == ''
+    assert tr._glossary_for_batch('サリー', {}, cues) == 'サリー'
+
+
 def test_build_system_prompt_hard_constraints():
     prompt = tr._build_system_prompt('ja', max_chars=20, max_cps=12)
     assert '每行最多 20 个字符' in prompt
@@ -326,6 +334,16 @@ def test_parse_json_response_rejects_garbage(capsys):
     assert tr._parse_json_response('完全不是 JSON') is None
     assert tr._parse_json_response('') is None
     assert 'Failed to parse JSON' in capsys.readouterr().err
+
+
+def test_normalize_batch_result_id_protocol():
+    assert tr._normalize_batch_result(
+        [{'id': 2, 'translation': '再见'},
+         {'id': 1, 'translation': '你好'}], 2) == ['你好', '再见']
+    assert tr._normalize_batch_result(
+        [{'id': 1, 'translation': '你好'}], 2) is None
+    assert tr._normalize_batch_result(['你好'], 1) == ['你好']
+    assert tr._normalize_batch_result([{'id': 1, 'translation': ''}], 1) == [None]
 
 
 def test_translate_batch_builds_prompt(monkeypatch):

@@ -298,7 +298,7 @@ class Qwen3WorkerClient:
             'context': context,
             'timestamps': bool(timestamps),
         }
-        if chunk_sec is not None and float(chunk_sec) > 0:
+        if chunk_sec is not None:
             payload['chunk_sec'] = float(chunk_sec)
         if chunk_boundaries:
             payload['chunk_boundaries'] = [float(b) for b in chunk_boundaries]

@@ -151,7 +151,9 @@ USER_TEMPLATE = """上下文（前几条日文原文，帮助理解语流）：
 固定译名参考（必须使用）：
 {glossary}
 
-请翻译以上每条字幕，输出 JSON 数组："""
+请翻译以上每条字幕，输出严格 JSON 数组，每项格式：
+{{"id": 输入编号, "translation": "中文译文"}}
+id 必须从 1 到 N 连续且与输入编号一致；禁止合并、拆分、漏条；数组长度必须等于输入条数。"""
 
 USER_TEMPLATE_AFTER = """上下文（前几条日文原文，帮助理解语流）：
 {context_before}
@@ -165,7 +167,9 @@ USER_TEMPLATE_AFTER = """上下文（前几条日文原文，帮助理解语流�
 固定译名参考（必须使用）：
 {glossary}
 
-请翻译以上每条字幕，输出 JSON 数组："""
+请翻译以上每条字幕，输出严格 JSON 数组，每项格式：
+{{"id": 输入编号, "translation": "中文译文"}}
+id 必须从 1 到 N 连续且与输入编号一致；禁止合并、拆分、漏条；数组长度必须等于输入条数。"""
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -572,6 +576,32 @@ def _parse_json_response(response):
     return None
 
 
+def _normalize_batch_result(parsed, n: int):
+    """Accept the id protocol, or legacy string arrays; reject id gaps.
+
+    A bare string array silently shifts every later cue if the model merges
+    one line (observed on EP003 cue 14).  Objects with explicit ids are
+    mapped back by id and must cover 1..N exactly.
+    """
+    if not isinstance(parsed, list):
+        return None
+    if all(isinstance(x, str) for x in parsed):
+        return parsed
+    if not all(isinstance(x, dict) for x in parsed):
+        return None
+    by_id = {}
+    for item in parsed:
+        try:
+            idx = int(item.get('id'))
+        except (TypeError, ValueError):
+            return None
+        text = item.get('translation', item.get('text', ''))
+        by_id[idx] = str(text or '').strip()
+    if set(by_id) != set(range(1, n + 1)):
+        return None
+    return [by_id[i] or None for i in range(1, n + 1)]
+
+
 def _translate_batch(cues, api_key, model, base_url, glossary_str, ja_context=None,
                      source_lang='ja', max_chars: int = 0,
                      max_cps: float = 0.0, ja_future=None):
@@ -615,7 +645,7 @@ def _translate_batch(cues, api_key, model, base_url, glossary_str, ja_context=No
     if not response:
         return None
 
-    return _parse_json_response(response)
+    return _normalize_batch_result(_parse_json_response(response), len(cues))
 
 
 # 模型照抄 prompt 时会把编号一起带回来（targets 是 "1. …\n2. …" 格式）
@@ -742,6 +772,20 @@ def repair_file(input_path, output_path, qa_path, glossary, api_key, model,
 # Single file translation
 # ═══════════════════════════════════════════════════════════════
 
+def _glossary_for_batch(glossary_str, ja_to_zh, cues):
+    """Only inject terms that actually occur in this batch.
+
+    Full-glossary injection lowered chrF and let 石田ヤマト become 石田阿和;
+    the filtered form keeps the prompt small and still enforces present names.
+    """
+    if not ja_to_zh:
+        return glossary_str
+    blob = ''.join(str(c.get('text', '')) for c in cues)
+    pairs = [f'{ja}→{zh}' for ja, zh in sorted(ja_to_zh.items())
+             if ja and ja in blob]
+    return ', '.join(pairs)
+
+
 def translate_file(input_path, output_path, glossary_str, ja_to_zh,
                    api_key, model, base_url,
                    oped=None,
@@ -806,20 +850,21 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
         # JA context: up to 3 cues immediately before this batch (original Japanese)
         ja_ctx = cues[max(0, i - 3):i]
         ja_future = cues[i + len(batch_cues):i + len(batch_cues) + 2]
-        batches.append((i, batch_cues, ja_ctx, ja_future))
+        batch_gloss = _glossary_for_batch(glossary_str, ja_to_zh, batch_cues)
+        batches.append((i, batch_cues, ja_ctx, ja_future, batch_gloss))
 
     # Submit all batches in parallel
     def _translate_one(idx_batch):
         """Translate a single batch with retry. Returns (batch_idx, result_list_or_None)."""
-        batch_idx, batch_cues, ja_ctx, ja_future = idx_batch
+        batch_idx, batch_cues, ja_ctx, ja_future, batch_gloss = idx_batch
         future = ja_future if future_context else None
-        result = _translate_batch(batch_cues, api_key, model, base_url, glossary_str,
+        result = _translate_batch(batch_cues, api_key, model, base_url, batch_gloss,
                                   ja_context=ja_ctx, source_lang=source_lang,
                                   max_chars=max_chars, max_cps=max_cps,
                                   ja_future=future)
         if result is None:
             time.sleep(1)
-            result = _translate_batch(batch_cues, api_key, model, base_url, glossary_str,
+            result = _translate_batch(batch_cues, api_key, model, base_url, batch_gloss,
                                       ja_context=ja_ctx, source_lang=source_lang,
                                       max_chars=max_chars, max_cps=max_cps,
                                       ja_future=future)
@@ -828,7 +873,7 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
         # 光看 None 判不出来。
         elif bad_ratio(batch_cues, result) > 0.5:
             time.sleep(1)
-            retry = _translate_batch(batch_cues, api_key, model, base_url, glossary_str,
+            retry = _translate_batch(batch_cues, api_key, model, base_url, batch_gloss,
                                      ja_context=ja_ctx, source_lang=source_lang,
                                      max_chars=max_chars, max_cps=max_cps,
                                      ja_future=future)
@@ -1053,6 +1098,7 @@ def main():
     parser.add_argument('--extract-dir', default='temp/nouns',
                         help='专名提取 sidecar 输出目录（默认 temp/nouns）')
     args = parser.parse_args()
+    BATCH_SIZE = max(1, args.batch)
 
     # API key（LLM_API_KEY 优先，回退到 POLISH_API_KEY）
     api_key = LLM_API_KEY

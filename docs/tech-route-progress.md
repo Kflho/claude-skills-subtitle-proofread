@@ -1,13 +1,13 @@
 # 2026 技术路线实施进度
 
 > **用途**：跨会话续跑。新会话先读本文件，再读 [`tech-route-2026.md`](tech-route-2026.md)、[`ADR-006`](adr/006-stable-asr-core.md)、[`ADR-007`](adr/007-cue-alignment.md)、[`ADR-008`](adr/008-qwen3-long-audio-chunking.md)、[`test-plan.md`](test-plan.md)。
-> **最后更新**：2026-10-18（第十轮：ASR-first 重设计 + 技术接入总图 + 模型审计；1423 tests / 79.2%）
+> **最后更新**：2026-10-18（第十轮：ASR-first 重设计 + 技术接入总图 + 模型审计；1428 tests / 78.9%）
 > **当前阶段**：EP01–03 视频/日文 CC 齐备；只读基准 + 防过拟合协议落地；**用户确认视频/CC 无真实偏移，并明确日语 CC 边界即测试标准**（不再另建人工金标）。第八轮把“P90 为什么下不去”拆开：test 集 90% 的 matched cue 起点系统性早 −0.37/−0.40 s（同段音频重转写复现，是当前对齐的起点缺陷，不是缓存/参考问题；EP001 仅 −55 ms），且 P90 只覆盖 42–45% 的 CC 字符；FA 塌缩吞掉成段对白（累计空洞 122–229 s）。`fix_by_asr` 整集偏移改为**默认关**，分段重对齐实测更差、留 P3。
 > **总目标**：把音频链路从 `WebRTC VAD → kotoba Whisper → 时间重叠匹配` 迁移到 `Qwen3-ASR → Qwen3-ForcedAligner → 全局文本对齐`；默认行为在 P2 验收前保持不变。
 
 ## 0. 当前一句话（clear 后从这里开始）
 
-已经完成：P1 稳定 ASR 核心、P2 对齐层、`run_all --asr` 接入、实机验证、held-out 三集基准；第八轮补齐 signed 偏差/覆盖分解/P90 归因/空洞诊断；**第九轮**按用户定位重排主次，并把测试标准收成一条 gate 命令（`release_gate.py` + `eval/gate.baseline.json`）。**用户已确认日语 CC 边界即测试标准**，所以 raw 数字就是验收结果：test P50 400 ms / P90 1196 ms（可靠 P90 510 ms），P2-14 未达标。**测试 1423 passed / 79.2% / 0 failed。**
+已经完成：P1 稳定 ASR 核心、P2 对齐层、`run_all --asr` 接入、实机验证、held-out 三集基准；第八轮补齐 signed 偏差/覆盖分解/P90 归因/空洞诊断；**第九轮**按用户定位重排主次，并把测试标准收成一条 gate 命令（`release_gate.py` + `eval/gate.baseline.json`）。**用户已确认日语 CC 边界即测试标准**，所以 raw 数字就是验收结果：test P50 400 ms / P90 1196 ms（可靠 P90 510 ms），P2-14 未达标。**测试 1428 passed / 78.9% / 0 failed。**
 
 **主次（用户定位：先应用新技术 + 建立测试标准，再慢慢改精度）：**
 
@@ -197,7 +197,7 @@ python scripts\eval\diagnose_timeline.py --asr-json temp\asr\digimon_ep002_main.
 
 **用户定位**：先应用新技术、建立测试标准，再慢慢改精度；不要陷进单点技术细节。
 **提交**：`d40ce74`（CC 即边界测试标准）+ 本轮 gate 提交（见 git log 顶部）。
-**测试**：1423 passed / 79.2% / 0 failed。
+**测试**：1428 passed / 78.9% / 0 failed。
 
 已完成：
 
@@ -295,7 +295,7 @@ L3 人工 ≤5%（现状 272 条全堆在报告）。
    翻译阶段已接（`--translate`，见 §0.12）。
 5. 评测加 auto/AI/human 三档计数，进 gate，防止“把 review 挪个文件”冒充优化。
 
-**测试**：1423 passed / 79.2%（Review 转换器 +4；AudioHints +6；上一轮删百度 −15）。
+**测试**：1428 passed / 78.9%（Review 转换器 +4；AudioHints +6；上一轮删百度 −15）。
 
 **0.6B 试跑（同轮，未完成）**：三集主故事窗口用 `Qwen3-ASR-0.6B + FA` 重转，
 10 分钟没跑完 EP001（1.7B 约 90s/集），GPU 37% / 4.9GB，无报告产出，手动终止。
@@ -448,6 +448,45 @@ judge-refiner）、IWSLT 2026 Subtitling（长度/压缩约束）、gpt-subtrans
     我们保留 pairs + series glossary，禁止并条回退，下一步 summary/MQM，不重写翻译器。
 - 详见 `docs/research-2026-10-model-usage.md`。
 
+## 0.15 控制变量实验（2026-10）
+
+台账：`docs/controlled-experiments.md`。
+
+**时间轴（EP001，同一参考/窗口）**：
+
+| 变体 | CER | P50 | P90 | 可靠 P90 | coverage | zero | collapse |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 60s chunk + ASR 映射 | .3705 | 129ms | 1897ms | 424ms | .418 | 9.4% | 19/229s |
+| VAD concat → ASR | .3672 | **87ms** | 2204ms | **316ms** | .436 | **3.6%** | **4/42s** |
+| ASR + hotwords | .3436 | 149ms | 2616ms | 687ms | .441 | 10.6% | 21/225s |
+| CC→FA 分组 | **.0366** | 200ms | 3179ms | 626ms | .667 | 22.3% | 14/196s |
+| 官方长音频直出 | **.4490** | 1882ms | 4148ms | 1363ms | .297 | 10.6% | 14/333s |
+
+**翻译（EP001 前 30 条）**：
+
+| 变体 | 批次 | 术语 | chrF 句均 | QA |
+|---|---:|---|---:|---|
+| 旧 prompt | 10 | 中文名 4 条 | 43.33 | 0 |
+| 当前 pairs | 10 | ja→zh 18 条 | 36.69 | 0 |
+| 当前 pairs | 10 | **本批出现的 7 条** | **40.61** | 0 |
+| ID 协议 + 按批过滤 | 10 | 本批出现的 7 条 | 38.49 | 1（行长） |
+| 当前 pairs | 30 | ja→zh 18 条 | 31.73 | 2 |
+| 无 glossary | 10 | 无 | 40.63 | 2 |
+
+初步判断：
+
+- **批处理是有效的**（30 条一批明显更差）；不能为了“单集直出”把分批去掉。
+- **裸 JSON 字符串数组会静默错位**：EP003 cue14 模型并条后，后面每条译文都串位；
+  QA 只抓到 glossary miss。已改为 `{"id": n, "translation": "..."}`，EP003 复测错位消失、QA 0。
+- **全量 glossary pairs 伤翻译流畅度/名字**（实测「石田阿和」）；只注入本批出现的
+  术语后 chrF 回到 40.61、QA 0 → **错在“整本 glossary 塞进每个 batch”，不是术语对照本身**。
+  已把 `_glossary_for_batch` 接进 `translate_file`。
+- **官方长音频直出明显更差**（P50 1882ms、P90 4148ms、coverage .297）：60s 切块
+  不是“skill 把效果搞坏”，反而是必要控制。
+- **VAD concat 多集不成立**：EP002 CER .258→.503、EP003 .270→.606，coverage 也崩；
+  仅 EP001 好看，**不接**。
+- 单集结果不当结论；EP002/003 已复测。
+
 ## 1. 状态总览
 
 | 阶段 | 内容 | 状态 | 验收 |
@@ -455,7 +494,7 @@ judge-refiner）、IWSLT 2026 Subtitling（长度/压缩约束）、gpt-subtrans
 | P0 | 边界测试标准 + 基线指标 | ✅ 用户确认日语 CC 边界即测试标准；三集基准 + 测量有效性（signed/覆盖/空洞）已落地 | `episode_benchmark` 新报告字段；CER/边界/偏差可复现 |
 | P1 | 稳定核心 + Qwen3/Whisper 适配 + 评测/CLI | ✅ 3 集跑通；Qwen3 vs Whisper large-v3 A/B 已记录；默认不变 | 契约/registry/router/CLI 稳定；A/B 有 raw + matched-span 数据 |
 | P2 | Qwen3-FA + cue mapper + align_repair | 🟡 核心/CLI/`run_all --asr` 完成；**P2-14 按 CC 标准未达标** | raw test P50 400 ms / 可靠 P90 510 ms；signed P50 −384 ms（起点缺陷） |
-| 测试 | 1423 tests / 79.2% 覆盖 / 0 failed | 🟡 主链补齐；剩余根脚本/nouns 旧入口/whisper_backends/align_cues | 关键路径每个分支至少一条测试 |
+| 测试 | 1428 tests / 78.9% 覆盖 / 0 failed | 🟡 主链补齐；剩余根脚本/nouns 旧入口/whisper_backends/align_cues | 关键路径每个分支至少一条测试 |
 | P3 | FireRedVAD/AED，VAD 降级为提示 | ⬜ 未开始 | speech/music/singing 时间线对比 |
 | P4 | glossary-first + 翻译 prompt，百度下线 | ⬜ 未开始 | 专名 F1 / 翻译人工评分 |
 | P5 | 云兜底 | ⬜ 未开始 | 成本/隐私评估；VibeVoice/说话人已删除 |
