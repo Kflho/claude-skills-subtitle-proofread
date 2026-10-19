@@ -1,14 +1,22 @@
 ---
 name: subtitle-proofread
 description: >
-  Use when the user wants 字幕 handled end to end: Qwen3-ASR/ForcedAligner or
-  legacy Whisper for timing, LLM translation to Chinese, proper-noun unification
-  across episodes, or proofreading existing SRT/ASS. FireRedVAD/AED is currently
-  diagnostic-only (no OP/ED decision consumer yet). Unfixable items get [???]
-  markers for Aegisub review.
+  字幕任务统一入口。用户提到：字幕校对 / 翻译字幕 / 专名、专有名词、译名、术语统一 /
+  时间轴修复、轴不对 / OP-ED、片头片尾、固定台词 / SRT、ASS 批量处理 / 校对字幕
+  时，先加载本 skill 再动手。维护或开发本 skill（改 pipeline、工具、文档）时同样先加载，
+  现有工具优先，避免重复造轮子。
 ---
 
 # Subtitle Proofread
+
+## 何时加载（使用 vs 开发）
+
+- **使用**：任何字幕任务开始前先按本文件流程走，不凭记忆直接改字幕。
+- **开发**：修改本仓库任何 pipeline/工具/文档前也先重读「行为分级」「运行」「错误恢复」，
+  **先找现有实现**（`oped_fixer`、`apply_map`、`run_all`、`references/*`），不要另写一套。
+- 本 skill 通过 junction 安装到 DSH：
+  `C:\Users\54238\.agents\skills\subtitle-proofread` → 本仓库，改完即指向同一份文件；
+  frontmatter 描述变更需新会话/重新加载后才会反映到 skill 目录。
 
 3-phase pipeline：扫描（乱码 + VAD 语音时间线）→ 时间轴修复（默认 Whisper legacy；
 可选 Qwen3-ASR + ForcedAligner）→ 专名统一 + 交付；可选 LLM 翻译。
