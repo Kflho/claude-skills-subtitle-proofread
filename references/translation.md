@@ -125,7 +125,7 @@ python translate_srt.py --input-dir 日文ai修复版/ --output-dir 中文翻译
 | `--batch` | 每批翻译句数（默认 20） |
 | `--context-window` | 前文日文 cue 数；默认 0，`-1`=全部过去（实验项） |
 | `--noun-pre-replace` | 翻译前替换日文专名（默认关；未验证优于纯 glossary） |
-| `--max-chars` / `--max-cps` | 写进 prompt 的硬约束（默认 0=不写） |
+| `--max-chars` / `--max-cps` | 写进 prompt 的硬约束（默认 0=不写；EP002 实测会伤 chrF，优先用 `--repair`） |
 | `--qa-report` / `--repair` | QA 报告 + 只修问题条 |
 | `--dry-run` | 预览，不调 API |
 
