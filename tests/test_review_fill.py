@@ -1,4 +1,4 @@
-﻿"""Review fill: routed gaps only, decisions validated before they can land."""
+"""Review fill: routed gaps only, decisions validated before they can land."""
 
 import json
 
@@ -104,10 +104,23 @@ def test_only_routable_gaps_are_sent():
     chat = _chat({'decisions': [{'id': 0, 'decision': 'keep'}]})
 
     stats = fill_mod.fill_pack(pack, chat=chat,
-                               allowed_actions={'asr_repair': {'keep'}})
+                               allowed_actions={'asr_repair': {'keep', 'rewrite'}})
 
     assert stats['sent'] == 1
     assert stats['skipped_unroutable'] == 2
+
+
+def test_keep_only_policy_does_not_dispatch_at_all():
+    """No writable right for the kind → asking the model cannot change anything."""
+    pack = _pack(_item(0))
+    chat = _chat({'decisions': [{'id': 0, 'decision': 'keep'}]})
+    policy = {'asr_repair': {'keep'}}
+
+    stats = fill_mod.fill_pack(pack, chat=chat, allowed_actions=policy)
+
+    assert stats['sent'] == 0
+    assert stats['skipped_no_rights'] == 1
+    assert chat.calls == []
 
 
 def test_fill_rejects_unsafe_decisions_and_falls_back_to_keep():
@@ -168,7 +181,7 @@ def test_fill_skips_items_that_already_have_a_decision():
     chat = _chat({'decisions': []})
 
     stats = fill_mod.fill_pack(pack, chat=chat,
-                               allowed_actions={'asr_repair': {'keep'}})
+                               allowed_actions={'asr_repair': {'keep', 'rewrite'}})
 
     assert stats['filled'] == 0
     assert chat.calls == []          # nothing pending → no model call
@@ -181,7 +194,7 @@ def test_fill_survives_failed_and_malformed_batches():
         return '', 'network down'
 
     stats = fill_mod.fill_pack(pack, chat=broken, batch_size=2,
-                               allowed_actions={'asr_repair': {'keep'}})
+                               allowed_actions={'asr_repair': {'keep', 'rewrite'}})
     assert stats['failed_batches'] == 2
     assert stats['filled'] == 0
     assert all(i['decision'] == '' for i in pack['items'])
@@ -190,7 +203,7 @@ def test_fill_survives_failed_and_malformed_batches():
         return '抱歉，我无法回答。', ''
 
     stats = fill_mod.fill_pack(pack, chat=prose, batch_size=2,
-                               allowed_actions={'asr_repair': {'keep'}})
+                               allowed_actions={'asr_repair': {'keep', 'rewrite'}})
     assert stats['failed_batches'] == 2
 
 
@@ -205,7 +218,7 @@ def test_missing_ids_are_retried_once():
         return json.dumps({'decisions': [{'id': 1, 'decision': 'keep'}]}), ''
 
     stats = fill_mod.fill_pack(pack, chat=chat,
-                               allowed_actions={'asr_repair': {'keep'}})
+                               allowed_actions={'asr_repair': {'keep', 'rewrite'}})
 
     assert stats['retries'] == 1
     assert stats['filled'] == 2
@@ -222,7 +235,7 @@ def test_duplicate_and_unknown_ids_are_counted():
     ]})
 
     stats = fill_mod.fill_pack(pack, chat=chat,
-                               allowed_actions={'asr_repair': {'keep'}})
+                               allowed_actions={'asr_repair': {'keep', 'rewrite'}})
 
     assert stats['duplicate_id'] == 1
     assert stats['unknown_id'] == 1

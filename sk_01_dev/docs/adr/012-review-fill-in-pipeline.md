@@ -41,6 +41,8 @@ ADR-003 把报告降级成 JSON 的只读导出后，这条路断了；`apply_re
 7. **提示词按协议收紧**：JSON 模式、≤40 条/≤4000 字批量、ID 缺失补问一次、
    每条 `why` 写依据；动作受 route×kind 白名单约束。
    详见 `docs/review-ai-fill.md` §5。
+8. **无写权不发送**：某类条目的策略里没有 `rewrite`/`delete` 时，不花调用去问模型
+   （`skipped_no_rights`）。默认配置下 `asr_repair` 零调用，只有 `translation` 会发。
 
 ## 后果
 

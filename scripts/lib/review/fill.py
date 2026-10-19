@@ -280,6 +280,14 @@ def validate_decision(item: dict, decision: dict,
     return {'decision': 'delete_line'}, ''
 
 
+def _writable(item: dict, allowed_actions) -> bool:
+    """True when the item's kind policy allows touching the file at all."""
+    if not isinstance(allowed_actions, dict):
+        return True
+    perms = _allowed_for(item, allowed_actions) or set()
+    return bool(perms & {'rewrite', 'delete'})
+
+
 def _apply_decisions(pack: dict, decisions: list[dict],
                      allow_rewrite: bool = True,
                      allowed_actions: set | dict | None = None) -> dict:
@@ -350,13 +358,22 @@ def fill_pack(pack: dict, *, chat=None, batch_size: int = BATCH_SIZE,
     """
     source = (pack_mod.pending_items(pack) if include_all
               else pack_mod.routable_items(pack))
+    skipped_rights = 0
+    if isinstance(allowed_actions, dict):
+        # No writable right for this kind → asking the model cannot change
+        # anything, so do not spend a call on it (triage with no action).
+        filtered = [i for i in source if _writable(i, allowed_actions)]
+        skipped_rights = len(source) - len(filtered)
+        source = filtered
     pending = list(source)
     if max_items is not None:
         pending = pending[:max_items]
     total = {'filled': 0, 'rejected': 0, 'unknown_id': 0, 'duplicate_id': 0,
              'batches': 0, 'failed_batches': 0, 'retries': 0,
              'sent': len(pending),
-             'skipped_unroutable': len(pack_mod.pending_items(pack)) - len(source)}
+             'skipped_unroutable': len(pack_mod.pending_items(pack)) - len(source)
+             - skipped_rights,
+             'skipped_no_rights': skipped_rights}
     if not pending:
         return total
 
