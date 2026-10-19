@@ -4,7 +4,7 @@
 Features:
 - OP/ED pre-translate: detect + translate once, apply to all episodes (--skip-oped to disable)
 - Proper noun pre-replace: ja→zh mapping from glossary before translation
-- Batch processing: N cues/batch with ±3 cue JA context window (pre-computed → fully parallel)
+- Batch processing: N cues/batch; optional `--context-window` (default 0)
 - Intra-episode parallelism: all batches submitted concurrently (ThreadPoolExecutor)
 
 Usage:
@@ -112,12 +112,8 @@ def _build_system_prompt(source_lang, max_chars: int = 0,
 1. **准确翻译**：保持原意，不增不减
 2. **口语化**：用自然中文口语表达，避免翻译腔
    - 书面词换口语词（"如何"→"怎么"、"迅速"→"快"）
-3. **角色语言风格**：
-   - 老年男性：用语稳重、简洁
-   - 少年/儿童：口语化、直接
-   - 女性：自然柔和（不要过度加"呢""哦"）
-4. **保持专有名词**：角色名、地名、组织名、术语不改变原文
-5. **字幕长度适中**：翻译后不应明显变长或变短"""
+3. **保持专有名词**：角色名、地名、组织名、术语不改变原文
+4. **字幕长度适中**：翻译后不应明显变长或变短"""
 
     # Japanese-specific rules
     if source_lang == 'ja':
@@ -144,22 +140,6 @@ def _build_system_prompt(source_lang, max_chars: int = 0,
 
 USER_TEMPLATE = """上下文（前几条日文原文，帮助理解语流）：
 {context_before}
-
-本次要翻译的字幕（日文）：
-{targets}
-
-固定译名参考（必须使用）：
-{glossary}
-
-请翻译以上每条字幕，输出严格 JSON 数组，每项格式：
-{{"id": 输入编号, "translation": "中文译文"}}
-id 必须从 1 到 N 连续且与输入编号一致；禁止合并、拆分、漏条；数组长度必须等于输入条数。"""
-
-USER_TEMPLATE_AFTER = """上下文（前几条日文原文，帮助理解语流）：
-{context_before}
-
-后文（日文原文，仅供理解，不翻译）：
-{context_after}
 
 本次要翻译的字幕（日文）：
 {targets}
@@ -468,9 +448,15 @@ def _call_llm(messages, api_key, model, base_url):
     body = {
         'model': model,
         'messages': messages,
-        'temperature': 0.3,
+        'temperature': float(os.environ.get('LLM_TEMPERATURE', '0.3')),
         'max_tokens': LLM_MAX_TOKENS,
     }
+    seed = os.environ.get('LLM_SEED', '').strip()
+    if seed:
+        try:
+            body['seed'] = int(seed)
+        except ValueError:
+            pass
     if LLM_REASONING_EFFORT:
         body['reasoning_effort'] = LLM_REASONING_EFFORT
     data = json.dumps(body).encode('utf-8')
@@ -604,33 +590,29 @@ def _normalize_batch_result(parsed, n: int):
 
 def _translate_batch(cues, api_key, model, base_url, glossary_str, ja_context=None,
                      source_lang='ja', max_chars: int = 0,
-                     max_cps: float = 0.0, ja_future=None):
+                     max_cps: float = 0.0,
+                     context_limit: int | None = 0):
     """Translate one batch of cues. Returns list of translated text or None.
 
     Args:
         cues: list of cue dicts to translate
-        ja_context: optional list of JA original cue dicts from preceding batch (pre-computed)
+        ja_context: optional list of JA original cue dicts from preceding cues
+        context_limit: max preceding cues kept in prompt; None = all,
+            0 = none.  Default 0: context was not validated as beneficial.
         source_lang: detected source language ('ja', 'ru', 'zh', 'other')
     """
     texts = [c['text'] if isinstance(c, dict) else str(c) for c in cues]
 
-    # Context: up to 3 JA original cues from previous batch (pre-computed, no dependency)
+    # Context: preceding JA source cues; experiment with 0 / 3 / all.
     context_before = ''
-    if ja_context:
-        recent = ja_context[-3:]
+    if ja_context and context_limit != 0:
+        recent = ja_context if context_limit is None else ja_context[-context_limit:]
         context_before = '\n'.join(f'{i+1}. {c["text"]}' for i, c in enumerate(recent) if c.get('text'))
-
-    context_after = ''
-    if ja_future:
-        upcoming = ja_future[:2]
-        context_after = '\n'.join(f'{i+1}. {c["text"]}' for i, c in enumerate(upcoming) if c.get('text'))
 
     targets = '\n'.join(f'{i+1}. {t}' for i, t in enumerate(texts) if t)
 
-    template = USER_TEMPLATE_AFTER if context_after else USER_TEMPLATE
-    user_msg = template.format(
+    user_msg = USER_TEMPLATE.format(
         context_before=context_before or '(无)',
-        context_after=context_after or '(无)',
         targets=targets,
         glossary=glossary_str or '(无)',
     )
@@ -825,7 +807,8 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
                    dry_run=False, source_lang=None,
                    extract_nouns=False, extract_dir=None,
                    max_chars: int = 0, max_cps: float = 0.0,
-                   future_context: bool = False):
+                   context_window: int | None = 0,
+                   pre_replace_nouns: bool = False):
     """Translate a single subtitle file (SRT or ASS).
 
     Args:
@@ -858,7 +841,9 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
             print(f'  {fname}: OP/ED pre-replaced {oped_replaced} cues', file=sys.stderr)
 
     # Step 2: Proper noun pre-replace
-    noun_replaced = apply_noun_pre_replace(cues, ja_to_zh)
+    noun_replaced = 0
+    if pre_replace_nouns:
+        noun_replaced = apply_noun_pre_replace(cues, ja_to_zh)
     if noun_replaced:
         print(f'  {fname}: noun pre-replaced {noun_replaced} occurrences', file=sys.stderr)
 
@@ -880,27 +865,31 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
         batch_cues = cues[i:i + BATCH_SIZE]
         if len(batch_cues) < 1:
             continue
-        # JA context: up to 3 cues immediately before this batch (original Japanese)
-        ja_ctx = cues[max(0, i - 3):i]
-        ja_future = cues[i + len(batch_cues):i + len(batch_cues) + 2]
+        # JA context: preceding source cues.  Default 0; `None` = full past
+        # (WMT26 full-video-context setup).  Opt-in only until A/B supports it.
+        if context_window is None:
+            ja_ctx = cues[:i]
+        elif context_window <= 0:
+            ja_ctx = []
+        else:
+            ja_ctx = cues[max(0, i - context_window):i]
         batch_gloss = _glossary_for_batch(glossary_str, ja_to_zh, batch_cues)
-        batches.append((i, batch_cues, ja_ctx, ja_future, batch_gloss))
+        batches.append((i, batch_cues, ja_ctx, batch_gloss))
 
     # Submit all batches in parallel
     def _translate_one(idx_batch):
         """Translate a single batch with retry. Returns (batch_idx, result_list_or_None)."""
-        batch_idx, batch_cues, ja_ctx, ja_future, batch_gloss = idx_batch
-        future = ja_future if future_context else None
+        batch_idx, batch_cues, ja_ctx, batch_gloss = idx_batch
         result = _translate_batch(batch_cues, api_key, model, base_url, batch_gloss,
                                   ja_context=ja_ctx, source_lang=source_lang,
                                   max_chars=max_chars, max_cps=max_cps,
-                                  ja_future=future)
+                                  context_limit=context_window)
         if result is None:
             time.sleep(1)
             result = _translate_batch(batch_cues, api_key, model, base_url, batch_gloss,
                                       ja_context=ja_ctx, source_lang=source_lang,
                                       max_chars=max_chars, max_cps=max_cps,
-                                      ja_future=future)
+                                      context_limit=context_window)
         # 整批回显/未翻译也重试一次：prompt 过长或语义混乱时，模型会直接
         # 把带编号的原文照抄回来。这类结果非 None、且与原文"不同"（多了编号），
         # 光看 None 判不出来。
@@ -909,7 +898,7 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
             retry = _translate_batch(batch_cues, api_key, model, base_url, batch_gloss,
                                      ja_context=ja_ctx, source_lang=source_lang,
                                      max_chars=max_chars, max_cps=max_cps,
-                                     ja_future=future)
+                                     context_limit=context_window)
             if retry is not None and bad_ratio(batch_cues, retry) < bad_ratio(batch_cues, result):
                 result = retry
         return batch_idx, batch_cues, result
@@ -1008,7 +997,9 @@ def _filter_by_start(files, start_from):
 def translate_dir(input_dir, output_dir, glossary_str, ja_to_zh,
                   api_key, model, base_url, dry_run=False, source_lang=None,
                   skip_oped=False, episodes=None, start_from=None,
-                  extract_nouns=False, extract_dir=None):
+                  extract_nouns=False, extract_dir=None,
+                  max_chars=0, max_cps=0.0, context_window=0,
+                  pre_replace_nouns=False):
     """Translate all SRT/ASS files in a directory."""
     if not os.path.isdir(input_dir):
         print(f'ERROR: {input_dir} not found', file=sys.stderr)
@@ -1067,6 +1058,9 @@ def translate_dir(input_dir, output_dir, glossary_str, ja_to_zh,
             oped=oped,
             dry_run=dry_run, source_lang=source_lang,
             extract_nouns=extract_nouns, extract_dir=extract_dir,
+            max_chars=max_chars, max_cps=max_cps,
+            context_window=context_window,
+            pre_replace_nouns=pre_replace_nouns,
         )
 
         grand_total += total
@@ -1115,8 +1109,12 @@ def main():
                         help='Write per-cue QA JSON (single-file mode)')
     parser.add_argument('--repair', action='store_true',
                         help='repair only QA-flagged cues, then rewrite QA')
-    parser.add_argument('--future-context', action='store_true',
-                        help='include the next 2 cues as read-only context')
+    parser.add_argument('--context-window', type=int, default=0,
+                        help='preceding JA cues in prompt: 0=none (default), '
+                             '-1=all past')
+    parser.add_argument('--noun-pre-replace', action='store_true',
+                        help='replace ja proper nouns in source before translation '
+                             '(not validated; default off)')
     parser.add_argument('--source-lang', choices=['ja', 'ru', 'zh', 'other'],
                         default=None,
                         help='Source language (default: auto-detect from cues)')
@@ -1168,7 +1166,9 @@ def main():
                        extract_nouns=args.extract_nouns,
                        extract_dir=args.extract_dir,
                        max_chars=args.max_chars, max_cps=args.max_cps,
-                       future_context=args.future_context)
+                       context_window=(None if args.context_window < 0
+                                       else args.context_window),
+                       pre_replace_nouns=args.noun_pre_replace)
         qa_path = args.qa_report
         if args.repair and not qa_path:
             qa_path = args.output + '.qa.json'
@@ -1197,7 +1197,11 @@ def main():
                       episodes=episodes,
                       start_from=args.start_from,
                       extract_nouns=args.extract_nouns,
-                      extract_dir=args.extract_dir)
+                      extract_dir=args.extract_dir,
+                      max_chars=args.max_chars, max_cps=args.max_cps,
+                      context_window=(None if args.context_window < 0
+                                      else args.context_window),
+                      pre_replace_nouns=args.noun_pre_replace)
     else:
         parser.print_help()
         sys.exit(1)

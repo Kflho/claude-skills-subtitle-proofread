@@ -359,11 +359,12 @@ def test_translate_batch_builds_prompt(monkeypatch):
     out = tr._translate_batch(cues, 'key', 'model', 'http://x',
                               'サリー=莎莉',
                               ja_context=[{'text': '前の台詞'}],
-                              source_lang='ja')
+                              source_lang='ja', context_limit=3)
 
     assert out == ['你好', '再见']
     system, user = seen['messages']
     assert system['role'] == 'system' and '日语' in system['content']
+    assert '老年男性' not in system['content']
     assert user['role'] == 'user'
     assert '1. こんにちは' in user['content']
     assert '2. さようなら' in user['content']
@@ -371,7 +372,7 @@ def test_translate_batch_builds_prompt(monkeypatch):
     assert '前の台詞' in user['content']
 
 
-def test_translate_batch_future_context(monkeypatch):
+def test_translate_batch_context_limit_none_keeps_all(monkeypatch):
     seen = {}
 
     def fake_llm(messages, api_key, model, base_url):
@@ -379,13 +380,40 @@ def test_translate_batch_future_context(monkeypatch):
         return '["你好"]'
 
     monkeypatch.setattr(tr, '_call_llm', fake_llm)
-    tr._translate_batch(
-        [{'text': 'こんにちは'}], 'key', 'model', 'http://x', '',
-        ja_future=[{'text': '次の台詞'}], source_lang='ja')
-
+    ctx = [{'text': f'前{i}'} for i in range(1, 6)]
+    tr._translate_batch([{'text': 'こんにちは'}], 'k', 'm', 'u', '',
+                        ja_context=ctx, source_lang='ja',
+                        context_limit=None)
     user = seen['messages'][1]['content']
-    assert '后文' in user
-    assert '次の台詞' in user
+    assert all(f'前{i}' in user for i in range(1, 6))
+
+
+def test_translate_batch_default_has_no_context(monkeypatch):
+    seen = {}
+
+    def fake_llm(messages, api_key, model, base_url):
+        seen.update(messages=messages)
+        return '["你好"]'
+
+    monkeypatch.setattr(tr, '_call_llm', fake_llm)
+    tr._translate_batch([{'text': 'こんにちは'}], 'k', 'm', 'u', '',
+                        ja_context=[{'text': '前の台詞'}], source_lang='ja')
+    assert '前の台詞' not in seen['messages'][1]['content']
+
+
+def test_translate_batch_context_limit_zero_omits_context(monkeypatch):
+    seen = {}
+
+    def fake_llm(messages, api_key, model, base_url):
+        seen.update(messages=messages)
+        return '["你好"]'
+
+    monkeypatch.setattr(tr, '_call_llm', fake_llm)
+    tr._translate_batch([{'text': 'こんにちは'}], 'k', 'm', 'u', '',
+                        ja_context=[{'text': '前の台詞'}], source_lang='ja',
+                        context_limit=0)
+    user = seen['messages'][1]['content']
+    assert '前の台詞' not in user
 
 
 def test_translate_batch_returns_none_when_api_fails(monkeypatch):

@@ -539,6 +539,9 @@ python "<scripts-dir>/fix/oped_fill.py" "<SUBTITLE_DIR>" \
 | `--mappings <JSON>` | translate_srt.py: path to noun_mappings.json (preferred over --glossary) |
 | `--skip-oped` | translate_srt.py: skip OP/ED detection and pre-translation (use for shows without OP/ED) |
 | `--batch N` | translate_srt.py: cues per batch (default: 10). Larger = less API calls but slower parallelism |
+| `--context-window N` | translate_srt.py: preceding JA cues (default: 0; `-1` = all past; experimental) |
+| `--noun-pre-replace` | translate_srt.py: replace ja proper nouns in source before translation (default off; not validated) |
+| `--qa-report` / `--repair` | translate_srt.py: write QA JSON / repair only flagged cues with per-cue rollback |
 | `--detect-boundaries` | oped_fixer/oped_fill: use API (LLM) to detect OP/ED boundaries from cue patterns |
 | `--skip-step1` | oped_fill: skip API boundary detection, use --op-boundary/--ed-boundary defaults |
 | `--extract-nouns` | translate_srt.py: 翻译后提取专名实体 → temp/nouns/extracted_EP###.json |
