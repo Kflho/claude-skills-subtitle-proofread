@@ -53,7 +53,7 @@ from lib.translation.qa import qa_report
 # Config
 # ═══════════════════════════════════════════════════════════════
 
-BATCH_SIZE = 10   # cues per API call
+BATCH_SIZE = 20   # cues per API call; 20 beat 5/10/30/50 on EP001–003
 DELAY = 1.0       # seconds between batches
 
 # ═══════════════════════════════════════════════════════════════
@@ -441,7 +441,7 @@ def _call_llm(messages, api_key, model, base_url):
 
     ⚠️ 推理模型的思考 token 会吃光 max_tokens（踩坑 #8），默认关闭思考。
     不关的话思考 token 会吃光 max_tokens 预算 → content 为空串 →
-    `_translate_batch` 判整批失败 → 该批 10 条 cue 全部保留日文原文，
+    `_translate_batch` 判整批失败 → 该批 cue 全部保留日文原文，
     且**不打印任何错误**（表现为 mojibake 式的"翻译没生效"）。
     """
     url = f'{base_url}/chat/completions'

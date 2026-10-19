@@ -79,7 +79,7 @@ def main(argv=None):
                         help='Qwen3-ForcedAligner path/id')
     parser.add_argument('--mappings', default='',
                         help='ja→zh glossary JSON (optional)')
-    parser.add_argument('--batch', type=int, default=10)
+    parser.add_argument('--batch', type=int, default=20)
     parser.add_argument('--no-repair', action='store_true')
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args(argv)

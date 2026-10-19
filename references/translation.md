@@ -122,7 +122,7 @@ python translate_srt.py --input-dir 日文ai修复版/ --output-dir 中文翻译
 | `--glossary` | proper-nouns.md（兼容旧版，不推荐） |
 | `--model` | LLM 模型（默认 deepseek-flash） |
 | `--base-url` | API 端点 |
-| `--batch` | 每批翻译句数（默认 10） |
+| `--batch` | 每批翻译句数（默认 20） |
 | `--context-window` | 前文日文 cue 数；默认 0，`-1`=全部过去（实验项） |
 | `--noun-pre-replace` | 翻译前替换日文专名（默认关；未验证优于纯 glossary） |
 | `--max-chars` / `--max-cps` | 写进 prompt 的硬约束（默认 0=不写） |
@@ -133,7 +133,7 @@ python translate_srt.py --input-dir 日文ai修复版/ --output-dir 中文翻译
 
 - **OP/ED 预翻译**：检测片头片尾区域，翻译一次后对所有集复用
 - **术语表**：`--mappings` 的 ja→zh 进 prompt；默认不再做“预替换”
-- **分批**：默认 10 条/批；按批只注入本批出现的术语
+- **分批**：默认 20 条/批；按批只注入本批出现的术语（EP001–003 上 20 优于 5/10/30/50）
 - **QA/repair**：覆盖、日语残留、回显、术语、行长/CPS、时间轴；只修问题条并逐条验收
 
 > 上下文默认关闭：EP001–003 的 60s/整集实验里，3 条/全量前文都没有稳定优于

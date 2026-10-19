@@ -538,7 +538,7 @@ python "<scripts-dir>/fix/oped_fill.py" "<SUBTITLE_DIR>" \
 | `--source-lang <LANG>` | translate_srt.py: force source language (ja/ru/zh). Default: auto-detect. |
 | `--mappings <JSON>` | translate_srt.py: path to noun_mappings.json (preferred over --glossary) |
 | `--skip-oped` | translate_srt.py: skip OP/ED detection and pre-translation (use for shows without OP/ED) |
-| `--batch N` | translate_srt.py: cues per batch (default: 10). Larger = less API calls but slower parallelism |
+| `--batch N` | translate_srt.py: cues per batch (default: 20; 20 beat 5/10/30/50 on EP001–003) |
 | `--context-window N` | translate_srt.py: preceding JA cues (default: 0; `-1` = all past; experimental) |
 | `--noun-pre-replace` | translate_srt.py: replace ja proper nouns in source before translation (default off; not validated) |
 | `--qa-report` / `--repair` | translate_srt.py: write QA JSON / repair only flagged cues with per-cue rollback |
