@@ -234,3 +234,22 @@ def test_project_aliases_do_not_overreach():
                  '行走于朦胧月夜，世间暗处'):
         out, hits = normalizer.normalize(text)
         assert out == text and hits == [], text
+
+def test_latin_alias_matches_case_insensitively_with_word_boundary():
+    normalizer = Normalizer({'小绿': ['Midori']})
+    assert normalizer.normalize('Midori来了')[0] == '小绿来了'
+    assert normalizer.normalize('midori来了')[0] == '小绿来了'
+    assert normalizer.normalize('MIDORI来了')[0] == '小绿来了'
+
+
+def test_latin_alias_does_not_match_inside_a_longer_word():
+    normalizer = Normalizer({'市': ['Ja']})
+    out, hits = normalizer.normalize('Jamaikuru')
+    assert out == 'Jamaikuru' and hits == []
+
+
+def test_latin_and_cjk_aliases_coexist():
+    normalizer = Normalizer({'佐武': ['Sabu', '萨布']})
+    out, hits = normalizer.normalize('Sabu和萨布')
+    assert out == '佐武和佐武'
+    assert len(hits) == 2

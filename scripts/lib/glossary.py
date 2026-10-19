@@ -37,6 +37,10 @@ MIN_VARIANT_CHARS = 2
 _CJK_WORD = re.compile(r'[\u3400-\u9fff]{2,4}')
 
 
+def _has_latin(text: str) -> bool:
+    return any('a' <= ch.lower() <= 'z' for ch in str(text or ''))
+
+
 def load_glossary(path: str) -> dict:
     """Load the flat ja→zh glossary that the rest of the toolchain uses."""
     with open(path, 'r', encoding='utf-8') as handle:
@@ -139,10 +143,21 @@ class Normalizer:
         pairs.sort(key=lambda p: len(p[0]), reverse=True)
         self._pairs = pairs
         self._pattern = None
+        self._latin_pattern = None
         self._blocked = [str(b) for b in (blocked or []) if str(b).strip()]
-        if pairs:
-            alternation = '|'.join(re.escape(v) for v, _ in pairs)
+        latin = {v: c for v, c in pairs if _has_latin(v)}
+        cjk = {v: c for v, c in pairs if not _has_latin(v)}
+        self._latin = latin
+        self._latin_lower = {v.lower(): c for v, c in latin.items()}
+        self._cjk = cjk
+        if cjk:
+            alternation = '|'.join(re.escape(v) for v, _ in cjk.items())
             self._pattern = re.compile(alternation)
+        if latin:
+            alternation = '|'.join(re.escape(v) for v, _ in latin.items())
+            self._latin_pattern = re.compile(
+                r'(?<![A-Za-z])(?:' + alternation + r')(?![A-Za-z])',
+                re.IGNORECASE)
 
     @property
     def has_rules(self) -> bool:
@@ -157,21 +172,36 @@ class Normalizer:
                 start = text.find(phrase, start + 1)
         return spans
 
+    def _matches(self, text: str):
+        found = []
+        if self._pattern is not None:
+            found.extend(self._pattern.finditer(text))
+        if self._latin_pattern is not None:
+            found.extend(self._latin_pattern.finditer(text))
+        found.sort(key=lambda m: (m.start(), -(m.end() - m.start())))
+        return found
+
     def normalize(self, text: str) -> tuple[str, list[dict]]:
-        if not text or self._pattern is None:
+        if not text or self._pattern is None and self._latin_pattern is None:
             return text, []
         spans = self._blocked_spans(text)
-        lookup = dict(self._pairs)
         hits = []
         result = []
         pos = 0
-        for match in self._pattern.finditer(text):
+        for match in self._matches(text):
+            if match.start() < pos:
+                continue        # nested match already covered
             if any(match.start() < end and match.end() > start
                    for start, end in spans):
                 continue
             result.append(text[pos:match.start()])
             variant = match.group(0)
-            canonical = lookup[variant]
+            if _has_latin(variant):
+                canonical = (self._latin.get(variant)
+                             or self._latin_lower.get(variant.lower())
+                             or variant)
+            else:
+                canonical = self._cjk.get(variant, variant)
             result.append(canonical)
             hits.append({'variant': variant, 'canonical': canonical,
                          'offset': match.start()})

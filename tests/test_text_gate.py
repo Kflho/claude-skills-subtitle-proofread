@@ -101,3 +101,24 @@ def test_report_contains_totals_and_items(tmp_path):
 def test_empty_directory_is_an_error(tmp_path, capsys):
     assert text_gate.main(['--zh-dir', str(tmp_path)]) == 2
     assert 'no subtitles' in capsys.readouterr().err
+
+def test_latin_residue_is_counted_and_gated(tmp_path):
+    import json
+    from eval import text_gate
+
+    zh = tmp_path / 'zh'
+    zh.mkdir()
+    (zh / 'EP001.srt').write_text(
+        "1\n00:00:01,000 --> 00:00:02,000\nMidori来了\n\n"
+        "2\n00:00:03,000 --> 00:00:04,000\n字幕制作：TheSkaroHunting\n\n",
+        encoding='utf-8')
+    report = tmp_path / 'report.json'
+    rc = text_gate.main(['--zh-dir', str(zh), '--max-latin', '0',
+                         '--report', str(report)])
+    data = json.loads(report.read_text(encoding='utf-8'))
+    assert rc == 1
+    assert data['totals']['latin'] == 1
+    assert any('latin' in f for f in data['failures'])
+
+    rc = text_gate.main(['--zh-dir', str(zh)])
+    assert rc == 0

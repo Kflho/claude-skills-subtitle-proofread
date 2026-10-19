@@ -104,3 +104,31 @@ python scripts\eval\text_gate.py --zh-dir <zh> --glossary ... --meta ... `
    属于「专名变体」的进 `aliases`（要先看正负样本，别拍脑袋）。
 2. 把 `text_gate` 接进每集流程：translate → normalize → gate，三条命令串起来。
 3. 英文路线（EP001–030）补一个 EN→ZH 的别名表，复用同一套 canonical。
+
+## 8. 多源（英/日）专名统一
+
+同一部剧可能一部分集从英文译、一部分从日文译，最终要合成一套中文字幕。
+两条线必须共用同一套 canonical：
+
+- **英文形进 `aliases`**：`{"佐武": ["Sabu", "SABU", "萨布"]}`；匹配按词边界 +
+  忽略大小写（`Sabu` 不会误伤 `Sabuyan` 内部的 `Sabu`，`midori` 也能命中）。
+- **英文专名同时进扁平词表**（`Sabu -> 佐武`），这样 `translate_srt --mappings`
+  在英译中时也能预替换。
+- **闸门加 `--max-latin 0`**：统计非制作名单行里的拉丁词，英文残留会直接失败。
+
+佐武实测（52 集，30 英源 + 22 日源）：
+
+| 指标 | 处理前 | 处理后 |
+|---|---:|---:|
+| 拉丁词残留 | 178 | **0** |
+| 含拉丁词的 cue | 163 | **0** |
+| 别名变体残留 | 197 | **0**（仅保留 blocked 的 `萨布托米多`） |
+| 两条线共同出现的 canonical | — | 23 个，写法一致 |
+
+英文形里有近一半是音译待定（`Sono/索诺`、`Taka/泷吉` 等），统一记在
+`_meta.needs_review`，先统一写法、后续对照原音再改名。
+
+测试：`tests/test_multisource_names.py`（5 例，默认运行）锁「两源同一 canonical、
+大小写/词边界、最长匹配、一个别名只属于一个 canonical、gate 前后」；
+`tests/test_project_multisource.py`（env 门控）在真实语料上断言拉丁残留 0、
+变体残留 0。

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Gate a translation run: kana residue, echo, leftover variants, CPS.
 
 This is the "did the normalization actually work" check, meant to run after
@@ -21,6 +21,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import sys
 
 import lib._path  # noqa: F401,E402
@@ -34,12 +35,16 @@ def _episode(path: str) -> str:
     return os.path.basename(path)[:-4]
 
 
+LATIN = re.compile(r"[A-Za-z][A-Za-z'’.\-]{1,}")
+CREDIT = ('字幕制作', '翻译', '时间轴', 'Society', 'Skaro', 'Hokutono')
+
+
 def check_file(zh_path: str, *, source_path: str = '', normalizer=None,
                max_chars: int = 20, max_cps: float = 12.0) -> dict:
     cues = read_subtitles(zh_path, mark_garbled=False)
     src = read_subtitles(source_path, mark_garbled=False) if (
         source_path and os.path.isfile(source_path)) else []
-    kana = echo = variants = cps = 0
+    kana = echo = variants = cps = latin = 0
     bad = []
     for i, cue in enumerate(cues):
         text = str(cue.get('text') or '')
@@ -51,6 +56,11 @@ def check_file(zh_path: str, *, source_path: str = '', normalizer=None,
                 str(src[i].get('text') or ''), text):
             echo += 1
             reasons.append('echo')
+        if not any(marker in text for marker in CREDIT):
+            tokens = LATIN.findall(text)
+            if tokens:
+                latin += len(tokens)
+                reasons.append('latin:' + ','.join(tokens[:3]))
         if normalizer is not None and normalizer.has_rules:
             _, hits = normalizer.normalize(text)
             if hits:
@@ -65,7 +75,7 @@ def check_file(zh_path: str, *, source_path: str = '', normalizer=None,
             bad.append({'cue': i + 1, 'start': cue.get('start'),
                         'reasons': reasons, 'text': text[:60]})
     return {'episode': _episode(zh_path), 'cues': len(cues), 'kana': kana,
-            'echo': echo, 'variants': variants, 'cps': cps,
+            'echo': echo, 'variants': variants, 'cps': cps, 'latin': latin,
             'items': bad}
 
 
@@ -78,6 +88,8 @@ def main(argv=None):
     parser.add_argument('--max-kana', type=int, default=0)
     parser.add_argument('--max-echo', type=int, default=0)
     parser.add_argument('--max-variants', type=int, default=0)
+    parser.add_argument('--max-latin', type=int, default=-1,
+                        help='allowed Latin-script tokens (-1 = do not gate)')
     parser.add_argument('--max-cps', type=int, default=-1,
                         help='allowed CPS-violating cues (-1 = do not gate)')
     parser.add_argument('--max-chars', type=int, default=20)
@@ -104,7 +116,7 @@ def main(argv=None):
             max_chars=args.max_chars, max_cps=args.cps_limit))
 
     totals = {key: sum(r[key] for r in results)
-              for key in ('kana', 'echo', 'variants', 'cps')}
+              for key in ('kana', 'echo', 'variants', 'cps', 'latin')}
     failures = []
     if totals['kana'] > args.max_kana:
         failures.append(f"kana {totals['kana']}>{args.max_kana}")
@@ -112,12 +124,14 @@ def main(argv=None):
         failures.append(f"echo {totals['echo']}>{args.max_echo}")
     if totals['variants'] > args.max_variants:
         failures.append(f"variants {totals['variants']}>{args.max_variants}")
+    if args.max_latin >= 0 and totals['latin'] > args.max_latin:
+        failures.append(f"latin {totals['latin']}>{args.max_latin}")
     if args.max_cps >= 0 and totals['cps'] > args.max_cps:
         failures.append(f"cps {totals['cps']}>{args.max_cps}")
 
     print(f'[gate] {len(results)} episode(s): kana {totals["kana"]}, '
           f'echo {totals["echo"]}, variants {totals["variants"]}, '
-          f'cps {totals["cps"]}', file=sys.stderr)
+          f'cps {totals["cps"]}, latin {totals["latin"]}', file=sys.stderr)
     for result in results:
         if any(result[k] for k in ('kana', 'echo', 'variants')):
             print(f"  {result['episode']}: kana {result['kana']}, "
@@ -126,7 +140,8 @@ def main(argv=None):
 
     payload = {'totals': totals, 'thresholds': {
         'kana': args.max_kana, 'echo': args.max_echo,
-        'variants': args.max_variants, 'cps': args.max_cps},
+        'variants': args.max_variants, 'cps': args.max_cps,
+        'latin': args.max_latin},
         'failures': failures, 'files': results}
     if args.report:
         os.makedirs(os.path.dirname(args.report) or '.', exist_ok=True)
