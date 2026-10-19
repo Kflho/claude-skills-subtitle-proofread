@@ -129,6 +129,17 @@
 - **speech 区/空洞分类**：speech 主导空洞才进修复，不门控删条；
 - 不要再用它强行改 chunk 边界（已实测负收益）。
 
+### 3.1 实测：FireRedVAD 对 Qwen 时间轴没有稳健提升
+
+- speech-only concat：EP001 好，EP002/003 CER .503/.606，文本崩；
+- token 过滤（只保留 speech 区 token）：EP001 P90 1897→663，但 EP002/003
+  coverage .428→.322/.335、.445→.265/.274，可靠 P90 不升反降；
+- 只裁首尾静音：EP001 P90 2957ms，可靠 479ms，混合；
+- AED 边界切块：P90 变差。
+
+结论：**FireRedVAD 目前只能当证据/分类，不应改 Qwen 的 ASR 输入或 token 映射**。
+“让结果最佳”的做法是保留 60s ASR+FA+映射，把 FireRedVAD 留给 OP/ED/speech 诊断。
+
 ## 4. Mel-Band RoFormer：官方有现成推理包，不用自己写
 
 来源：PyPI `melband-roformer-infer`（MIT，inference-only，CLI+API）。

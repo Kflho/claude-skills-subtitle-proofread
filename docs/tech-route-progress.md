@@ -487,6 +487,9 @@ judge-refiner）、IWSLT 2026 Subtitling（长度/压缩约束）、gpt-subtrans
   不是“skill 把效果搞坏”，反而是必要控制。
 - **VAD concat 多集不成立**：EP002 CER .258→.503、EP003 .270→.606，coverage 也崩；
   仅 EP001 好看，**不接**。
+- **FireRedVAD token 过滤/首尾裁剪也不稳健**：EP001 P90 可从 1897 降到 663，
+  但 EP002/003 coverage 崩、可靠 P90 不升反降；证据见 `docs/controlled-experiments.md` §1.2/1.3。
+  结论：FireRedVAD 只用于 OP/ED/speech 诊断，不改 Qwen 输入/映射。
 - 单集结果不当结论；EP002/003 已复测。
 
 ## 1. 状态总览
