@@ -57,6 +57,23 @@ python scripts/video_to_zh.py \
 > 原有的 B（专名审查）、D（`auto_translate` / `oped_fixer` / `polish_zh`）仍在
 > [workflows.md §5](workflows.md#场景-5完整流程视频--成品中文)。要交付成品，走那条 A–D。
 
+### 视频直出选哪条？
+
+| 路线 | 文本 | 时间轴 | 现状 |
+|---|---|---|---|
+| Qwen3-ASR + FA | 略差 | 更好 | `--engine qwen3`，wrapper 默认 |
+| Whisper legacy | 更好 | 更差（segment 级） | `--engine whisper`，需要 `WHISPER_CLI`/`WHISPER_MODEL` |
+
+已有 3 集 A/B（同一参考/窗口）：Whisper test CER **0.204**，Qwen3 **0.263**；
+但 Qwen3 test P50 **400ms** vs Whisper **757ms**，可靠 P90 **510ms** vs **1325ms**。
+所以：
+
+- **文本质量**：旧 Whisper 更好；
+- **时间轴**：Qwen3 + FA 更好；
+- **没有端到端中文质量 A/B**：不能声称新路线整条字幕更好。
+
+只想“先出能看的中文粗剪”可用 Qwen3；更在意识别文本可走 Whisper 旧路径。
+
 ## 3. 整条 pipeline（修复 + 翻译）
 
 ```bash

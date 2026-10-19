@@ -42,6 +42,8 @@ translated/zh/<EP>.qa.json
 > `video_to_zh.py` 是 **A 转写 + C 翻译** 的快捷粗剪，不替代原有完整 A–D：
 > 专名审查、`auto_translate`、`oped_fixer`、`polish_zh` 见
 > [references/workflows.md §5](references/workflows.md#场景-5完整流程视频--成品中文)。
+> 质量证据：旧 Whisper 文本更好（CER 0.204 vs Qwen3 0.263），Qwen3 时间轴更好
+> （P50 400 vs 757ms）；**没有端到端中文质量 A/B**，不能声称新路线整体更好。
 
 详细步骤：[references/quickstart.md](references/quickstart.md) ·
 环境配置：[references/setup.md](references/setup.md) ·
