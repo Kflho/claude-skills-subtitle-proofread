@@ -25,7 +25,7 @@ import sys
 
 import lib._path  # noqa: F401,E402
 
-from lib.glossary import Normalizer, build_variant_map, load_glossary, load_meta  # noqa: E402
+from lib.glossary import build_normalizer, build_variant_map, load_glossary, load_meta  # noqa: E402
 from lib.subtitle_io import read_subtitles  # noqa: E402
 from lib.translation.qa import count_kana, cue_violations, is_untranslated  # noqa: E402
 
@@ -87,8 +87,8 @@ def main(argv=None):
 
     normalizer = None
     if args.glossary:
-        normalizer = Normalizer(build_variant_map(
-            load_glossary(args.glossary), load_meta(args.meta)))
+        normalizer = build_normalizer(load_glossary(args.glossary),
+                                      load_meta(args.meta))
 
     files = sorted(glob.glob(os.path.join(args.zh_dir, '*.srt')))
     if not files:

@@ -92,6 +92,12 @@ def build_variant_map(glossary: dict, meta: dict) -> dict:
     return out
 
 
+def build_normalizer(glossary: dict, meta: dict) -> "Normalizer":
+    """Normalizer with the reviewed table and the meta blocklist."""
+    blocked = (meta.get('blocked_phrases') or []) if isinstance(meta, dict) else []
+    return Normalizer(build_variant_map(glossary, meta), blocked=blocked)
+
+
 def explain_variant_map(glossary: dict, meta: dict) -> dict:
     """Report what ``build_variant_map`` kept/dropped, for review."""
     kept = build_variant_map(glossary, meta)
@@ -119,11 +125,13 @@ class Normalizer:
     """Longest-match variant → canonical replacement.
 
     Only the reviewed table is applied; the canonical form is never rewritten.
-    ``normalize`` returns the new text plus the hits, so callers can log
-    exactly what changed (dry-run == apply minus the write).
+    ``blocked`` phrases suppress any replacement that would overlap them
+    (e.g. an uncertain reading like 「萨布托米多」 must not become
+    「佐武托米多」).  ``normalize`` returns the new text plus the hits, so
+    callers can log exactly what changed (dry-run == apply minus the write).
     """
 
-    def __init__(self, variant_map: dict):
+    def __init__(self, variant_map: dict, blocked: list | None = None):
         pairs = []
         for canonical, variants in (variant_map or {}).items():
             for variant in variants:
@@ -131,6 +139,7 @@ class Normalizer:
         pairs.sort(key=lambda p: len(p[0]), reverse=True)
         self._pairs = pairs
         self._pattern = None
+        self._blocked = [str(b) for b in (blocked or []) if str(b).strip()]
         if pairs:
             alternation = '|'.join(re.escape(v) for v, _ in pairs)
             self._pattern = re.compile(alternation)
@@ -139,14 +148,27 @@ class Normalizer:
     def has_rules(self) -> bool:
         return bool(self._pairs)
 
+    def _blocked_spans(self, text: str) -> list[tuple[int, int]]:
+        spans = []
+        for phrase in self._blocked:
+            start = text.find(phrase)
+            while start >= 0:
+                spans.append((start, start + len(phrase)))
+                start = text.find(phrase, start + 1)
+        return spans
+
     def normalize(self, text: str) -> tuple[str, list[dict]]:
         if not text or self._pattern is None:
             return text, []
+        spans = self._blocked_spans(text)
         lookup = dict(self._pairs)
         hits = []
         result = []
         pos = 0
         for match in self._pattern.finditer(text):
+            if any(match.start() < end and match.end() > start
+                   for start, end in spans):
+                continue
             result.append(text[pos:match.start()])
             variant = match.group(0)
             canonical = lookup[variant]

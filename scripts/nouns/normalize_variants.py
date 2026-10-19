@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Normalize reviewed proper-noun variants in Chinese subtitles.
 
 The glossary (`--glossary`) is the flat ja→zh map used by translation; the
@@ -36,7 +36,7 @@ import sys
 import lib._path  # noqa: F401,E402
 
 from lib.glossary import (  # noqa: E402
-    Normalizer, build_variant_map, discover_variants, explain_variant_map,
+    Normalizer, build_normalizer, build_variant_map, discover_variants, explain_variant_map,
     load_glossary, load_meta, normalize_cues,
 )
 from lib.subtitle_io import read_subtitles, write_subtitles  # noqa: E402
@@ -91,7 +91,7 @@ def main(argv=None):
         return 0
 
     variant_map = build_variant_map(glossary, meta)
-    normalizer = Normalizer(variant_map)
+    normalizer = build_normalizer(glossary, meta)
     summary = {'glossary_terms': len(glossary),
                'canonicals_with_variants': len(variant_map),
                'variants': sum(len(v) for v in variant_map.values()),

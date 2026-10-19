@@ -1,4 +1,4 @@
-﻿"""Glossary normalization: reviewed variant table, longest match, no overreach."""
+"""Glossary normalization: reviewed variant table, longest match, no overreach."""
 
 import json
 
@@ -146,6 +146,38 @@ def test_discover_variants_ignores_cues_that_already_match():
     ja = {'EP001': [{'text': 'サブが来た'}, {'text': 'サブが来た'}]}
     zh = {'EP001': [{'text': '佐武来了'}, {'text': '佐武来了'}]}
     assert discover_variants(ja, zh, GLOSSARY, min_count=2) == []
+
+
+def test_blocked_phrase_suppresses_partial_replacement():
+    """An uncertain reading must not be half-replaced (萨布托米多 → 佐武托米多)."""
+    normalizer = Normalizer({'佐武': ['萨布']}, blocked=['萨布托米多'])
+
+    out, hits = normalizer.normalize('萨布托米多的维持')
+    assert out == '萨布托米多的维持' and hits == []
+
+    out, hits = normalizer.normalize('萨布来了')
+    assert out == '佐武来了' and len(hits) == 1
+
+
+def test_blocked_phrase_is_partial_overlap_only():
+    normalizer = Normalizer({'佐武': ['萨布']}, blocked=['托米多'])
+    out, hits = normalizer.normalize('萨布来了，托米多也在')
+    assert out == '佐武来了，托米多也在'
+    assert len(hits) == 1
+
+
+def test_build_normalizer_reads_blocklist_from_meta():
+    from lib.glossary import build_normalizer
+    meta = {'aliases': {'佐武': ['萨布']}, 'blocked_phrases': ['萨布托米多']}
+    normalizer = build_normalizer({'サブ': '佐武'}, meta)
+    assert normalizer.normalize('萨布托米多')[0] == '萨布托米多'
+    assert normalizer.normalize('萨布')[0] == '佐武'
+
+
+def test_build_normalizer_without_blocklist():
+    from lib.glossary import build_normalizer
+    normalizer = build_normalizer({'サブ': '佐武'}, {'aliases': {'佐武': ['萨布']}})
+    assert normalizer.normalize('萨布')[0] == '佐武'
 
 
 def test_project_glossary_files_are_consistent():
