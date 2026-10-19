@@ -1,70 +1,96 @@
-# 环境设置
+# 环境设置（当前版本）
 
-> 首次使用或更换环境时执行。已验证过的项目跳过。
+> 首次使用或换机器时执行。**本机绝对路径/密钥不写进 skill，也不进 GitHub。**
 
-## 导出环境变量
+## 1. 基础
 
-从项目 CLAUDE.md「密钥与路径」段逐条 `export`。**不要跳过** — 缺 env var 会导致 Whisper 静默跳过。
+- Python 3.12+
+- ffmpeg（在 PATH）
+- `PYTHONIOENCODING=utf-8`（Windows 防乱码）
 
 ```bash
-export PYTHONIOENCODING=utf-8   # 防 Windows GBK 乱码
+python --version
+ffmpeg -version
 ```
 
-## 验证关键路径
+## 2. LLM（翻译/repair 必需）
+
+使用任意 OpenAI 兼容 `/chat/completions` 端点：
 
 ```bash
-test -f "$WHISPER_CLI" && echo "[OK] whisper-cli" || echo "[MISSING] whisper-cli"
-test -f "$WHISPER_MODEL" && echo "[OK] model" || echo "[MISSING] model"
-test -d "<VIDEO_DIR>" && echo "[OK] video" || echo "[MISSING] video"
-```
-
-有 `[MISSING]` → 告知用户。Whisper 缺失可残血运行（跳过音频修复）。
-
-## 验证 Python 依赖
-
-```bash
-python --version           # 需要 Python 3.12+
-
-# 日语项目 — jamdict（JMdict 词典，专名分类）+ Janome（形态素解析，词汇提取）
-python -c "from jamdict import Jamdict; Jamdict(); print('[OK] jamdict')" 2>/dev/null \
-  || { echo "[INSTALL] jamdict..."; pip install jamdict; }
-python -c "from janome.tokenizer import Tokenizer; Tokenizer().tokenize('テスト'); print('[OK] janome')" 2>/dev/null \
-  || { echo "[INSTALL] janome..."; pip install janome; }
-
-# 中文项目 — jieba（分词 + 词典过滤，对标 jamdict）
-python -c "import jieba; jieba.initialize(); print('[OK] jieba', len(jieba.dt.FREQ), 'words')" 2>/dev/null \
-  || { echo "[INSTALL] jieba..."; pip install jieba; }
-```
-
-`[OK]` → 继续。`[INSTALL]` → 自动安装后继续。安装失败 → 残血运行（退回规则分类）。
-
-降级影响：
-- **jamdict** 不可用 → Phase 3 退回规则分类
-- **Janome** 不可用 → Phase 1 退回 n-gram 切分（~40% 碎片率）
-- **jieba** 不可用 → Phase 1 退回 n-gram 切分，Phase 3 退回规则分类
-
-## LLM API 密钥（翻译 + 润色，--lang zh 可选）
-
-```bash
-# OpenAI 兼容 API — 翻译脚本 + 润色脚本共用
-# 支持 DeepSeek、OpenAI、Gemini 等任何 /chat/completions 端点
-export LLM_API_KEY="sk-..."
-# 可选：覆盖默认模型和端点
-export LLM_MODEL="deepseek-flash"                   # 默认
+export LLM_API_KEY="<your-key>"
 export LLM_BASE_URL="https://api.deepseek.com/v1"   # 默认
+export LLM_MODEL="deepseek-v4-pro"                  # 以你的配置为准
 ```
 
-> ⚠️ 不要复用 Claude Code 的 key。创建独立的 API key。
-> 未设置时降级：翻译功能不可用（需先配 key）；Pipeline 末尾润色交互提问时选 `y` → AI 助理逐句润色（⚠️ 高 token 消耗，7.5 万 cue）。
-> 选 `n` → 跳过润色，直接交付。
+Windows PowerShell 可从已有配置文件读取，但**不要打印/提交 key**：
 
-## Git 备份（铁律）
+```powershell
+$s = Get-Content "$env:USERPROFILE\.claude\settings.json" -Raw | ConvertFrom-Json
+$env:LLM_API_KEY = $s.env.LLM_API_KEY
+$env:LLM_BASE_URL = $s.env.LLM_BASE_URL
+$env:LLM_MODEL = $s.env.LLM_MODEL
+```
 
-**每次修改 SRT 前必须 git commit 备份** — pipeline 原地覆写文件，不可逆。
+验证：
 
 ```bash
-cd "<project-root>"
-git add -A && git commit -m "备份：pipeline前"
+python scripts/translate_srt.py --input EP001.srt --output /tmp/test.srt --dry-run
 ```
 
-> 如果项目目录还不是 git repo，先 `git init` + `git add -A` + `git commit`。
+## 3. Qwen3-ASR / ForcedAligner（可选，时间轴主路线）
+
+- 独立 venv：`.venv-qwen`（torch + qwen-asr + fireredvad）；
+- 模型目录：`models/Qwen3-ASR-1.7B`、`models/Qwen3-ForcedAligner-0.6B`；
+- 通过 `.venv-qwen/Scripts/python.exe` 启动 worker，不污染主环境。
+
+```bash
+python scripts/run_all.py \
+  --input-dir "<字幕目录>" --video-dir "<视频目录>" \
+  --lang ja --asr qwen3 \
+  --asr-python ".venv-qwen/Scripts/python.exe" \
+  --translate
+```
+
+没有 Qwen 环境时不要加 `--asr qwen3`，走 legacy Whisper 路线。
+
+## 4. FireRedVAD（可选，当前仅诊断）
+
+- `.venv-qwen` + `fireredvad 0.0.2`；
+- 权重：`models/FireRedVAD/{VAD,Stream-VAD,AED}`；
+- 输出 hints，但默认流程**不消费**；只在 OP/ED 预研/诊断用。
+
+```bash
+python scripts/audio/detect_events.py \
+  --wav temp/ep001.wav --mode aed \
+  --out temp/scans/EP001.audio_hints.json
+```
+
+## 5. Legacy Whisper（可选）
+
+本机已有 whisper.cpp CUDA 时，`WHISPER_CLI`/`WHISPER_MODEL` 由本地配置提供；
+不在 skill 中写死路径。没有 Whisper 也能用 `--skip-whisper` + Qwen/仅翻译。
+
+## 6. Python 依赖（可选增强）
+
+```bash
+python -c "import jamdict"   # 日语词典分类
+python -c "import janome"    # 日语分词
+python -c "import jieba"     # 中文分词
+```
+
+缺依赖时对应步骤降级，不影响主翻译/时间轴。
+
+## 7. 本机配置
+
+本机软件版本、模型绝对路径、API 配置来源由维护者本地保存，**不随 skill 分发**；
+普通用户按上面 1–6 节配置即可。新会话需要恢复本机配置时，读维护者本地的
+`sk_01_dev/LOCAL_ENV.md`（不在 GitHub）。
+
+## 8. 快速验证
+
+```bash
+python -m pytest -q tests
+```
+
+期望全绿；有失败先修环境，不要继续跑 pipeline。

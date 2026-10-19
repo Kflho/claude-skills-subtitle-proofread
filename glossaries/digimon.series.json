@@ -4,6 +4,11 @@
     "episodes": 54,
     "cue_pairs": 14605,
     "kept": 18,
+    "added_after_validation": {
+      "高石タケル": "高石岳",
+      "八神ヒカリ": "八神光",
+      "コロモン": "滚球兽"
+    },
     "dropped": {
       "デジヴァイス": "no aligned pair with a stable Chinese term",
       "サーバ大陸": "no aligned pair with a stable Chinese term"
@@ -26,5 +31,8 @@
   "デジモン": "数码宝贝",
   "ファイル島": "文件岛",
   "タケル": "阿岳",
-  "ヒカリ": "小光"
+  "高石タケル": "高石岳",
+  "ヒカリ": "小光",
+  "八神ヒカリ": "八神光",
+  "コロモン": "滚球兽"
 }

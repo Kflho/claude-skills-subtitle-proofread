@@ -100,16 +100,18 @@ python "<scripts-dir>/nouns/apply_map.py" temp/noun_map.json \
 
 ## 运行
 
+**第一次用先看 [references/quickstart.md](references/quickstart.md)**：已有日文字幕 →
+中文 / 整条 pipeline 的最短命令、输出、QA 字段和已知边界。
+
 ### 环境设置
 
 首次使用 → [references/setup.md](references/setup.md)（环境变量、Python 依赖、API 密钥、git 备份铁律）
 
 已验证过的项目跳过，直接从 CLAUDE.md export 环境变量即可。
 
-### 2026 模型资产（已下载，别重下）
+### 可选模型资产（不随 skill 分发）
 
-**新会话先读 [docs/model-assets.md](docs/model-assets.md)**：模型在 `models/`（gitignored），
-包含路径、调用命令、已验证结果和集成位。速查：
+模型在 `models/`（gitignored）；本机绝对路径/版本由维护者本地保存，skill 不写死。速查：
 
 | 模型 | 路径 | 调用 |
 |---|---|---|
@@ -130,7 +132,7 @@ python scripts/run_all.py --asr qwen3 --audio-hints
 > **write-only**：只写 `<EP>.audio_hints.json`，生产流程没有读取方；且只在
 > `--asr qwen3` 下触发。token 过滤、VAD concat、AED 边界切块均未通过多集验证。
 > 保留它只为后续 **完整集 OP/ED 翻译** 研究；不要当生产决策。
-> 详见 [docs/fireredvad-status.md](docs/fireredvad-status.md)。
+> 本机状态/缺口见本地开发仓库（不随 skill 分发）。
 
 > Whisper 系按用户规则**不下载、不再测试**；本机只保留 whisper.cpp CUDA（路径由 `WHISPER_CLI` 指定）。
 
@@ -192,7 +194,7 @@ python "<scripts-dir>/run_all.py" \
 > ASS 的 `--asr` 写回暂不支持（只出报告，不静默改文件）。
 > `--translate`：修复完成后把源字幕翻成中文，输出 `translated/zh/<EP>.srt` +
 > `<EP>.qa.json`；QA 只修问题条（`--repair`），默认关，失败不阻断交付。
-> 架构/评测见 `docs/translation-architecture.md`。
+> 架构/评测说明在本地开发仓库；用户用法见 [references/translation.md](references/translation.md)。
 
 ### 模块化调用
 

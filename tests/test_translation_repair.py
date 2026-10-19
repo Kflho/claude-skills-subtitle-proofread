@@ -68,6 +68,24 @@ def test_repair_prompt_contains_ja_to_zh_mapping(tmp_path, monkeypatch):
     assert 'タケル→阿武' in seen['text']
 
 
+def test_repair_rejects_non_improving_candidate(tmp_path, monkeypatch):
+    src = tmp_path / 'src.srt'
+    out = tmp_path / 'out.srt'
+    qa = tmp_path / 'qa.json'
+    src.write_text(_srt('おはよう'), encoding='utf-8')
+    out.write_text(_srt('おはよう'), encoding='utf-8')
+    _write_qa(src, out, qa)
+    before = out.read_text(encoding='utf-8')
+
+    monkeypatch.setattr(tr, '_call_llm', lambda *a, **k: '["おはよう!"]')
+    fixed, report = tr.repair_file(
+        str(src), str(out), str(qa), {}, 'key', 'model', 'url')
+
+    assert fixed == 0
+    assert out.read_text(encoding='utf-8') == before
+    assert report['summary']['violations'] > 0
+
+
 def test_repair_noop_when_clean(tmp_path, monkeypatch):
     src = tmp_path / 'src.srt'
     out = tmp_path / 'out.srt'

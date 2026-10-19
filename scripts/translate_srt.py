@@ -728,13 +728,26 @@ def _repair_one(source_text, current_text, reasons, api_key, model, base_url,
     return str(candidate).strip() if candidate else None
 
 
+def _cue_issues(src_cue, out_cue, glossary, max_chars, max_cps):
+    report = qa_report([src_cue], [out_cue], glossary=glossary,
+                       max_chars=max_chars, max_cps=max_cps)
+    if not report.get('items'):
+        return set()
+    return set(report['items'][0].get('reasons') or [])
+
+
+def _cue_issue_count(src_cue, out_cue, glossary, max_chars, max_cps):
+    return len(_cue_issues(src_cue, out_cue, glossary, max_chars, max_cps))
+
+
 def repair_file(input_path, output_path, qa_path, glossary, api_key, model,
                 base_url, *, source_lang='ja', max_chars=20,
-                max_cps=12.0, max_repairs=50):
-    """Repair only QA-flagged cues, then rewrite output + QA report.
+                max_cps=12.0, max_repairs=50, max_passes=2):
+    """Repair only QA-flagged cues, accepting only per-cue improvements.
 
-    This is the judge-refiner step from docs/translation-architecture.md:
-    do not retranslate the whole batch, only the cues that violate a rule.
+    A repair that keeps the same violation count is rejected: on EP001 the
+    second pass replaced names with non-canonical variants and raised QA
+    from 4 to 7.  The judge-refiner must not make QA worse.
     """
     src = parse_subtitles(input_path, mark_garbled=False)
     out = parse_subtitles(output_path, mark_garbled=False)
@@ -743,29 +756,49 @@ def repair_file(input_path, output_path, qa_path, glossary, api_key, model,
             report = json.load(handle)
     except (OSError, json.JSONDecodeError):
         return 0, None
-    items = report.get('items', [])[:max_repairs]
-    fixed = 0
-    for item in items:
-        idx = int(item.get('index', -1))
-        reasons = item.get('reasons') or []
-        if idx < 0 or idx >= len(out) or idx >= len(src) or not reasons:
-            continue
-        new_text = _repair_one(
-            str(src[idx].get('text', '')), str(out[idx].get('text', '')),
-            reasons, api_key, model, base_url,
-            glossary_str=', '.join(f'{ja}→{zh}' for ja, zh in glossary.items()
-                                    if ja and zh) if glossary else '',
-            source_lang=source_lang, max_chars=max_chars, max_cps=max_cps)
-        if new_text:
-            out[idx]['text'] = new_text
-            fixed += 1
-    if fixed:
+    fixed_total = 0
+    for _pass in range(max(1, max_passes)):
+        items = report.get('items', [])[:max_repairs]
+        fixed = 0
+        for item in items:
+            idx = int(item.get('index', -1))
+            reasons = item.get('reasons') or []
+            if idx < 0 or idx >= len(out) or idx >= len(src) or not reasons:
+                continue
+            before = _cue_issue_count(src[idx], out[idx], glossary,
+                                      max_chars, max_cps)
+            before_reasons = _cue_issues(src[idx], out[idx], glossary,
+                                         max_chars, max_cps)
+            new_text = _repair_one(
+                str(src[idx].get('text', '')), str(out[idx].get('text', '')),
+                reasons, api_key, model, base_url,
+                glossary_str=', '.join(f'{ja}→{zh}' for ja, zh in glossary.items()
+                                        if ja and zh) if glossary else '',
+                source_lang=source_lang, max_chars=max_chars, max_cps=max_cps)
+            if not new_text or new_text == str(out[idx].get('text', '')):
+                continue
+            candidate = dict(out[idx])
+            candidate['text'] = new_text
+            after_reasons = _cue_issues(src[idx], candidate, glossary,
+                                        max_chars, max_cps)
+            after = len(after_reasons)
+            fatal = {'japanese_residual', 'echo', 'empty'}
+            # Reject punctuation-only "improvements" and any candidate that
+            # still leaves a fatal residual.  A later pass can try again.
+            if after < before and not (after_reasons & fatal):
+                out[idx]['text'] = new_text
+                fixed += 1
+        if not fixed:
+            break
+        fixed_total += fixed
         write_subtitles(output_path, out, template_path=input_path)
         report = qa_report(src, out, glossary=glossary,
                            max_chars=max_chars, max_cps=max_cps)
         with open(qa_path, 'w', encoding='utf-8') as handle:
             json.dump(report, handle, ensure_ascii=False, indent=2)
-    return fixed, report
+        if report.get('summary', {}).get('violations', 0) == 0:
+            break
+    return fixed_total, report
 
 
 # ═══════════════════════════════════════════════════════════════

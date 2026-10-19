@@ -8,6 +8,14 @@ from lib.translation.qa import (
 )
 
 
+def test_glossary_longest_match_accepts_full_name():
+    glossary = {'タケル': '阿岳', '高石タケル': '高石岳'}
+    assert glossary_misses('高石タケル', '高石岳', glossary) == []
+    assert glossary_misses('高石タケル', '阿武', glossary) == ['高石タケル']
+    assert glossary_misses('タケル', '阿岳', glossary) == []
+    assert glossary_misses('タケル', '阿武', glossary) == ['タケル']
+
+
 def test_chrf_score_guardrail():
     assert chrf_score('早上好', '早上好') == 100.0
     assert chrf_score('早上好', '再见') == 0.0

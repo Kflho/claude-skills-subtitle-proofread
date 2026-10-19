@@ -69,18 +69,38 @@ def cue_violations(cue: dict, *, max_chars: int = 20,
 
 
 def glossary_misses(source: str, target: str, glossary: dict | None) -> list[str]:
-    """Japanese terms present in source but whose Chinese form is absent."""
+    """Japanese terms present in source but whose Chinese form is absent.
+
+    Longest term wins: 高石タケル→高石岳 must not also trigger the shorter
+    タケル→阿岳 check.  Occurrences of the short term outside the longer
+    span are still checked.
+    """
     if not glossary:
         return []
-    misses = []
     src = source or ''
     tgt = target or ''
+    terms = []
     for ja, zh in glossary.items():
         ja = str(ja or '').strip()
         zh = str(zh or '').strip()
-        if not ja or not zh or ja not in src:
-            continue
-        if zh not in tgt:
+        if ja and zh and ja in src:
+            terms.append((ja, zh))
+    terms.sort(key=lambda pair: len(pair[0]), reverse=True)
+    covered: list[tuple[int, int]] = []
+    misses = []
+    for ja, zh in terms:
+        start = 0
+        active = False
+        while True:
+            pos = src.find(ja, start)
+            if pos < 0:
+                break
+            end = pos + len(ja)
+            if not any(a <= pos and end <= b for a, b in covered):
+                active = True
+                covered.append((pos, end))
+            start = pos + 1
+        if active and zh not in tgt:
             misses.append(ja)
     return misses
 
