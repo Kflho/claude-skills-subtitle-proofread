@@ -123,11 +123,13 @@ python scripts/harness/init_local.py --check
 
 ## 9. 隐私检查
 
-`ash
-python scripts/harness/privacy_check.py
-``n
-扫描 git 跟踪文件里的密钥模式与 home 路径；返回非 0 就先修，再提交。
+提交/推送前用个人运维 skill **machine-keeper** 的扫描器：
 
+```bash
+python <machine-keeper>/scripts/privacy/scan.py --staged
+```
+
+本仓库不再内置隐私扫描（2026-10 移到 machine-keeper）。
 
 ## 10. B 站资源（可选）
 

@@ -79,8 +79,6 @@ def _detect(args) -> dict:
     if not Path(bili23_config).is_file():
         bili23_config = ''
     bili23_exe = args.bili23_exe or os.environ.get('BILI23_EXE') or ''
-    gameviewer_dir = (args.gameviewer_dir or os.environ.get('GAMEVIEWER_DIR')
-                      or '')
 
     return {
         'schema_version': 1,
@@ -95,7 +93,6 @@ def _detect(args) -> dict:
             'aligner_model': args.aligner_model or '',
             'bili23_config': bili23_config,
             'bili23_exe': bili23_exe,
-            'gameviewer_dir': gameviewer_dir,
         },
         'llm': llm,
         'video_roots': [v for v in (args.video_roots or '').split(';') if v],
@@ -139,7 +136,6 @@ def main(argv=None):
     parser.add_argument('--projects-root', default='')
     parser.add_argument('--bili23-config', default='')
     parser.add_argument('--bili23-exe', default='')
-    parser.add_argument('--gameviewer-dir', default='')
     parser.add_argument('--check', action='store_true')
     parser.add_argument('--force', action='store_true')
     args = parser.parse_args(argv)

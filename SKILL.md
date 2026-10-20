@@ -16,8 +16,9 @@ description: >
   **先找现有实现**（`oped_fixer`、`apply_map`、`run_all`、`references/*`），不要另写一套。
 - **开发与 harness 分离**：本仓库是唯一开发源；harness 读取的是**同步副本**
   （`~/.agents/skills/subtitle-proofread`），不要用 junction 指向仓库。
-  改完先跑 `python scripts/harness/privacy_check.py`，再 `python scripts/harness/sync_skill.py --dry-run` 预览，去掉
-  `--dry-run` 同步；描述变更需新会话/重新加载才生效。
+  改完先跑 `python scripts/harness/sync_skill.py --dry-run` 预览，去掉 `--dry-run` 同步；
+  提交/推送前用个人运维 skill `machine-keeper` 的 `scripts/privacy/scan.py --staged` 做隐私扫描。
+  描述变更需新会话/重新加载才生效。
 - **本机路径与密钥只写在 harness 副本的 `local.json`**：同步后在副本里运行
   `python scripts/harness/init_local.py --force`（自动从环境/`~/.claude/settings.json`
   读取模型目录、Qwen venv、Whisper、ffmpeg、LLM 端点）。仓库里不保存这些。
@@ -246,18 +247,6 @@ python "<scripts-dir>/acquire/bili23.py" download "<url>" --episodes all \
 下载目录/命名由 Bili23 设置决定（MCP 不允许改）；字幕与视频同目录。
 详见 [references/acquire.md](references/acquire.md)。
 
-### 远程连接守护（GameViewer / UU）
-
-调试系统代理/TUN 可能踢掉远程连接。本机服务/进程掉了用：
-
-```bash
-python "<scripts-dir>/net/gameviewer_watchdog.py" --status
-python "<scripts-dir>/net/gameviewer_watchdog.py" --once
-python "<scripts-dir>/net/gameviewer_watchdog.py" --install-task   # 每分钟自查一次
-```
-
-它只拉起 GameViewerService / GameViewerServer，**不改代理、防火墙、路由**。
-详见 [references/remote-watchdog.md](references/remote-watchdog.md)。
 ### 跑 pipeline
 
 **⚠️ 破坏性改动前必须 git 备份。** Pipeline 的 Phase 2/3 会直接修改 SRT 文件（原地覆写），
