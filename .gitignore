@@ -20,3 +20,6 @@ project.json
 # benchmark manifest：本机素材路径，只留 example
 eval/manifest.*.json
 !eval/manifest.example.json
+
+# kf-personal-service 的 skill 验证台账（manage.py record）
+/dev/
