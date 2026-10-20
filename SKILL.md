@@ -314,6 +314,31 @@ python "<scripts-dir>/run_all.py" \
 > `<EP>.qa.json`；QA 只修问题条（`--repair`），默认关，失败不阻断交付。
 > 架构/评测说明在本地开发仓库；用户用法见 [references/translation.md](references/translation.md)。
 
+### 场景：文字正确、时间轴错位（重新打轴）
+
+先抽查几句：文本与台词一致，只是起点/漂移/重叠不对。**不要重译或重转写文本**，
+只把现有 cue 对到音频上。
+
+```bash
+# 先诊断，不写盘
+python "<scripts-dir>/asr/align_cues.py" \
+  --srt "<EN.srt>" --video "<video>" \
+  --language English --engine qwen3 --python "<venv>/Scripts/python.exe"
+
+# 确认 summary/plan 合理后，只写时间码
+python "<scripts-dir>/asr/align_cues.py" \
+  --srt "<EN.srt>" --asr-json temp/asr/<EP>.json --write
+```
+
+- 默认 time-only：`--write` 只改起止时间，文本不动；
+- `--fix-text` 只用于乱码/错词，**本场景不要加**；
+- 已有 ASR JSON 时用 `--asr-json` 跳过模型；
+- 字幕文本与音频语言不一致（例如日语配音 + 英文字幕）时，英文 cue 无法直接匹配
+  日文 ASR：先对齐**源语言字幕/转写**，再按句序映射译文，或提供同语言的 ASR；
+- ASS 暂不支持写回，先转 SRT 或只用报告。
+
+详见 [references/retime-existing-subs.md](references/retime-existing-subs.md)。
+
 ### 模块化调用
 
 `run_all.py` 适合一键跑完；单步调试/定制用下列脚本。完整命令见
@@ -327,6 +352,7 @@ python "<scripts-dir>/run_all.py" \
 | OP/ED | `fix/oped_fixer.py`、`fix/oped_fill.py` |
 | 批量转录 | `whisper_batch_transcribe.py` |
 | 参考字幕复用 | `reuse/align.py` + `reuse/apply.py` |
+| 重新打轴（文字不改） | `asr/align_cues.py` |
 | 切段修复 | `whisper_spot_fix.py` |
 
 **常用单步**：
