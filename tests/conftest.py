@@ -6,6 +6,12 @@ import pytest
 from collections import OrderedDict
 from pathlib import Path
 
+# Keep tests independent of the machine's gitignored local.json.  Some tests
+# set SKILL_LOCAL_CONFIG explicitly; those overrides still win.
+os.environ.setdefault(
+    'SKILL_LOCAL_CONFIG',
+    str(Path(__file__).resolve().parent / '_no_such_local.json'))
+
 
 # ═══════════════════════════════════════════════════════════════
 # SRT fixtures
