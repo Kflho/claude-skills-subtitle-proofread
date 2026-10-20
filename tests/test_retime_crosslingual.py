@@ -101,6 +101,29 @@ def test_warp_smoothing_tames_single_spike():
     assert abs(warp(200)) < 1.0
 
 
+def test_warp_points_rejects_bucket_outlier():
+    anchors = [anchor(t, 0.0) for t in (0, 20, 40, 60)]
+    anchors.append(anchor(30, 9.0))          # one bad pairing
+    points = R.warp_points(anchors, bucket=90.0, min_count=3, tol=4.0)
+    assert len(points) == 4
+    assert all(p['delta'] == 0.0 for p in points)
+
+
+def test_warp_points_keeps_sparse_anchors():
+    anchors = [anchor(10, 1.0), anchor(20, 1.0)]   # fewer than min_count
+    points = R.warp_points(anchors, bucket=90.0, min_count=3)
+    assert len(points) == 2
+    assert [p['delta'] for p in points] == [1.0, 1.0]
+
+
+def test_warp_points_piecewise_offsets_survive():
+    anchors = [anchor(t, 0.0) for t in (0, 20, 40)] + \
+              [anchor(t, 5.0) for t in (200, 220, 240)]
+    points = R.warp_points(anchors, bucket=90.0, min_count=3)
+    assert [p['delta'] for p in points] == [0.0, 0.0, 0.0, 5.0, 5.0, 5.0]
+    assert points[-1]['cue_start'] == 240
+
+
 # ── apply ───────────────────────────────────────────────────────────────
 def test_apply_warp_keeps_text_and_count():
     cues = [cue(10, 12, '第一行'), cue(20, 22, '第二行')]
@@ -123,6 +146,23 @@ def test_apply_warp_enforces_min_duration():
     cues = [cue(10, 10.05)]
     out = R.apply_warp(cues, R.Warp([anchor(0, 0.0)]), min_dur=0.4)
     assert out[0]['end_s'] - out[0]['start_s'] >= 0.4 - 1e-6
+
+
+def test_apply_warp_keeps_legitimate_overlap():
+    """Two lines can legitimately share time (sign + dialogue); don't split them."""
+    cues = [cue(10, 20), cue(15, 25)]
+    warp = R.Warp([anchor(0, 1.0), anchor(100, 1.0)])
+    out = R.apply_warp(cues, warp)
+    assert out[0]['start_s'] == pytest.approx(11.0)
+    assert out[1]['start_s'] == pytest.approx(16.0)
+
+
+def test_apply_warp_trims_previous_end_instead_of_delaying_start():
+    cues = [cue(10, 20), cue(21, 30)]
+    warp = R.Warp([anchor(0, 0.0), anchor(20, 0.0), anchor(21, -10.0)], smooth=0)
+    out = R.apply_warp(cues, warp)
+    assert out[1]['start_s'] == pytest.approx(11.0)       # mapped start kept
+    assert out[0]['end_s'] < out[1]['start_s']            # tail trimmed
 
 
 def test_apply_warp_never_negative_start():

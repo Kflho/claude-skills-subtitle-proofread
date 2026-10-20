@@ -234,6 +234,40 @@ def prepare_anchors(anchors, window=5, tol=8.0, baseline='auto', lead=1.0):
 # --------------------------------------------------------------------------
 # warp
 # --------------------------------------------------------------------------
+def warp_points(anchors, bucket=90.0, tol=4.0, min_count=3, hampel=2.5):
+    """Reject anchors that disagree with their time bucket, keep the rest raw.
+
+    A bad anchor (LLM mispair, or a 17 s ASR segment whose start is far from
+    the matched line) would otherwise bend the warp far from any evidence.
+    Two passes: bucket medians remove gross outliers, then a Hampel filter
+    (median of the 5 nearest anchors) removes isolated dips that survive.
+    Surviving anchors keep their own timestamps so genuine steps stay sharp.
+    """
+    buckets = {}
+    for anchor in anchors:
+        buckets.setdefault(int(anchor['cue_start'] // bucket), []).append(anchor)
+    kept = []
+    for key in sorted(buckets):
+        items = buckets[key]
+        deltas = sorted(a['delta'] for a in items)
+        median = deltas[len(deltas) // 2]
+        for anchor in items:
+            if len(items) < min_count or abs(anchor['delta'] - median) <= tol:
+                kept.append({'cue_start': anchor['cue_start'],
+                             'delta': anchor['delta']})
+    kept.sort(key=lambda p: p['cue_start'])
+    if hampel and len(kept) >= 5:
+        filtered = []
+        for i, point in enumerate(kept):
+            lo, hi = max(0, i - 2), min(len(kept), i + 3)
+            local = sorted(p['delta'] for p in kept[lo:hi])
+            if abs(point['delta'] - local[len(local) // 2]) <= hampel:
+                filtered.append(point)
+        kept = filtered or kept
+    return kept or [{'cue_start': a['cue_start'], 'delta': a['delta']}
+                    for a in anchors]
+
+
 class Warp:
     """Piecewise-linear delta(t); constant before the first / after the last point."""
 
@@ -248,7 +282,6 @@ class Warp:
                 seg = sorted(self.deltas[lo:hi])
                 smoothed.append(seg[len(seg) // 2])
             self.deltas = smoothed
-
     def __call__(self, t: float) -> float:
         times, deltas = self.times, self.deltas
         if t <= times[0]:
@@ -285,14 +318,24 @@ def apply_warp(cues, warp, min_dur=0.4, min_gap=0.04):
                     'start': format_tc(round(start, 3)),
                     'end': format_tc(round(end, 3))})
     for i in range(1, len(out)):
-        floor = out[i - 1]['end_s'] + min_gap
-        if out[i]['start_s'] < floor:
-            shift = floor - out[i]['start_s']
-            out[i]['start_s'] = round(floor, 3)
-            out[i]['end_s'] = round(max(out[i]['end_s'] + shift,
-                                        out[i]['start_s'] + min_dur), 3)
-            out[i]['start'] = format_tc(out[i]['start_s'])
-            out[i]['end'] = format_tc(out[i]['end_s'])
+        # Overlapping pairs are legitimate (two speakers, sign + dialogue):
+        # only fix ordering where the source itself was ordered.
+        if cues[i - 1]['end_s'] > cues[i]['start_s']:
+            continue
+        floor = out[i]['start_s'] - min_gap
+        if out[i - 1]['end_s'] > floor:
+            # Prefer trimming the previous tail over delaying this start: the
+            # start carries the sync, and pushing it later compounds error.
+            trimmed = floor
+            if trimmed - out[i - 1]['start_s'] >= min_dur:
+                out[i - 1]['end_s'] = round(trimmed, 3)
+                out[i - 1]['end'] = format_tc(out[i - 1]['end_s'])
+            else:
+                out[i]['start_s'] = round(out[i - 1]['end_s'] + min_gap, 3)
+                out[i]['start'] = format_tc(out[i]['start_s'])
+                out[i]['end_s'] = round(max(out[i]['end_s'],
+                                            out[i]['start_s'] + min_dur), 3)
+                out[i]['end'] = format_tc(out[i]['end_s'])
     return out
 
 
@@ -419,7 +462,8 @@ def main(argv=None) -> int:
 
     clean = prepare_anchors(anchors, baseline=args.baseline)
     coverage = len(clean) / max(1, len(cues))
-    warp = Warp(clean, smooth=args.smooth)
+    knot_anchors = warp_points(clean)
+    warp = Warp(knot_anchors, smooth=args.smooth)
     result = apply_warp(targets, warp)
 
     deltas = [a['delta'] for a in clean]
@@ -434,6 +478,7 @@ def main(argv=None) -> int:
         'delta_range': [round(min(deltas), 2), round(max(deltas), 2)] if deltas else [],
         'holdout_error': holdout_error(clean),
         'local_medians': local_medians(clean),
+        'warp_knots': len(knot_anchors),
         'moved_cues': sum(1 for d in moved if d > 0.05),
         'moved_p50': round(sorted(moved)[len(moved) // 2], 2) if moved else 0,
         'moved_max': round(max(moved), 2) if moved else 0,
