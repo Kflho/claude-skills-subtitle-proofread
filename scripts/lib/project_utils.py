@@ -15,6 +15,7 @@ from lib.config import (
     get_input_dir, DEFAULT_INPUT_DIR, VIDEO_CANDIDATES,
     WHISPER_CLI, WHISPER_MODEL, WHISPER_BACKEND,
 )
+from lib.project_paths import temp_root
 
 
 def load_json(path):
@@ -136,7 +137,7 @@ def detect_project_lang(project_dir: str, sample_size: int = 100,
         sample_size: number of non-noise cues to sample (default 100)
         cache: whether to write/read the cached result
     """
-    cache_path = os.path.join(project_dir, 'temp', 'scans', 'project_lang.json')
+    cache_path = os.path.join(temp_root(project_dir), 'scans', 'project_lang.json')
 
     # ── Read cache ──
     if cache and os.path.exists(cache_path):

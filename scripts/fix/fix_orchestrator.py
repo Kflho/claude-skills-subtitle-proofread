@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 import lib._path  # noqa: F401
+from lib.project_paths import temp_root
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _SCRIPTS_DIR = os.path.dirname(_SCRIPT_DIR)
@@ -587,7 +588,7 @@ class Fixer:
         candidates += [
             os.path.join(self._session.project_dir, 'glossaries',
                          'digimon.series.json'),
-            os.path.join(self._session.project_dir, 'temp', 'nouns',
+            os.path.join(temp_root(self._session.project_dir), 'nouns',
                          'noun_mappings.json'),
         ]
         for path in candidates:

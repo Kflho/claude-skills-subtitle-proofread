@@ -15,6 +15,16 @@
 | 参考字幕 | <ref_sub_dir or "无"> |
 | demucs | 可选（人声分离，减少 BGM 幻觉） |
 
+## 目录约定
+
+- `<project>/data/` 一旦存在，中间产物写 `data/temp/`、报告写 `data/reports/`
+  （脚本走 `lib/project_paths.py` 自动判定）；没有 `data/` 时退回旧布局
+  `temp/`、`reports/`。
+- 成品只放 `bin/exports/<YYMMDD>/`，同日配 `bin/exports/<项目名>_<YYMMDD>.zip`；
+  发布目录只读，改动新建日期目录。
+- 输入资料（参考字幕、源字幕）放 `bin/reference_docs/`。
+- 项目根不建工作目录，一次性目录用完即删。
+
 ## 密钥与路径
 
 > ⚠️ 含私密信息，禁止上传公开仓库。

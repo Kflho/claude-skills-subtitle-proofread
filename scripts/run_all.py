@@ -22,6 +22,7 @@ import os
 import re
 import subprocess
 import sys
+from lib.project_paths import reports_root, temp_root
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _ROOT_DIR = _SCRIPT_DIR
@@ -121,10 +122,10 @@ def step_scan(project_dir, lang, force_rescan=False, target_dir=None,
         episodes: optional list of episode IDs to scan (None = all)
     """
     target = target_dir or os.path.join(project_dir, DEFAULT_INPUT_DIR)
-    findings = os.path.join(project_dir, 'temp', 'scans', 'findings.json')
-    issues = os.path.join(project_dir, 'temp', 'scans', 'issues')
-    ai_nouns = os.path.join(project_dir, 'temp', 'scans', 'ai_nouns.json')
-    vad_cache = os.path.join(project_dir, 'temp', 'scans')
+    findings = os.path.join(temp_root(project_dir), 'scans', 'findings.json')
+    issues = os.path.join(temp_root(project_dir), 'scans', 'issues')
+    ai_nouns = os.path.join(temp_root(project_dir), 'scans', 'ai_nouns.json')
+    vad_cache = os.path.join(temp_root(project_dir), 'scans')
     os.makedirs(os.path.dirname(findings), exist_ok=True)
 
     # ── Cache check: skip rescan if SRTs haven't changed ──
@@ -175,7 +176,7 @@ def step_scan(project_dir, lang, force_rescan=False, target_dir=None,
     # The glossary is small (typically 30-100 entries). Instead of heuristic
     # auto-clean scripts, AI reviews the full glossary directly — one pass,
     # reasonable token cost, no complex rules to maintain.
-    glossary_path = os.path.join(project_dir, 'reports', 'proper-nouns.md')
+    glossary_path = os.path.join(reports_root(project_dir), 'proper-nouns.md')
     if os.path.exists(glossary_path):
         _print_glossary_ai_review_notice(project_dir, glossary_path, lang)
 
@@ -232,7 +233,7 @@ def step_fix_episodes(project_dir, lang, resources,
     continue with what's available. Phase 2 can run with reference only, Whisper
     only, both, or neither (skip entirely).
     """
-    findings = load_json(os.path.join(project_dir, 'temp', 'scans', 'findings.json'))
+    findings = load_json(os.path.join(temp_root(project_dir), 'scans', 'findings.json'))
 
     # Determine episode list
     if episodes:
@@ -341,7 +342,7 @@ def step_fix_episodes(project_dir, lang, resources,
 def step_nouns(project_dir, lang, target_dir=None):
     """Layer 3: noun_checker — proper nouns + OP/ED consistency."""
     target = target_dir or os.path.join(project_dir, DEFAULT_INPUT_DIR)
-    glossary = os.path.join(project_dir, 'reports', 'proper-nouns.md')
+    glossary = os.path.join(reports_root(project_dir), 'proper-nouns.md')
     checker = os.path.join(_SCRIPT_DIR, 'nouns', 'noun_checker.py')
 
     results = {}
@@ -350,7 +351,7 @@ def step_nouns(project_dir, lang, target_dir=None):
     # Uses cross-episode similarity to classify: instrumental (→ auto-clean) vs vocal (→ AI review)
     print('\n[oped] OP/ED consistency check...', file=sys.stderr)
     oped_fixer = os.path.join(_SCRIPT_DIR, 'fix', 'oped_fixer.py')
-    oped_output = os.path.join(project_dir, 'temp', 'scans', 'oped_fixes.json')
+    oped_output = os.path.join(temp_root(project_dir), 'scans', 'oped_fixes.json')
     _run(['python', oped_fixer, target, '--lang', lang, '--auto-only',
           '-o', oped_output],
          project_dir, desc='oped')
@@ -365,8 +366,8 @@ def step_nouns(project_dir, lang, target_dir=None):
     # Suspect noun search — proactively find potential proper nouns
     # Uses word segmentation to flag terms not in glossary that look like names
     suspect_script = os.path.join(_SCRIPT_DIR, 'nouns', 'find_suspect_nouns.py')
-    suspect_output = os.path.join(project_dir, 'temp', 'scans', 'suspect_nouns.json')
-    mappings = os.path.join(project_dir, 'temp', 'noun_mappings.json')
+    suspect_output = os.path.join(temp_root(project_dir), 'scans', 'suspect_nouns.json')
+    mappings = os.path.join(temp_root(project_dir), 'noun_mappings.json')
     suspect_args = ['python', suspect_script, '--input-dir', target,
                     '--lang', lang, '--mode', 'source', '--output', suspect_output,
                     '--max-singletons', '0']  # unlimited — AI will filter
@@ -383,7 +384,7 @@ def step_nouns(project_dir, lang, target_dir=None):
     _run(suspect_args, project_dir, desc='suspect-nouns')
 
     # Wire suspect nouns to report layer '3'
-    report_path = os.path.join(project_dir, 'reports', '问题解决报告.md')
+    report_path = os.path.join(reports_root(project_dir), '问题解决报告.md')
     if os.path.exists(suspect_output):
         _wire_suspect_nouns_to_report(suspect_output, report_path)
 
@@ -402,7 +403,7 @@ def _step_noun_classify(project_dir, lang, checker, target, glossary):
     # per SRT when len(srt_files) > 1, so a single-file -o target is ignored.
     # MUST create the directory first: noun_checker only respects -o as a dir
     # target when os.path.isdir() returns True (it falls back to dirname otherwise).
-    nouns_out_dir = os.path.join(project_dir, 'temp', 'scans', 'nouns')
+    nouns_out_dir = os.path.join(temp_root(project_dir), 'scans', 'nouns')
     os.makedirs(nouns_out_dir, exist_ok=True)
     _run(['python', checker, target, '--lang', lang,
           '--noun-table', glossary,
@@ -426,7 +427,7 @@ def _step_noun_classify(project_dir, lang, checker, target, glossary):
                     all_unknowns.append(r)
 
     # Save aggregated result for backward compatibility (step_apply_all reads this)
-    agg_path = os.path.join(project_dir, 'temp', 'scans', 'noun_check.json')
+    agg_path = os.path.join(temp_root(project_dir), 'scans', 'noun_check.json')
     agg_data = {
         'total_unknown': len(all_unknowns),
         'results': all_unknowns,
@@ -469,7 +470,7 @@ def _apply_classified_results(project_dir, candidates, unknowns, cands, lang):
     results['ai_review_count'] = len(top_candidates)
     results['ai_candidates'] = top_candidates
 
-    ai_path = os.path.join(project_dir, 'temp', 'scans', 'ai_review_candidates.json')
+    ai_path = os.path.join(temp_root(project_dir), 'scans', 'ai_review_candidates.json')
     os.makedirs(os.path.dirname(ai_path), exist_ok=True)
     with open(ai_path, 'w', encoding='utf-8') as f:
         json.dump(top_candidates, f, ensure_ascii=False, indent=2)
@@ -480,7 +481,7 @@ def _apply_classified_results(project_dir, candidates, unknowns, cands, lang):
 
     # ── Write L3.5 report entries ──
     try:
-        report_path = os.path.join(project_dir, 'reports', '问题解决报告.md')
+        report_path = os.path.join(reports_root(project_dir), '问题解决报告.md')
         _replace_layer(report_path, step='3.5', entries=[
             {'ep': '', 'time': '', 'original': c['candidate'],
              'corrected': '', 'status': '⬜'}
@@ -528,7 +529,7 @@ def step_apply_all(project_dir, lang, target_dir=None, dry_run=False):
     # Collect fixes from all sources
     all_fixes = []
     for src in ['oped_fixes.json', 'noun_check.json', 'noun_accepted_fixes.json']:
-        path = os.path.join(project_dir, 'temp', 'scans', src)
+        path = os.path.join(temp_root(project_dir), 'scans', src)
         data = load_json(path)
         if data:
             fixes = data.get('fixes', [])
@@ -537,7 +538,7 @@ def step_apply_all(project_dir, lang, target_dir=None, dry_run=False):
                 print(f'[apply] {len(fixes)} fixes from {src}', file=sys.stderr)
 
     # Also check ai_review_fixes.json if it exists
-    ai_fixes = load_json(os.path.join(project_dir, 'temp', 'scans', 'ai_review_fixes.json'))
+    ai_fixes = load_json(os.path.join(temp_root(project_dir), 'scans', 'ai_review_fixes.json'))
     if ai_fixes:
         all_fixes.extend(ai_fixes)
         print(f'[apply] {len(ai_fixes)} fixes from AI review', file=sys.stderr)
@@ -550,14 +551,14 @@ def step_apply_all(project_dir, lang, target_dir=None, dry_run=False):
     all_fixes = _dedup_fixes(all_fixes)
 
     # Write combined fixes
-    fixes_path = os.path.join(project_dir, 'temp', 'scans', 'all_fixes.json')
+    fixes_path = os.path.join(temp_root(project_dir), 'scans', 'all_fixes.json')
     os.makedirs(os.path.dirname(fixes_path), exist_ok=True)
     with open(fixes_path, 'w', encoding='utf-8') as f:
         json.dump(all_fixes, f, ensure_ascii=False, indent=2)
 
     # Apply — all_fixes.json is a temp artifact, so it is written either way;
     # --dry-run is what keeps the subtitle files themselves untouched.
-    report_path = os.path.join(project_dir, 'reports', '问题解决报告.md')
+    report_path = os.path.join(reports_root(project_dir), '问题解决报告.md')
     apply_args = [
         'python', apply_script,
         '--target-dir', target,
@@ -592,7 +593,7 @@ def step_polish(project_dir, target_dir=None):
     """
     target = target_dir or os.path.join(project_dir, DEFAULT_INPUT_DIR)
     output_dir = os.path.join(project_dir, '中文润色后')
-    glossary = os.path.join(project_dir, 'reports', 'proper-nouns.md')
+    glossary = os.path.join(reports_root(project_dir), 'proper-nouns.md')
 
     polish_script = os.path.join(_SCRIPT_DIR, 'polish_zh.py')
     cmd = [
@@ -700,7 +701,7 @@ def _append_to_glossary(project_dir, accepted_candidates, lang):
     not common words, not fragments).  This prevents the auto_classify →
     glossary feedback loop from accumulating garbage.
     """
-    glossary_path = os.path.join(project_dir, 'reports', 'proper-nouns.md')
+    glossary_path = os.path.join(reports_root(project_dir), 'proper-nouns.md')
     if not accepted_candidates:
         return
 
@@ -815,7 +816,7 @@ def step_ai_review(project_dir, lang, target_dir=None):
     writing temp/scans/ai_fragments_{EP}.json per episode.
     This step scans for those files and prints instructions.
     """
-    scan_dir = os.path.join(project_dir, 'temp', 'scans')
+    scan_dir = os.path.join(temp_root(project_dir), 'scans')
 
     if not os.path.isdir(scan_dir):
         print('[ai-review] No temp/scans/ directory.', file=sys.stderr)
@@ -866,7 +867,7 @@ def step_review_fill(project_dir, lang='ja', target_dir=None, dry_run=False):
     """
     from lib.config import LLM_API_KEY
 
-    scan_dir = os.path.join(project_dir, 'temp', 'scans')
+    scan_dir = os.path.join(temp_root(project_dir), 'scans')
     packs = [f for f in os.listdir(scan_dir)] if os.path.isdir(scan_dir) else []
     qa_dir = os.path.join(project_dir, 'translated', 'zh')
     has_qa = any(f.endswith('.qa.json') for f in os.listdir(qa_dir)) \
@@ -909,7 +910,7 @@ def _write_degraded_report(project_dir, garbled_cues, findings_path, review_dir,
     Used when Whisper is unavailable (degraded mode) — garbled cues from
     the scan are written directly to 问题解决报告.md for manual/AI review.
     """
-    report_path = os.path.join(project_dir, 'reports', '问题解决报告.md')
+    report_path = os.path.join(reports_root(project_dir), '问题解决报告.md')
     os.makedirs(os.path.dirname(report_path), exist_ok=True)
 
     from datetime import datetime
@@ -970,8 +971,8 @@ def step_deliver(project_dir, lang, processed_episodes=None, is_full_run=True,
     This function now only handles the degraded-mode report (残血运行:
     garbled cues without Whisper → report for manual/AI processing).
     """
-    review_dir = os.path.join(project_dir, 'reports', 'manual-review')
-    scan_dir = os.path.join(project_dir, 'temp', 'scans')
+    review_dir = os.path.join(reports_root(project_dir), 'manual-review')
+    scan_dir = os.path.join(temp_root(project_dir), 'scans')
 
     # ── Degraded mode: unresolved garbled cues from Phase 1 scan ──
     findings_path = os.path.join(scan_dir, 'findings.json')
@@ -1037,7 +1038,7 @@ def _apply_ai_checklists(project_dir, lang, target_dir=None):
     to human review for unfilled entries.
     """
     srt_dir = target_dir or os.path.join(project_dir, DEFAULT_INPUT_DIR)
-    scan_dir = os.path.join(project_dir, 'temp', 'scans')
+    scan_dir = os.path.join(temp_root(project_dir), 'scans')
     if not os.path.isdir(scan_dir):
         print('[apply-ai-review] No temp/scans/ directory.', file=sys.stderr)
         return False
@@ -1116,7 +1117,7 @@ def print_ai_review_notice(noun_results, project_dir, lang):
 
 def _print_progress(project_dir, label='Progress'):
     """Print progress summary from findings.json and filesystem state."""
-    findings = load_json(os.path.join(project_dir, 'temp', 'scans', 'findings.json'))
+    findings = load_json(os.path.join(temp_root(project_dir), 'scans', 'findings.json'))
 
     print(f'\n{"─"*40}', file=sys.stderr)
     print(f'  {label}', file=sys.stderr)
@@ -1138,7 +1139,7 @@ def _print_progress(project_dir, label='Progress'):
 
     # Scan filesystem for pending work
     import glob as _glob
-    scan_dir = os.path.join(project_dir, 'temp', 'scans')
+    scan_dir = os.path.join(temp_root(project_dir), 'scans')
     pending_ai = len(_glob.glob(os.path.join(scan_dir, '*_pending_ai.json')))
     print(f'  AI review pending:    {pending_ai} episode(s)', file=sys.stderr)
 

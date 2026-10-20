@@ -27,6 +27,7 @@ import os
 import re
 import datetime
 from collections import OrderedDict
+from lib.project_paths import temp_root
 
 # ═══════════════════════════════════════════════════════════════
 # 层定义（与 SKILL.md 3-Phase 流水线对应）
@@ -113,7 +114,7 @@ def _json_path(md_path):
     """
     reports_dir = os.path.dirname(os.path.abspath(md_path))
     project_dir = os.path.dirname(reports_dir)
-    return os.path.join(project_dir, 'temp', 'report.json')
+    return os.path.join(temp_root(project_dir), 'report.json')
 
 
 # ═══════════════════════════════════════════════════════════════

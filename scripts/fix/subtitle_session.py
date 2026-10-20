@@ -20,6 +20,7 @@ import lib._path  # noqa: F401 — ensure scripts/ on sys.path
 from lib.whisper_utils import (
     setup_windows_utf8, parse_srt, to_seconds, format_tc,
 )
+from lib.project_paths import reports_root, temp_root
 setup_windows_utf8()
 
 from lib.config import (
@@ -99,17 +100,17 @@ class SubtitleSession:
     @property
     def temp_dir(self) -> str:
         """temp/scans/ directory for intermediate artifacts."""
-        return os.path.join(self.project_dir, 'temp', 'scans')
+        return os.path.join(temp_root(self.project_dir), 'scans')
 
     @property
     def report_path(self) -> str:
         """Path to 问题解决报告.md."""
-        return os.path.join(self.project_dir, 'reports', '问题解决报告.md')
+        return os.path.join(reports_root(self.project_dir), '问题解决报告.md')
 
     @property
     def review_dir(self) -> str:
         """Directory for manual review checklists and clips."""
-        return os.path.join(self.project_dir, 'reports', 'manual-review')
+        return os.path.join(reports_root(self.project_dir), 'manual-review')
 
     # ── Path resolution ──
 

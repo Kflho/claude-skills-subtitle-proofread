@@ -165,6 +165,15 @@ def test_apply_warp_trims_previous_end_instead_of_delaying_start():
     assert out[0]['end_s'] < out[1]['start_s']            # tail trimmed
 
 
+def test_apply_warp_allows_brief_overlap_over_delaying_start():
+    """A big push is worse than a brief overlap when the tail cannot be trimmed."""
+    cues = [cue(10, 10.1), cue(10.15, 12)]
+    warp = R.Warp([anchor(10, 0.0), anchor(10.15, -1.0)], smooth=0)
+    out = R.apply_warp(cues, warp)
+    assert out[1]['start_s'] == pytest.approx(9.15, abs=0.02)   # mapped, not pushed
+    assert out[0]['end_s'] > out[1]['start_s']                  # overlap accepted
+
+
 def test_apply_warp_never_negative_start():
     cues = [cue(1, 2)]
     warp = R.Warp([anchor(0, -10.0)])

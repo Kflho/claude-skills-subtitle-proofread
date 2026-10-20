@@ -7,7 +7,7 @@
 
 ```text
 python -m pytest -q
-1643 passed, 4 skipped in ~16s   # 无网络、无模型；4 例项目词表测试需 SABU_GLOSSARY_DIR
+1656 passed, 4 skipped in ~9s   # 无网络、无模型；4 例项目词表测试需 SABU_GLOSSARY_DIR
 ```
 
 **2026-10-19 新增 39 例**（1472 → 1511）：

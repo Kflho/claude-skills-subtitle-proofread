@@ -31,6 +31,7 @@ from datetime import datetime
 
 # ── Path setup for importing from scripts dir ──
 import lib._path  # noqa: F401
+from lib.project_paths import temp_root
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _SCRIPTS_DIR = os.path.dirname(_SCRIPT_DIR)  # scripts/ — needed for subprocess PYTHONPATH
@@ -71,7 +72,7 @@ def step_translate(project_dir, episode, scan_result, dry_run=False, target_lang
         return None
 
     # Output path
-    out_dir = os.path.join(project_dir, 'temp', 'translations')
+    out_dir = os.path.join(temp_root(project_dir), 'translations')
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f'{episode}_translated.srt')
 
@@ -271,7 +272,7 @@ def _write_ai_review_json(project_dir, episode, ai_review_items, cues=None):
                 pass
         review_data['items'].append(item)
 
-    review_dir = os.path.join(project_dir, 'temp', 'scans')
+    review_dir = os.path.join(temp_root(project_dir), 'scans')
     os.makedirs(review_dir, exist_ok=True)
     review_path = os.path.join(review_dir, f'{episode}_ai_review.json')
     with open(review_path, 'w', encoding='utf-8') as f:
@@ -342,7 +343,7 @@ def _print_ai_review_prompt(project_dir, episode, ai_review_items):
 
     Called via: python episode_workflow.py EPxxx --step ai-review
     """
-    review_path = os.path.join(project_dir, 'temp', 'scans', f'{episode}_ai_review.json')
+    review_path = os.path.join(temp_root(project_dir), 'scans', f'{episode}_ai_review.json')
     review_data = load_json(review_path)
 
     if not review_data or not review_data.get('items'):
@@ -458,7 +459,7 @@ def _run_pipeline(project_dir, episode, resources, args):
         steps = [args.step]
 
     # Load findings for this episode (used as gate by step functions)
-    findings = load_json(os.path.join(project_dir, 'temp', 'scans', 'findings.json'))
+    findings = load_json(os.path.join(temp_root(project_dir), 'scans', 'findings.json'))
     per_ep = (findings or {}).get('per_episode_issues', {})
     issues = per_ep.get(episode, [])
     scan_result = {'issues': issues} if issues else None

@@ -26,6 +26,7 @@ import sys
 from lib.review import apply as apply_mod
 from lib.review import fill as fill_mod
 from lib.review import pack as pack_mod
+from lib.project_paths import reports_root, temp_root
 
 STATUS_APPLIED = '✅'
 STATUS_DELETED = '🗑️'
@@ -73,7 +74,7 @@ def run_review_stage(project_dir: str, *, scan_dir: str | None = None,
                      attach_failures: bool = True,
                      log=sys.stderr) -> dict:
     """Run the fill+apply stage over every pack in ``project_dir``."""
-    scan_dir = scan_dir or os.path.join(project_dir, 'temp', 'scans')
+    scan_dir = scan_dir or os.path.join(temp_root(project_dir), 'scans')
     if allowed_actions is None:
         from lib.config import REVIEW_ACTIONS, REVIEW_TRANSLATION_ACTIONS
         allowed_actions = {
@@ -101,7 +102,7 @@ def run_review_stage(project_dir: str, *, scan_dir: str | None = None,
     if not paths:
         return summary
 
-    report_path = os.path.join(project_dir, 'reports', '问题解决报告.md')
+    report_path = os.path.join(reports_root(project_dir), '问题解决报告.md')
 
     for path in paths:
         pack = pack_mod.load_pack(path)

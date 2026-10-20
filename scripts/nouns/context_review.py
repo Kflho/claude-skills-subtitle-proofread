@@ -38,6 +38,7 @@ from lib.review.context_agent import (  # noqa: E402
     apply_approvals, review_near_terms, review_style,
 )
 from lib.subtitle_io import read_subtitles, write_subtitles  # noqa: E402
+from lib.project_paths import temp_root
 
 
 def _backup(path: str) -> str:
@@ -208,7 +209,7 @@ def main(argv=None):
                 for episode in touched:
                     _backup(os.path.join(zh_dir, f'{episode}.srt'))
             else:
-                out_dir = args.out_dir or os.path.join(args.project, 'temp',
+                out_dir = args.out_dir or os.path.join(temp_root(args.project),
                                                        'oped_textkeyed')
                 os.makedirs(out_dir, exist_ok=True)
             for episode in touched:

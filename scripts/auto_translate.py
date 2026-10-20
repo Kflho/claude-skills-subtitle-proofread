@@ -29,6 +29,7 @@ import sys
 
 import lib._path  # noqa: F401
 from lib.config import LLM_API_KEY
+from lib.project_paths import temp_root
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _FIND_SUSPECT = os.path.join(_SCRIPT_DIR, 'nouns', 'find_suspect_nouns.py')
@@ -55,7 +56,7 @@ def _run(cmd, project_dir, desc=''):
 
 
 def _get_temp_dir(project_dir):
-    return os.path.join(project_dir, 'temp', 'scans')
+    return os.path.join(temp_root(project_dir), 'scans')
 
 
 def _latest_srt_mtime(target_dir):
@@ -170,7 +171,7 @@ def stage_review(project_dir, target_dir, source_dir, mappings_path, limit=None)
     if os.path.exists(mappings_path):
         cmd.extend(['--mappings', mappings_path])
     # Pass external Chinese common word blacklist if exists
-    bl_path = os.path.join(project_dir, 'temp', 'zh_common_blacklist.json')
+    bl_path = os.path.join(temp_root(project_dir), 'zh_common_blacklist.json')
     if os.path.exists(bl_path):
         cmd.extend(['--zh-blacklist', bl_path])
     if limit:

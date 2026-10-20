@@ -181,6 +181,27 @@ python "<scripts-dir>/nouns/context_review.py" ... --mode oped \
 
 > 如需重新初始化（添加参考字幕、更换模型等），删除 CLAUDE.md 中的 `SKILL INITIALIZED: true` 行即可。
 
+## 输出目录约定
+
+项目根按「二元目录」分层，别把中间产物和成品混在根上：
+
+```text
+<project>/
+  bin/reference_docs/   输入资料（参考字幕、源字幕）
+  bin/exports/<YYMMDD>/ 成品，一次发布一个日期目录；同名 zip 放旁边
+  data/temp/            一次性中间产物（scans/、ASR、锚点、缓存）
+  data/reports/         生成的报告（问题解决报告.md、proper-nouns.md、manual-review/）
+  data/glossaries/      词表
+```
+
+`lib/project_paths.py` 是唯一路径入口：**项目下有 `data/` 就写 `data/temp`、
+`data/reports`；没有就退回旧布局 `temp/`、`reports/`**。本文件的示例命令仍写
+`temp/scans/...`、`reports/...`，它们相对的是上面那个「temp 根 / reports 根」，
+在已迁移项目里等于 `data/temp/...`、`data/reports/...`。
+
+新建项目时先 `mkdir data`，再跑管线；成品只进 `bin/exports/<日期>/`，发布目录只读，
+改动新建日期目录。
+
 ## 运行
 
 **第一次用先看 [references/quickstart.md](references/quickstart.md)**：已有日文字幕 →

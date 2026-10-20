@@ -326,16 +326,11 @@ def apply_warp(cues, warp, min_dur=0.4, min_gap=0.04):
         if out[i - 1]['end_s'] > floor:
             # Prefer trimming the previous tail over delaying this start: the
             # start carries the sync, and pushing it later compounds error.
-            trimmed = floor
-            if trimmed - out[i - 1]['start_s'] >= min_dur:
-                out[i - 1]['end_s'] = round(trimmed, 3)
+            if floor - out[i - 1]['start_s'] >= min_dur:
+                out[i - 1]['end_s'] = round(floor, 3)
                 out[i - 1]['end'] = format_tc(out[i - 1]['end_s'])
-            else:
-                out[i]['start_s'] = round(out[i - 1]['end_s'] + min_gap, 3)
-                out[i]['start'] = format_tc(out[i]['start_s'])
-                out[i]['end_s'] = round(max(out[i]['end_s'],
-                                            out[i]['start_s'] + min_dur), 3)
-                out[i]['end'] = format_tc(out[i]['end_s'])
+            # If the previous cue cannot be trimmed, leave a small overlap:
+            # a brief overlap is far cheaper than moving this start by seconds.
     return out
 
 
