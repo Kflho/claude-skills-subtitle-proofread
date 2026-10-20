@@ -1,21 +1,25 @@
 # 环境设置（当前版本）
 
 > 仓库只放代码和文档；**机器路径、模型目录、venv、密钥都不进仓库**。
-> harness 用的是同步副本，本机信息写在副本的 `local.json`。
+> 本机 harness 用 junction 指向仓库，机器配置写在仓库的 `local.json`（gitignored）；
+> 换机器/打包时才用复制副本。
 
-## 0. 开发 → 同步 → 初始化
+## 0. 开发 → 链接 → 初始化
 
 ```bash
 # 1) 在开发仓库里改完
-python scripts/harness/sync_skill.py --dry-run   # 预览会同步哪些文件
-python scripts/harness/sync_skill.py             # 同步到 ~/.agents/skills/<name>
+python scripts/harness/sync_skill.py --dry-run --link  # 预览链接
+python scripts/harness/sync_skill.py --link            # junction 到 ~/.agents/skills/<name>
 
-# 2) 在 harness 副本里生成/更新本机配置
-cd ~/.agents/skills/subtitle-proofread
-python scripts/harness/init_local.py --check     # 只检查
-python scripts/harness/init_local.py --force     # 写入 local.json
+# 2) 在仓库根目录生成本机配置
+python scripts/harness/init_local.py --check
+python scripts/harness/init_local.py --force --output local.json
+
+# 换机器/打包：用复制模式
+python scripts/harness/sync_skill.py
 ```
 
+junction 下改仓库文件会立即反映到 harness；新会话/重新加载后描述变更生效。
 `local.json` 的解析顺序：**环境变量 > local.json > 内置默认**。
 `SKILL_LOCAL_CONFIG` 可指向另一个 local.json（测试/多机）。
 
@@ -99,10 +103,11 @@ python -c "import jieba"     # 中文分词
 
 ## 7. 本机配置 / 隐私
 
-- 所有绝对路径、模型路径、API 配置只写 **harness 副本的 `local.json`**
-  （或临时环境变量）；仓库、SKILL.md、references 里不出现机器路径/密钥。
-- `sync_skill.py` 不会覆盖目标里的 `local.json`；换机器重新跑
-  `init_local.py --force` 即可。
+- 所有绝对路径、模型路径、API 配置只写**仓库根目录的 `local.json`**
+  （junction 下 harness 直接读它；或临时环境变量）；SKILL.md、references
+  里不出现机器路径/密钥。
+- `local.json` 已 gitignore；换机器重新跑
+  `python scripts/harness/init_local.py --force --output local.json`。
 - `local.json` 含密钥，只在本机保存，不要提交/分享。
 
 ## 8. 快速验证

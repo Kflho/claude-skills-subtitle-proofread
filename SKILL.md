@@ -14,14 +14,15 @@ description: >
 - **使用**：任何字幕任务开始前先按本文件流程走，不凭记忆直接改字幕。
 - **开发**：修改本仓库任何 pipeline/工具/文档前也先重读「行为分级」「运行」「错误恢复」，
   **先找现有实现**（`oped_fixer`、`apply_map`、`run_all`、`references/*`），不要另写一套。
-- **开发与 harness 分离**：本仓库是唯一开发源；harness 读取的是**同步副本**
-  （`~/.agents/skills/subtitle-proofread`），不要用 junction 指向仓库。
-  改完先跑 `python scripts/harness/sync_skill.py --dry-run` 预览，去掉 `--dry-run` 同步；
-  提交/推送前用个人运维 skill `machine-keeper` 的 `scripts/privacy/scan.py --staged` 做隐私扫描。
-  描述变更需新会话/重新加载才生效。
-- **本机路径与密钥只写在 harness 副本的 `local.json`**：同步后在副本里运行
-  `python scripts/harness/init_local.py --force`（自动从环境/`~/.claude/settings.json`
-  读取模型目录、Qwen venv、Whisper、ffmpeg、LLM 端点）。仓库里不保存这些。
+- **开发与 harness**：本仓库是唯一开发源。本机用 **junction** 指向仓库，
+  改完立即生效：`python scripts/harness/sync_skill.py --link`；换机器/打包用复制模式
+  （去掉 `--link`）。描述变更仍需新会话/重新加载才生效。
+  提交/推送前用个人运维 skill `machine-keeper` 的
+  `scripts/privacy/scan.py --staged` 做隐私扫描。
+- **本机路径与密钥只写在仓库的 `local.json`**（gitignored；junction 下 harness 直接读它）：
+  `python scripts/harness/init_local.py --force --output local.json`
+  （自动从环境/`~/.claude/settings.json` 读取模型目录、Qwen venv、Whisper、ffmpeg、
+  LLM 端点）。仓库里不提交这些。
 
 3-phase pipeline：扫描（乱码 + VAD 语音时间线）→ 时间轴修复（默认 Whisper legacy；
 可选 Qwen3-ASR + ForcedAligner）→ 专名统一 + 交付；可选 LLM 翻译。

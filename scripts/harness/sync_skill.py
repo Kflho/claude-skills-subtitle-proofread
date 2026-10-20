@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Sync the runtime skill from this repo into the harness skills directory.
 
-Development happens in the repo; the harness must load a **real copy**, never a
-junction to the dev tree (that was the old, confusing setup).  Machine paths
-and keys do not belong to the repo: after syncing, run ``init_local.py`` inside
-the harness copy to write its ``local.json``.
+Default mode copies files (portable).  On the local dev machine ``--link``
+creates a Windows junction to this repo, so edits are live and ``local.json``
+stays in the gitignored repo root.
 
     python scripts/harness/sync_skill.py --dry-run
+    python scripts/harness/sync_skill.py --link
     python scripts/harness/sync_skill.py
 """
 
@@ -67,6 +67,32 @@ def plan(target: Path) -> list[Path]:
     return items
 
 
+def link(target: Path, dry_run: bool = False) -> int:
+    if target.resolve() == REPO_ROOT.resolve():
+        print('refusing: target is the development repo itself', file=sys.stderr)
+        return 2
+    if target.exists() and _is_link(target) and target.resolve() == REPO_ROOT.resolve():
+        print(f'already linked: {target}')
+        return 0
+    if dry_run:
+        print(f'  would link {target} -> {REPO_ROOT}')
+        return 0
+    if target.exists() or _is_link(target):
+        if _is_link(target):
+            target.unlink()
+        else:
+            shutil.rmtree(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        ['cmd', '/c', 'mklink', '/J', str(target), str(REPO_ROOT)],
+        capture_output=True, text=True, encoding='utf-8', errors='replace')
+    if result.returncode != 0:
+        print(f'failed to create junction: {result.stderr}', file=sys.stderr)
+        return 2
+    print(f'linked {target} -> {REPO_ROOT} (edits are live)')
+    return 0
+
+
 def sync(target: Path, dry_run: bool = False) -> int:
     if _is_link(target):
         print(f'refusing: {target} is a junction/symlink; remove it first',
@@ -118,8 +144,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--target', default=str(default_target))
     parser.add_argument('--dry-run', action='store_true')
+    parser.add_argument('--link', action='store_true',
+                        help='create a local junction instead of copying')
     args = parser.parse_args(argv)
-    return sync(Path(args.target), args.dry_run)
+    target = Path(args.target)
+    return link(target, args.dry_run) if args.link else sync(target, args.dry_run)
 
 
 if __name__ == '__main__':
