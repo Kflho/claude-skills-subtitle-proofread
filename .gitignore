@@ -17,3 +17,6 @@ SYNCED.json
 
 # per-project config (absolute download paths)
 project.json
+
+# 本机生成的完整 manifest（含绝对视频路径）
+eval/manifest.*.full.json
