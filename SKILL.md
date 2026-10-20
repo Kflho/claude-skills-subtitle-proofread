@@ -338,6 +338,20 @@ python "<scripts-dir>/asr/align_cues.py" \
   日文 ASR：先对齐**源语言字幕/转写**，再按句序映射译文，或提供同语言的 ASR；
 - ASS 暂不支持写回，先转 SRT 或只用报告。
 
+**语言不同（英字译文 + 日语音轨）**：`align_cues` 会给出 0 条干净匹配，
+改用跨语言路线——转写原音，LLM 按语义给 cue→ASR 锚点，再分段 warp 时间码：
+
+```bash
+python "<scripts-dir>/asr/retime_crosslingual.py" \
+  --source-srt "<EN.srt>" --asr-srt "<ja-asr.srt>" \
+  --target-srt "<zh.srt>" --output "<zh.retimed.srt>" --report temp/retime/<EP>.json
+```
+
+> 先确认**集号对得上**：发行版集号可能和视频集号错位（实测《佐武与市捕物控》
+> 英版 E01/E02 与 DVD P1/P2 对调）。症状是片头固定台词能对上、之后整体跑偏；
+> `coverage` 明显偏低就是信号。集号错位只能换文件，重打轴救不了。
+> 报告里 `coverage` 是硬门槛（< 0.35 直接退出 4），`holdout_error` 看真实精度。
+
 详见 [references/retime-existing-subs.md](references/retime-existing-subs.md)。
 
 ### 模块化调用
@@ -354,6 +368,7 @@ python "<scripts-dir>/asr/align_cues.py" \
 | 批量转录 | `whisper_batch_transcribe.py` |
 | 参考字幕复用 | `reuse/align.py` + `reuse/apply.py` |
 | 重新打轴（文字不改） | `asr/align_cues.py` |
+| 跨语言重打轴（译文 vs 原音） | `asr/retime_crosslingual.py` |
 | 切段修复 | `whisper_spot_fix.py` |
 
 **常用单步**：

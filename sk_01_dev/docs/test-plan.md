@@ -7,7 +7,7 @@
 
 ```text
 python -m pytest -q
-1509 passed, 2 skipped in ~10s   # 无网络、无模型；2 例项目词表测试需 SABU_GLOSSARY_DIR
+1643 passed, 4 skipped in ~16s   # 无网络、无模型；4 例项目词表测试需 SABU_GLOSSARY_DIR
 ```
 
 **2026-10-19 新增 39 例**（1472 → 1511）：
@@ -111,6 +111,7 @@ coverage: 79.0% (15,753 statements)
 | 对齐核心 | `lib/alignment/*` | `test_alignment_*`, `test_cue_*` | 90–98% | 基本齐全 |
 | 对齐修复 | `fix/align_repair.py` | `test_align_repair`, `test_fix_by_asr` | **92.5%** | 相邻联动求解已测；realign 的 ffmpeg 错误分支可补 |
 | 对齐 CLI | `asr/align_cues.py` | `test_align_cues_cli` | 78% | `--video` 抽音频分支未测（mock ffmpeg） |
+| 跨语言重打轴 | `asr/retime_crosslingual.py` | `test_retime_crosslingual` | **92%** | LLM 用注入 chat 测；含已知 ±4/0/+6 s 分段偏移的还原测试 |
 | Phase 1 扫描 | `scan/unified_scanner.py` | `test_unified_scanner` | **94.6%** | `scan_all`/VAD/CLI 已测；剩 tokenizer import 与少量分支 |
 | Phase 2 修复编排 | `fix/whisper_pipeline.py` | `test_whisper_pipeline` | **81%** | VAD/Tier1/Tier2/main 已测；`_cluster_garbled_cues` 回退路径可补 |
 | Whisper 后端 | `lib/whisper_backends.py` | `test_whisper_backends` | **59%** | faster/openai 已测；`validate_backend`、缺失参数的 branch 未测 |

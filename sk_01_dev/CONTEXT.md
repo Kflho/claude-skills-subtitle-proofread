@@ -1,4 +1,4 @@
-# CONTEXT.md — Subtitle Proofread Skill
+﻿# CONTEXT.md — Subtitle Proofread Skill
 
 ## 项目是什么
 
@@ -156,7 +156,7 @@ scripts/
 ## 测试
 
 ```bash
-cd <skill>/tests && pytest -q    # 1509 passed + 2 skipped（项目词表例需 SABU_GLOSSARY_DIR）
+cd <skill>/tests && pytest -q    # 1643 passed + 4 skipped（4 例项目词表测试需 SABU_GLOSSARY_DIR）
 cd <skill> && pytest -q tests --cov --cov-report=term-missing   # 覆盖率 79.0%，矩阵见 docs/test-plan.md
 ```
 
@@ -215,7 +215,7 @@ P2 对齐层已落地：`lib/alignment/*`（字符时间轴 → 时间窗匹配 
 
 素材现状：**验收作品定为数码宝贝（Digimon Adventure）**，目录 `<video-root>\数码宝贝`。**EP01/02/03 视频完整（各约 1386s）**；用户人工复核三集视频/CC 均无真实偏移。日文参考：`日语字幕\` 下 S01E01–S01E54 共 54 集 `ja[cc].srt`，已清洁；主故事窗口 `[95,1240]`。01–05 另有中文字幕，只能做参考无关/翻译复用。素材台账 `eval/materials.md`，清单 `eval/manifest.digimon.json`（Qwen3）与 `eval/manifest.digimon.whisper.json`（A/B）。莎莉/阿童木历史素材只保留机制/吞吐回放。
 
-测试：1509 passed / 2 skipped（需 SABU_GLOSSARY_DIR 的项目词表例）/ 0 failed；矩阵与剩余缺口见 `docs/test-plan.md`。
+测试：1643 passed / 4 skipped（需 SABU_GLOSSARY_DIR 的项目词表例）/ 0 failed；矩阵与剩余缺口见 `docs/test-plan.md`。
 
 ## 配置
 
