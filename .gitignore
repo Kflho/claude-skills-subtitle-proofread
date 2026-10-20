@@ -3,7 +3,6 @@ __pycache__/
 .venv-qwen/
 models/
 temp/
-eval/manifest.json
 .coverage
 htmlcov/
 coverage.xml
@@ -18,5 +17,6 @@ SYNCED.json
 # per-project config (absolute download paths)
 project.json
 
-# 本机生成的完整 manifest（含绝对视频路径）
-eval/manifest.*.full.json
+# benchmark manifest：本机素材路径，只留 example
+eval/manifest.*.json
+!eval/manifest.example.json

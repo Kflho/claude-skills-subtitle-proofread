@@ -1,7 +1,7 @@
 # 金标素材登记
 
 > **用户指定（2026-10-18）**：验收作品改为 **数码宝贝（Digimon Adventure）**。
-> **素材目录**：`D:\videos\Animation\TV\数码宝贝`
+> **素材目录**：`<video-root>\数码宝贝`
 > 本文件是素材台账；`eval/manifest.digimon.json` 是评测清单草稿。
 
 ## 1. 目录现状
@@ -15,7 +15,7 @@
 | 05 電光！カブテリモン | ⬜ | ✅ | ✅ `…S01E05…ja[cc].srt` | 缺视频 |
 | … | ⬜ | — | ✅ S01E06–S01E54 | 日文字幕共 **54 集** |
 
-**日语字幕目录**：`D:\videos\Animation\TV\数码宝贝\日语字幕`
+**日语字幕目录**：`<video-root>\数码宝贝\日语字幕`
 文件命名：`デジモンアドベンチャー.S01E01.WEBRip.ja[cc].srt` … `S01E54`。
 
 ### EP01 技术检查（2026-10-18）
@@ -71,7 +71,7 @@
 
 ## 5. 素材接收（2026-10-18 22:29）
 
-- 压缩包已下载/解压到 `D:\videos\Animation\TV\数码宝贝`：EP01/02/03 `.mkv` 完整（各 ~1.26–1.37 GB，约 1386 s）。
+- 压缩包已下载/解压到 `<video-root>\数码宝贝`：EP01/02/03 `.mkv` 完整（各 ~1.26–1.37 GB，约 1386 s）。
 - 04–05 只有中文字幕，没有视频；日文 CC 共 54 集。
 - 用户仔细复核后确认：EP01/02/03 的视频/CC **都没有真实偏移**，**日语 CC 边界可直接作为测试标准**。此前 `estimate_global_offset` 得到的 -0.37/-0.40 s 是按 CC 量出的当前对齐起点缺陷（重转写复现），不是参考侧偏移；**按 raw 评估，不用偏移修正**。
 - 清单 `eval/manifest.digimon.json`（Qwen3）与 `eval/manifest.digimon.whisper.json`（Whisper A/B）：EP01=dev，EP02/03=test；主故事窗口 `[95,1240]`；ASR 缓存 `temp/asr/digimon_ep00X_main.{qwen3,whisper}.json`。
@@ -163,7 +163,7 @@ EP01/02/03 视频 ✅；日文 CC 54 集 ✅；用户确认 CC 边界即测试�
 
 ```text
 项目：temp/smoke_e2e2/project（AI审查后/EP001.srt = 完整日文 CC，296 cue）
-视频：D:\videos\Animation\TV\数码宝贝（不改名、不拷贝）
+视频：<video-root>\数码宝贝（不改名、不拷贝）
 命令：run_all.py --lang ja --asr qwen3 --asr-python .venv-qwen\Scripts\python.exe
 模型：models\Qwen3-ASR-1.7B + models\Qwen3-ForcedAligner-0.6B（ASR_FALLBACK=none）
 结果：exit 0；24 chunks / 1188 tokens；约 2 分钟

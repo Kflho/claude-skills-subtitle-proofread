@@ -11,10 +11,10 @@ Manifest (JSON):
       "language": "Japanese",
       "episodes": [
         {"id": "EP001", "category": "clean",
-         "audio": "C:/media/EP001.wav",
+         "audio": "<media-dir>/EP001.wav",
          "reference_srt": "C:/subs/EP001.ja.srt"},
         {"id": "EP002", "category": "overlap",
-         "video": "C:/media/EP002.mkv",
+         "video": "<media-dir>/EP002.mkv",
          "reference_srt": "C:/subs/EP002.ja.srt"}
       ]
     }

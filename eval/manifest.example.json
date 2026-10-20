@@ -5,22 +5,22 @@
     {
       "id": "EP001",
       "category": "clean",
-      "audio": "D:/media/EP001.wav",
-      "reference_srt": "D:/subs/EP001.ja.srt",
+      "audio": "<media-dir>/EP001.wav",
+      "reference_srt": "<subs-dir>/EP001.ja.srt",
       "context": "作品名: ...\n人物: ...\n术语: ...",
       "timestamps": true
     },
     {
       "id": "EP002",
       "category": "overlap",
-      "video": "D:/media/EP002.mkv",
-      "reference_srt": "D:/subs/EP002.ja.srt"
+      "video": "<media-dir>/EP002.mkv",
+      "reference_srt": "<subs-dir>/EP002.ja.srt"
     },
     {
       "id": "EP003",
       "category": "bgm",
-      "audio": "D:/media/EP003.wav",
-      "reference_srt": "D:/subs/EP003.ja.srt"
+      "audio": "<media-dir>/EP003.wav",
+      "reference_srt": "<subs-dir>/EP003.ja.srt"
     }
   ]
 }

@@ -49,7 +49,7 @@
 
 ### B. 素材已就绪（2026-10-18 22:29）
 
-- [x] **EP02/03 视频**：`D:\videos\Animation\TV\数码宝贝` 下 02/03 `.mkv` 完整（1.37 GB 各）。
+- [x] **EP02/03 视频**：`<video-root>\数码宝贝` 下 02/03 `.mkv` 完整（1.37 GB 各）。
 - [ ] **用户人工确认 EP02/03 日文 CC 与视频同步**（EP01 已确认；EP02/03 实测有 -0.37/-0.40 s 全局偏移，可能是音频切点/CC 版本差异，需人工确认）。
 - [ ] **三集分类**：按实际音频标 `clean` / `overlap` / `bgm`（当前 `unclassified`，不猜）。
 - [x] **三集评测**：主故事窗口 [95,1240]、缓存 ASR JSON、`episode_benchmark.py` 基线/最终报告已生成。
@@ -1025,14 +1025,14 @@ coverage: 64.0% (13,607 statements)     # 上轮 576 / 36.3%
 
 - ✅ 0.6B + 1.7B + aligner 已下载；两种模型 smoke test 均通过（§4）。
 - ✅ P2 对齐核心 + 修复计划 + CLI + `run_all --asr` 完成；P2 专项 101 项测试、真实 cue 结构回归已跑（§4）。
-- ✅ 莎莉日语视频已到位（110 集 MKV）：`D:\videos\Animation\TV\[1966-1981] Toei Majokko series_東映魔女大系(東映魔女っ子シリーズ)_TV\[1966-1991] Sally_小仙女莎莉(魔法使いサリー)_TV\[1966-1968] Sally_小仙女莎莉 第1作(魔法使いサリー)_TV`。**仅历史/机制回归用途；字幕质量差，按用户要求不再作测试/验收素材。**
+- ✅ 莎莉日语视频已到位（110 集 MKV）：`<video-root>\[1966-1981] Toei Majokko series_東映魔女大系(東映魔女っ子シリーズ)_TV\[1966-1991] Sally_小仙女莎莉(魔法使いサリー)_TV\[1966-1968] Sally_小仙女莎莉 第1作(魔法使いサリー)_TV`。**仅历史/机制回归用途；字幕质量差，按用户要求不再作测试/验收素材。**
 - ✅ P2-13 实机验证完成：180s 分块塌缩 → 自切 60s + 补零；RTF 0.83→0.207–0.295，零时长 48%→8.4%（§4）。
 - ✅ 测试基线：全量 **1306 passed / 0 failed / 79.0%**（上轮 1162 / 74.0%）；第五轮补齐 `whisper_utils`、`episode_workflow`、`reuse/*`、`asr_eval`；1 个真 bug + 1 处日志修正，均配回归测试。
-- ⬜ 验收金标素材：**数码宝贝**（`D:\videos\Animation\TV\数码宝贝`，见 `eval/materials.md`）；EP01 视频完整、用户已人工核对日文 CC 与视频同步；**EP02/03 视频下载中**（`.mkv.downloading` 0 B）；日文 CC 54 集已到位。P2-14 未开始，三集计划用 95–1233s 主故事窗口。
+- ⬜ 验收金标素材：**数码宝贝**（`<video-root>\数码宝贝`，见 `eval/materials.md`）；EP01 视频完整、用户已人工核对日文 CC 与视频同步；**EP02/03 视频下载中**（`.mkv.downloading` 0 B）；日文 CC 54 集已到位。P2-14 未开始，三集计划用 95–1233s 主故事窗口。
 - ✅ P1/P2 主链补测完成：`scan` / `apply` 主流程、`run_all` 各 `step_*`、worker chunk、`whisper_utils`、`episode_workflow`、`reuse`、`eval` 已补（见 `test-plan.md` §3）。
 - ⬜ 剩余补测（不阻塞验收）：根脚本部分分支（65.7%）、`nouns` 旧入口（67.2%）、`whisper_backends`（59%）、`align_cues`（78%）；确认 `auto_classify` / `auto_clean_glossary` / `_write_ai_review_json` / `--mode` 去留。
 - ✅ 整集 0.6B（880s）与热态 RTF 0.122 反常：本轮复测 **453.1s / RTF 0.300**，同态 1.7B **237.0s / RTF 0.157**；880s 未复现，0.6B 仍慢 1.9× → 草稿模式不启用（见 §4 “0.6B 复测”）。
-- ✅ 阿童木视频已到位：`D:\videos\Animation\TV\[Anonymoose] 鉄腕アトム (DVD, 10bit)`，193 MKV + 193 同名 SRT。**按用户要求不再用于测试/验收。**
+- ✅ 阿童木视频已到位：`<video-root>\[Anonymoose] 鉄腕アトム (DVD, 10bit)`，193 MKV + 193 同名 SRT。**按用户要求不再用于测试/验收。**
 - ⚠️ 阿童木同目录 SRT 是**机翻中文、2s 粗轴**（样例：`嗯` / `飞雄啊——！`），不是日语参考，也**不能当金标**。
 - ⬜ 金标与 A/B 均等用户素材；阿童木 Qwen3 侧任务已取消，临时音频已清理。
 - ⛔ 无硬阻塞；默认切换等用户金标素材（P2-14）。
@@ -1192,7 +1192,7 @@ python scripts\eval\alignment_bench.py --srt ep.srt
 python scripts\eval\alignment_bench.py --srt ep.ass --scenario segment --json temp\bench.json
 
 # ── 历史 EP001 复现（仅机制/吞吐回放；勿当验收素材；模型/路径按本机）──
-$video = "D:\videos\Animation\TV\[1966-1981] Toei Majokko series_東映魔女大系(東映魔女っ子シリーズ)_TV\[1966-1991] Sally_小仙女莎莉(魔法使いサリー)_TV\[1966-1968] Sally_小仙女莎莉 第1作(魔法使いサリー)_TV\Mahou_Tsukai_Sally_1966_DVD_Ep001_Simu.mkv"
+$video = "<video-root>\[1966-1981] Toei Majokko series_東映魔女大系(東映魔女っ子シリーズ)_TV\[1966-1991] Sally_小仙女莎莉(魔法使いサリー)_TV\[1966-1968] Sally_小仙女莎莉 第1作(魔法使いサリー)_TV\Mahou_Tsukai_Sally_1966_DVD_Ep001_Simu.mkv"
 ffmpeg -y -v error -i "$video" -vn -ac 1 -ar 16000 -c:a pcm_s16le temp\asr\sally_ep001.wav
 .\.venv-qwen\Scripts\python.exe scripts\asr\qwen3_transcribe.py `
   --audio temp\asr\sally_ep001.wav --asr models\Qwen3-ASR-1.7B `
@@ -1234,7 +1234,7 @@ python scripts\run_all.py --lang ja --target-dir temp\proj_asr --input-dir subs 
 - **单句 segments 用 ASR 原文**：Qwen3-ASR 的句内标点/空格不在 aligner token 里，单段时直接沿用原文；多段才按 token 分配。
 - **`dirname()` 可能为空**：`separate_vocals` 等“默认同输入目录”的函数要写 `dirname(...) or '.'`；否则裸相对文件名会触发 `os.makedirs('')`。
 - **旧入口/死代码先标记不删**：`auto_classify`、`auto_clean_glossary`、`_write_ai_review_json`、`--mode` 已确认不在主链，删除属产品决策；本轮只在 test-plan 记录，不顺手改行为。
-- **金标来源规则**：机翻 / ASR / LLM 润色后的字幕都不能当参考。**验收作品：数码宝贝**（`D:\videos\Animation\TV\数码宝贝`，见 `eval/materials.md`）；日文 CC 54 集已到位（配信闭合字幕，需清洁标签/振假名/♪），视频仅 EP01，**还缺至少 2 集视频**。中文字幕只能做非金标冒烟；莎莉/阿童木只保留机制回放。
+- **金标来源规则**：机翻 / ASR / LLM 润色后的字幕都不能当参考。**验收作品：数码宝贝**（`<video-root>\数码宝贝`，见 `eval/materials.md`）；日文 CC 54 集已到位（配信闭合字幕，需清洁标签/振假名/♪），视频仅 EP01，**还缺至少 2 集视频**。中文字幕只能做非金标冒烟；莎莉/阿童木只保留机制回放。
 - **进程隔离**：主环境不 import torch/qwen-asr；worker JSON lines。
 - **Windows**：vLLM 不支持；走 Transformers 后端 + SDPA。
 - **模型下载**：HF 直连被墙；用 ModelScope（已验证 200）/ 镜像。

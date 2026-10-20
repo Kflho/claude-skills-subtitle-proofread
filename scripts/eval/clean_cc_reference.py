@@ -13,7 +13,7 @@ Use the cleaned copy for CER / alignment; raw files are never modified.
 
 Usage:
   python scripts/eval/clean_cc_reference.py \
-      --input-dir "D:/videos/Animation/TV/数码宝贝/日语字幕" \
+      --input-dir "<video-root>/数码宝贝/日语字幕" \
       --output-dir temp/references/digimon --report temp/references/cc.json
 """
 
