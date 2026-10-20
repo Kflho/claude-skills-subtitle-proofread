@@ -1,4 +1,4 @@
-# 仓库隐私与 skill 管理调研（2026-10-19）
+﻿# 仓库隐私与 skill 管理调研（2026-10-19）
 
 ## 1. 有没有“仓库隐私”类 skill？
 
@@ -25,7 +25,7 @@
 ## 2. 本仓库实际踩到的两类泄露
 
 1. **机器路径**：`sk_01_dev/README.md`、`docs/fireredvad-status.md` 里写死了
-   `C:\Users\<user>\...`、`D:\...\sk_01`（已改为占位符/同步副本说明）。
+   本机绝对路径（`%USERPROFILE%` / 仓库盘符；已改为占位符与同步副本说明）。
 2. **本机配置**：harness 副本的 `local.json` 含 API key。仓库 `.gitignore`
    忽略它，`sync_skill.py` 不复制它，`init_local.py --check` 输出脱敏。
 

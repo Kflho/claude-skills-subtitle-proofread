@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Write the harness-local ``local.json`` for this machine.
 
 The repo must not carry machine paths or keys.  Run this **inside the synced
@@ -73,6 +73,15 @@ def _detect(args) -> dict:
         'model': args.llm_model or os.environ.get('LLM_MODEL')
         or env.get('LLM_MODEL', ''),
     }
+    bili23_config = (args.bili23_config or os.environ.get('BILI23_CONFIG')
+                     or str(Path(os.environ.get('APPDATA', '')) /
+                            'Bili23 Downloader' / 'config.json'))
+    if not Path(bili23_config).is_file():
+        bili23_config = ''
+    bili23_exe = args.bili23_exe or os.environ.get('BILI23_EXE') or ''
+    gameviewer_dir = (args.gameviewer_dir or os.environ.get('GAMEVIEWER_DIR')
+                      or '')
+
     return {
         'schema_version': 1,
         'paths': {
@@ -84,6 +93,9 @@ def _detect(args) -> dict:
             'whisper_retry_model': whisper_retry,
             'asr_model': args.asr_model or '',
             'aligner_model': args.aligner_model or '',
+            'bili23_config': bili23_config,
+            'bili23_exe': bili23_exe,
+            'gameviewer_dir': gameviewer_dir,
         },
         'llm': llm,
         'video_roots': [v for v in (args.video_roots or '').split(';') if v],
@@ -125,6 +137,9 @@ def main(argv=None):
     parser.add_argument('--llm-model', default='')
     parser.add_argument('--video-roots', default='', help=';-separated')
     parser.add_argument('--projects-root', default='')
+    parser.add_argument('--bili23-config', default='')
+    parser.add_argument('--bili23-exe', default='')
+    parser.add_argument('--gameviewer-dir', default='')
     parser.add_argument('--check', action='store_true')
     parser.add_argument('--force', action='store_true')
     args = parser.parse_args(argv)

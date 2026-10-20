@@ -230,6 +230,34 @@ python scripts/run_all.py --asr qwen3 --audio-hints
 
 > Whisper 系按用户规则**不下载、不再测试**；本机只保留 whisper.cpp CUDA（路径由 `WHISPER_CLI` 指定）。
 
+### 资源获取（B 站链接）
+
+只有 B 站链接时，用 Bili23 Downloader（v2.20，GUI）自带的 MCP 下载视频+字幕：
+
+```bash
+# 首次：完全退出 Bili23 -> 开启 MCP -> 重新启动
+python "<scripts-dir>/acquire/bili23.py" enable
+python "<scripts-dir>/acquire/bili23.py" status
+python "<scripts-dir>/acquire/bili23.py" parse "<url>"
+python "<scripts-dir>/acquire/bili23.py" download "<url>" --episodes all \
+  --subtitle-format srt --subtitle-lang zh-CN --wait
+```
+
+下载目录/命名由 Bili23 设置决定（MCP 不允许改）；字幕与视频同目录。
+详见 [references/acquire.md](references/acquire.md)。
+
+### 远程连接守护（GameViewer / UU）
+
+调试系统代理/TUN 可能踢掉远程连接。本机服务/进程掉了用：
+
+```bash
+python "<scripts-dir>/net/gameviewer_watchdog.py" --status
+python "<scripts-dir>/net/gameviewer_watchdog.py" --once
+python "<scripts-dir>/net/gameviewer_watchdog.py" --install-task   # 每分钟自查一次
+```
+
+它只拉起 GameViewerService / GameViewerServer，**不改代理、防火墙、路由**。
+详见 [references/remote-watchdog.md](references/remote-watchdog.md)。
 ### 跑 pipeline
 
 **⚠️ 破坏性改动前必须 git 备份。** Pipeline 的 Phase 2/3 会直接修改 SRT 文件（原地覆写），

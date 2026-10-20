@@ -128,3 +128,11 @@ python scripts/harness/privacy_check.py
 ``n
 扫描 git 跟踪文件里的密钥模式与 home 路径；返回非 0 就先修，再提交。
 
+
+## 10. B 站资源（可选）
+
+- Bili23 Downloader v2.20 的 MCP 默认关闭：先完全退出程序，
+  运行 `python scripts/acquire/bili23.py enable`，再启动程序；
+- 配置文件路径由 `local.json` 的 `paths.bili23_config` 提供；
+- 下载/字幕命令见 [acquire.md](acquire.md)。
+
