@@ -31,6 +31,7 @@ import os
 import re
 import secrets
 import shutil
+import subprocess
 import sys
 import time
 import urllib.error
@@ -68,6 +69,130 @@ def load_config(path: Path) -> dict:
     if not isinstance(data, dict):
         raise ValueError(f'{path} is not a JSON object')
     return data
+
+
+def bili23_running() -> bool:
+    """The GUI rewrites config.json on exit; only edit it while closed."""
+    try:
+        out = subprocess.run(['tasklist.exe', '/FI',
+                              'IMAGENAME eq Bili23.exe', '/NH'],
+                             capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return b'Bili23.exe' in (out.stdout or b'')
+
+
+def read_download_path(path: Path) -> str:
+    if not path.is_file():
+        return ''
+    config = load_config(path)
+    return str((config.get('Download') or {}).get('download_path') or '').strip()
+
+
+def skill_download_path() -> str:
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from lib.local_config import pick
+        return str(pick('BILI23_DOWNLOAD_DIR', 'paths', 'bili23_download_dir')
+                   or '').strip()
+    except Exception:
+        return ''
+
+
+def _save_skill_download_path(directory: Path) -> None:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from lib.local_config import config_path, load_local
+    path = config_path()
+    data = load_local(refresh=True)
+    if not isinstance(data, dict):
+        data = {}
+    paths = data.setdefault('paths', {})
+    paths['bili23_download_dir'] = str(directory)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n',
+                    encoding='utf-8', newline='\n')
+
+
+def _project_module():
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from lib import project_config
+    return project_config
+
+
+def resolve_download_dir(config_path: Path, explicit: str = '',
+                         project: str = '') -> Path:
+    """CLI > project.json > local.json; ask the user if none is configured."""
+    pc = _project_module()
+    project_file = pc.find_project(project or None)
+    project_value = str(pc.get(project_file, 'bili23', 'download_dir') or '').strip()
+    current = read_download_path(config_path)
+    remembered = skill_download_path()
+    chosen = explicit.strip() or project_value or remembered
+    if not chosen:
+        hint = f' Bili23 currently points at {current!r}.' if current else ''
+        raise MCPError(
+            'download path is not configured for this project. Ask the user '
+            'where to save the video/subtitles, then run: bili23.py '
+            'set-download-path "<dir>" --project "<project-dir>" '
+            '(close Bili23 first).' + hint)
+    chosen_path = Path(chosen)
+    if current and os.name == 'nt':
+        same = os.path.normcase(os.path.abspath(current)) == os.path.normcase(
+            os.path.abspath(str(chosen_path)))
+    else:
+        same = Path(current).absolute() == chosen_path.absolute()
+    if current and not same:
+        raise MCPError(
+            f'Bili23 is configured for {current!r}, not {str(chosen_path)!r}. '
+            'Close Bili23, run set-download-path, then start it again')
+    return chosen_path
+
+
+def set_download_path(config_path: Path, directory: str,
+                      project: str = '', scope: str = 'auto') -> dict:
+    if bili23_running():
+        raise MCPError('close Bili23 completely before changing its download '
+                       'path (it rewrites config.json on exit)')
+    pc = _project_module()
+    target = Path(directory).expanduser().resolve()
+    target.mkdir(parents=True, exist_ok=True)
+    project_file = None
+    chosen_scope = scope
+    if scope == 'project':
+        if not project:
+            raise MCPError('--project is required with --scope project')
+        p = Path(project).expanduser().resolve()
+        project_file = p if p.name == pc.PROJECT_FILE else p / pc.PROJECT_FILE
+    elif scope == 'auto':
+        project_file = pc.find_project(project or None)
+    if scope == 'auto':
+        chosen_scope = 'project' if project_file else 'global'
+    if chosen_scope == 'project' and project_file is None:
+        raise MCPError('no project.json found; pass --project or --scope global')
+    config = load_config(config_path)
+    download = config.setdefault('Download', {})
+    previous = download.get('download_path')
+    download['download_path'] = str(target).replace('\\', '/')
+    backup = config_path.with_suffix(config_path.suffix + '.bak-download')
+    if not backup.exists():
+        shutil.copyfile(config_path, backup)
+    config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2)
+                           + '\n', encoding='utf-8', newline='\n')
+    if chosen_scope == 'project':
+        pc.set_value(project_file, 'bili23', 'download_dir',
+                     value=str(target))
+    else:
+        _save_skill_download_path(target)
+    return {'config': str(config_path), 'previous': previous,
+            'download_path': str(target), 'scope': chosen_scope,
+            'project_file': str(project_file) if project_file else None}
+
+
+def cmd_set_download_path(args) -> int:
+    path = resolve_config_path(args.config)
+    result = set_download_path(path, args.directory, args.project, args.scope)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
 
 
 def enable_mcp(path: Path, *, force_token: bool = False) -> dict:
@@ -316,9 +441,16 @@ def cmd_status(args) -> int:
     config = load_config(path)
     mcp = config.get('MCP') or {}
     download = config.get('Download') or {}
+    pc = _project_module()
+    project_file = pc.find_project()
     info = {'config': str(path), 'mcp_enabled': bool(mcp.get('mcp_enabled')),
             'mcp_port': mcp.get('mcp_port'), 'mcp_token_set': bool(mcp.get('mcp_token')),
-            'download_path': download.get('download_path'), 'server': None}
+            'download_path': download.get('download_path'),
+            'project_file': str(project_file) if project_file else None,
+            'project_download_path': pc.get(project_file, 'bili23',
+                                            'download_dir') if project_file else None,
+            'global_download_path': skill_download_path() or None,
+            'server': None}
     if mcp.get('mcp_enabled') and mcp.get('mcp_token'):
         try:
             client = _client_from_config(path, timeout=args.timeout)
@@ -354,7 +486,14 @@ def cmd_parse(args) -> int:
 
 
 def cmd_download(args) -> int:
-    client = _client_from_config(resolve_config_path(args.config), args.timeout)
+    path = resolve_config_path(args.config)
+    try:
+        directory = resolve_download_dir(path, args.download_dir, args.project)
+    except MCPError as exc:
+        print(f'error: {exc}', file=sys.stderr)
+        return 2
+    print(f'[download] target: {directory}')
+    client = _client_from_config(path, args.timeout)
     client.initialize()
     parsed = client.parse(args.url, args.limit)
     ids = _select_ids(parsed, args.episodes)
@@ -411,6 +550,13 @@ def main(argv=None) -> int:
     sub.add_parser('status')
     sub.add_parser('enable')
 
+    set_path = sub.add_parser('set-download-path')
+    set_path.add_argument('directory')
+    set_path.add_argument('--project', default='',
+                          help='project dir (writes <project>/project.json)')
+    set_path.add_argument('--scope', choices=('auto', 'project', 'global'),
+                          default='auto')
+
     search = sub.add_parser('search')
     search.add_argument('keyword')
     search.add_argument('--limit', type=int, default=20)
@@ -430,6 +576,10 @@ def main(argv=None) -> int:
     download.add_argument('--quality', default='auto')
     download.add_argument('--codec', default='auto')
     download.add_argument('--container', default='mkv')
+    download.add_argument('--download-dir', default='',
+                          help='must match the project/Bili23 configured dir')
+    download.add_argument('--project', default='',
+                          help='project dir with project.json')
     download.add_argument('--wait', action='store_true')
     download.add_argument('--wait-timeout', type=float, default=1800.0)
 
@@ -441,7 +591,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     handlers = {'status': cmd_status, 'enable': cmd_enable, 'parse': cmd_parse,
                 'download': cmd_download, 'tasks': cmd_tasks,
-                'search': cmd_search}
+                'search': cmd_search, 'set-download-path': cmd_set_download_path}
     try:
         return handlers[args.command](args)
     except (MCPError, FileNotFoundError, ValueError) as exc:

@@ -239,13 +239,20 @@ python scripts/run_all.py --asr qwen3 --audio-hints
 # 首次：完全退出 Bili23 -> 开启 MCP -> 重新启动
 python "<scripts-dir>/acquire/bili23.py" enable
 python "<scripts-dir>/acquire/bili23.py" status
+
+# 下载前必须先问用户保存目录（不要猜/复用上一项目）
+python "<scripts-dir>/acquire/bili23.py" set-download-path "<用户给的目录>" \
+  --project "<项目根目录>"        # 写 <项目>/project.json（随项目变）
 python "<scripts-dir>/acquire/bili23.py" parse "<url>"
 python "<scripts-dir>/acquire/bili23.py" download "<url>" --episodes all \
-  --subtitle-format srt --subtitle-lang zh-CN --wait
+  --project "<项目根目录>" --subtitle-format srt --subtitle-lang zh-CN --wait
 ```
 
-下载目录/命名由 Bili23 设置决定（MCP 不允许改）；字幕与视频同目录。
-详见 [references/acquire.md](references/acquire.md)。
+下载目录必须由用户确认：优先写项目 `project.json` 的 `bili23.download_dir`；
+没有项目上下文时才用 `local.json` 的全局兜底。Bili23 GUI 自己的设置必须同步
+（`set-download-path` 会改，需先完全退出 Bili23），否则 MCP 仍下到旧目录。
+字幕与视频同目录。配置分层见 [references/config.md](references/config.md)，
+下载细节见 [references/acquire.md](references/acquire.md)。
 
 ### 跑 pipeline
 

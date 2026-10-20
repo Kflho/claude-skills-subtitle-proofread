@@ -14,3 +14,6 @@ sk_01_dev/LOCAL_ENV.md
 # harness 本机配置（含密钥，绝不入库）
 local.json
 SYNCED.json
+
+# per-project config (absolute download paths)
+project.json

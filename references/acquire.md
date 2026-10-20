@@ -59,11 +59,24 @@ python scripts/acquire/bili23.py tasks --state completed --limit 10
 
 ## 4. 输出目录与命名
 
-MCP 明确不允许改下载目录和命名模板：**用 Bili23 设置里的值**。
-建议把 Bili23 的下载目录设为项目的一个 staging 目录，例如：
+**下载目录必须先问用户**，不要复用上一项目。两档配置：
+
+- `<项目>/project.json` → `bili23.download_dir`（随项目变，优先）；
+- `local.json` → `paths.bili23_download_dir`（全局兜底）。
+
+写入命令（Bili23 必须完全退出，它会覆写 config.json）：
+
+```bash
+python scripts/acquire/bili23.py set-download-path "<用户目录>" \
+  --project "<项目根>"
+```
+
+MCP 不允许改下载目录/命名模板：Bili23 设置里的 `Download.download_path`
+才是实际落盘位置。`set-download-path` 会同时改 Bili23 配置和 project.json；
+两者不一致时 `download` 会报错，不会下到旧目录。建议结构：
 
 ```text
-<project>/downloads/          # Bili23 download_path
+<project>/downloads/          # Bili23 download_path（用户确认）
 <project>/videos/             # pipeline 的 --video-dir（必要时改名/移动）
 <project>/日语参考字幕/        # 字幕 srt 放这里
 ```
