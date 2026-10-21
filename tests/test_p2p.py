@@ -143,3 +143,21 @@ def test_locate_skips_first_missing_root(tmp_path):
     good = tmp_path / 'last-used'
     _write(good / 'release' / '01.mkv', 1)
     assert locate_task(manifest, str(tmp_path / 'nope'), str(good)) == str(good / 'release')
+
+
+def test_progress_recognises_thunder_temp_files(tmp_path):
+    """迅雷 下载中写 .bt.xltd，下完才改名；进度必须认它。"""
+    from acquire.p2p import task_progress
+    manifest = {'name': 'release', 'total': 1000, 'files': [
+        {'path': '01.mkv', 'length': 600},
+        {'path': '02.mkv', 'length': 400},
+    ]}
+    root = tmp_path / 'release'
+    root.mkdir()
+    (root / '01.mkv.bt.xltd').write_bytes(b'\0' * 600)
+    (root / '02.mkv.bt.xltd').write_bytes(b'\0' * 100)
+    progress = task_progress(manifest, str(root))
+    assert progress['files_done'] == 1
+    assert progress['bytes_done'] == 700
+    assert progress['percent'] == pytest.approx(70.0)
+    assert progress['complete'] is False

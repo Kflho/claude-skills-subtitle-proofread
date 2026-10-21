@@ -463,35 +463,47 @@ def locate_task(manifest: dict, *bases: str) -> str:
     return ''
 
 
+def _file_size(path: str) -> int:
+    """最终文件或 迅雷 的临时文件（``.bt.xltd`` / ``.xltd``）的字节数。"""
+    if not path:
+        return 0
+    for candidate in (path, path + '.bt.xltd', path + '.xltd'):
+        if os.path.isfile(candidate):
+            return os.path.getsize(candidate)
+    return 0
+
+
 def task_progress(manifest: dict, root: str) -> dict:
-    """Compare every file in the manifest against what is on disk."""
+    """Compare every file in the manifest against what is on disk.
+
+    迅雷 把 BT 下载写成 ``<name>.mkv.bt.xltd`` 临时文件，下完才改名。所以进度要
+    同时认临时文件，否则下载中永远显示 0%。
+    """
     present = 0
     done = 0
     missing = []
-    for entry in manifest.get('files') or []:
+    on_disk = 0
+    entries = manifest.get('files') or []
+    for entry in entries:
         path = os.path.join(root, *entry['path'].split('/')) if root else ''
-        size = os.path.getsize(path) if path and os.path.isfile(path) else 0
+        size = _file_size(path)
         if size:
             present += 1
         if size >= entry['length']:
             done += 1
         elif not size:
             missing.append(entry['path'])
-    total = sum(f['length'] for f in manifest.get('files') or []) or 1
-    on_disk = 0
-    for entry in manifest.get('files') or []:
-        path = os.path.join(root, *entry['path'].split('/')) if root else ''
-        if path and os.path.isfile(path):
-            on_disk += min(os.path.getsize(path), entry['length'])
+        on_disk += min(size, entry['length'])
+    total = sum(f['length'] for f in entries) or 1
     return {
         'root': root,
         'exists': bool(root) and os.path.isdir(root),
         'files_done': done,
-        'files_total': len(manifest.get('files') or []),
+        'files_total': len(entries),
         'bytes_done': on_disk,
         'bytes_total': total,
         'percent': round(on_disk * 100.0 / total, 2),
-        'complete': done == len(manifest.get('files') or []) and bool(manifest.get('files')),
+        'complete': done == len(entries) and bool(entries),
         'missing': missing[:5],
     }
 

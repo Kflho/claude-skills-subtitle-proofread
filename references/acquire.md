@@ -226,11 +226,21 @@ python scripts/acquire/p2p.py collect --series 小麻烦千惠 --dry-run
 - 迅雷路径/下载目录**自动探测**（`magnet:` 协议处理器 + `Profiles/config.json`），
   本机路径不写进仓库；`--thunder-exe` / `--download-dir` 可覆盖；
 - 迅雷 12 的「新建任务面板」需要**人工点一次「立即下载」**。面板是 Electron，
-  UIA 拿不到控件树，自动确认留到后续（照 kf-personal-service 的 `flclash.py`
-  坐标点击 + 窗口校验的做法做）；
-- 下载落点不一定等于默认目录：迅雷面板会用 `PathAndCategory.LastUsedPath`
-  （「上次使用」），所以 `status` / `collect` 会依次在默认目录、LastUsedPath、
-  manifest 记录之间找；
+  UIA 拿不到控件树；要自动点就用 `kf-personal-service` 的
+  `scripts/ui/clicker.py`（相对坐标 + 截图核对，见那边 `references/ui-clicker.md`）；
+- **落点先确认再点下载**：面板「下载到」用的是迅雷自己的「上次使用」目录
+  （`PathAndCategory.LastUsedPath`），不一定等于 `local.json` 的媒体库根。
+  要改路径：面板右下角文件夹图标 →「传统选择方式」→ 在**地址栏**输入目标目录。
+  系列目录**不用预先建**：BT 任务会自己生成发布名文件夹（如
+  `[AniArchive] Jarinko Chie (1981) [BD][1496x1080]`），收片时再 `collect` 归位；
+- BT 下载中迅雷写 `<文件名>.bt.xltd` 临时文件，下完才改名；`status` 会同时认这两者，
+  否则下载中永远显示 0%；
+- 下载落点不一定等于默认目录：`status` / `collect` 会依次在默认目录、
+  LastUsedPath、manifest 记录之间找。**注意大小写**：Windows 上
+  `<盘>:\Video` 和 `<盘>:\videos` 可以是两个不同目录；媒体库以 `local.json`
+  的 `paths.media` 为准（`<root>/<category>/<KIND>/<series>`），别被面板里的
+  同名路径骗了。下到别处也能 `collect` 搬回来，但更省事的是把迅雷默认下载目录
+  设成媒体库的 TV 目录；
 - 索引站可达性：nyaa / dmhy / mikan / acg.rip 本机直连常超时，脚本默认读系统代理
   （`--proxy` 可覆盖，`--no-proxy` 关闭）。
 
