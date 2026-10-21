@@ -43,6 +43,7 @@ eval/text_gate.py      kana / echo / variants / CPS 计数，超阈值退出 1
 | 变体 < 2 字 → 丢弃 | 单字会命中普通词 | 同上 |
 | 变体是规范名的子串 → 丢弃 | 「市之」⊂「市」这类会误伤 | `test_substring_of_canonical_is_dropped` |
 | 最长匹配 | 「サブヤン」不能被「サブ」截断 | `test_normalizer_prefers_longest_match` |
+| 规范名自身是保护区间 | 变体「绿姑娘」会把「小绿姑娘」改成「小小绿」 | `test_variant_overlapping_canonical_is_ignored` |
 | 规范写法永不重写 | 避免二次污染 | `test_normalizer_never_touches_canonical_only_text` |
 | 普通词不碰 | 市场/小偷/强盗/笨蛋 | `test_normalizer_leaves_decoy_words_alone` |
 | 不修改入参 | 便于 dry-run 与回滚 | `test_normalize_cues_does_not_mutate_input` |

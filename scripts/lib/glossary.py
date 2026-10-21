@@ -145,6 +145,10 @@ class Normalizer:
         self._pattern = None
         self._latin_pattern = None
         self._blocked = [str(b) for b in (blocked or []) if str(b).strip()]
+        # Canonical names themselves are protected spans: a variant that only
+        # overlaps part of a canonical (绿姑娘 inside 小绿姑娘) must not fire.
+        self._canonicals = sorted({canonical for _, canonical in pairs},
+                                  key=len, reverse=True)
         latin = {v: c for v, c in pairs if _has_latin(v)}
         cjk = {v: c for v, c in pairs if not _has_latin(v)}
         self._latin = latin
@@ -172,6 +176,15 @@ class Normalizer:
                 start = text.find(phrase, start + 1)
         return spans
 
+    def _canonical_spans(self, text: str) -> list[tuple[int, int]]:
+        spans = []
+        for canonical in self._canonicals:
+            start = text.find(canonical)
+            while start >= 0:
+                spans.append((start, start + len(canonical)))
+                start = text.find(canonical, start + 1)
+        return spans
+
     def _matches(self, text: str):
         found = []
         if self._pattern is not None:
@@ -184,7 +197,7 @@ class Normalizer:
     def normalize(self, text: str) -> tuple[str, list[dict]]:
         if not text or self._pattern is None and self._latin_pattern is None:
             return text, []
-        spans = self._blocked_spans(text)
+        spans = self._blocked_spans(text) + self._canonical_spans(text)
         hits = []
         result = []
         pos = 0

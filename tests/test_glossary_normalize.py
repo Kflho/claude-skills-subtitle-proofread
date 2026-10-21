@@ -82,6 +82,15 @@ def test_normalizer_never_touches_canonical_only_text():
     assert out == text and hits == []
 
 
+def test_variant_overlapping_canonical_is_ignored():
+    """绿姑娘 inside 小绿姑娘 must not fire (it would become 小小绿)."""
+    normalizer = Normalizer({'小绿': ['绿姑娘']})
+    out, hits = normalizer.normalize('小绿姑娘，不好意思啊')
+    assert out == '小绿姑娘，不好意思啊' and hits == []
+    out, hits = normalizer.normalize('绿姑娘，不好意思啊')
+    assert out == '小绿，不好意思啊' and len(hits) == 1
+
+
 def test_normalizer_leaves_decoy_words_alone():
     normalizer = Normalizer(build_variant_map(GLOSSARY, META))
     for text in ('市场上人很多', '小偷摸走了钱包', '强盗在山里出没', '这是笨蛋行为'):
