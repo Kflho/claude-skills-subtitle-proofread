@@ -195,3 +195,68 @@ python scripts/acquire/bili_subs.py --bvid BV... --project "<项目根>"
 
 如果以后要无头/CI 下载，Bili23 不适合；可换维护中的 CLI（如 BBDown、yutto），
 但需要重新做登录/字幕格式适配，不在本 skill 当前范围内。
+
+## 11. P2P（BitTorrent）：B 站没有的老片
+
+老番的视频通常只存在于公开 BT 发布。`scripts/acquire/p2p.py` 把「搜索引站 →
+拿 `.torrent` 解析文件清单 → 交给本机客户端 → 按清单核对 → 归位媒体库」串成一条线：
+
+```bash
+# 本机装了什么、下载到哪、走什么代理
+python scripts/acquire/p2p.py clients
+
+# 四个索引站一起搜（nyaa / dmhy / mikan / acg.rip）
+python scripts/acquire/p2p.py search -q "じゃりン子チエ" --limit 6
+
+# 先 dry-run 看清单、体积和目标目录，再真下
+python scripts/acquire/p2p.py grab --torrent-id nyaa:1927106 \
+    --series 小麻烦千惠 --media-type tv --dry-run
+python scripts/acquire/p2p.py grab --torrent-id nyaa:1927106 --series 小麻烦千惠
+
+# 下载中/完成：逐文件比对 .torrent 里的 length，不信客户端的「100%」
+python scripts/acquire/p2p.py status
+
+# 完成后搬进 <media root>/<category>/TV/<series>
+python scripts/acquire/p2p.py collect --series 小麻烦千惠 --dry-run
+```
+
+- **`.torrent` 优先于磁力**：只有种子带文件清单，才能判断「是不是真下完了」；
+  磁力没有清单时 `grab` 只报任务已交给客户端，不写 manifest；
+- manifest 与状态写在 `data/temp/p2p/`（项目有 `data/` 时），`status` 不依赖客户端 API；
+- 迅雷路径/下载目录**自动探测**（`magnet:` 协议处理器 + `Profiles/config.json`），
+  本机路径不写进仓库；`--thunder-exe` / `--download-dir` 可覆盖；
+- 迅雷 12 的「新建任务面板」需要**人工点一次「立即下载」**。面板是 Electron，
+  UIA 拿不到控件树，自动确认留到后续（照 kf-personal-service 的 `flclash.py`
+  坐标点击 + 窗口校验的做法做）；
+- 下载落点不一定等于默认目录：迅雷面板会用 `PathAndCategory.LastUsedPath`
+  （「上次使用」），所以 `status` / `collect` 会依次在默认目录、LastUsedPath、
+  manifest 记录之间找；
+- 索引站可达性：nyaa / dmhy / mikan / acg.rip 本机直连常超时，脚本默认读系统代理
+  （`--proxy` 可覆盖，`--no-proxy` 关闭）。
+
+选片参考（同一部片实测）：BD 1080p HEVC 全集 ≈ 25 GiB；BD-BOX + 剧场版 ≈ 55 GiB；
+BDMV 原盘 ≈ 185 GiB。**先看目标盘余量再下**，宁可选小一档。
+
+> 仅个人非商业使用；公开分发、批量抓取都不在支持范围内。
+
+### 选型记录（2026-10 实测）
+
+本机没有 qBittorrent / aria2 / libtorrent，只有迅雷 12.4.7（VIP）。GitHub 上的
+活跃度（star / 最近提交，2026-10-21 查询）供换机器时参考：
+
+| 方案 | 活跃度 | 接入方式 | 本机结论 |
+|---|---|---|---|
+| 迅雷 12（本机） | 商业软件 | `magnet:` 协议处理器 → `Thunder.exe "%1" -StartType:magnet` | **采用**：VIP 加速，但新建任务面板要人工确认一次 |
+| qBittorrent | 41.0k / 2026-10-20 | Web API（`qbittorrent-api` 516 star） | 未安装；要无头/常驻时首选 |
+| aria2 | 43.2k / 2026-06-25 | RPC（`aria2p` 575 star），磁力靠 DHT | 未安装；轻量兜底 |
+| rqbit | 1.9k / 2026-10-09 | Rust，本地 HTTP API | 备选 |
+| webtorrent-cli | 1.4k / 2026-10-15 | Node CLI | 备选 |
+| Jackett / Prowlarr | 16.2k / 7.4k | 索引器聚合 | 不需要：四个 RSS 站够用 |
+| AnimeGarden | 1.4k / 2026-10-20 | 动花镜像 + 开放 BT 接口 | 中文圈搜索的备选后端 |
+| Torrent-Api-py | 426 / 2025-02 | 多站聚合 API | 维护放缓，暂不接入 |
+
+索引站实测（走系统代理）：nyaa / dmhy / mikan / acg.rip 均可访问，老片主要来自 nyaa。
+同一部片的发布体积：BD 1080p HEVC 全集 ≈ 25 GiB，BD-BOX + 剧场版 ≈ 55 GiB，
+BDMV 原盘 ≈ 185 GiB——下之前先看盘余量。
+
+

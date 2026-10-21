@@ -369,6 +369,30 @@ Bili23 GUI 自己的设置必须同步（`set-download-path` 会改，需先完�
 UTF-8 BOM（会被当成旧版配置，把登录态和下载目录一起重置）；默认 `download_parallel=1`
 是**一集一集下**，要并发得先关应用改配置，但实测瓶颈在带宽不在并发数。
 
+### 资源获取（P2P / BT）
+
+B 站没有的老片，视频通常只在公开 BT 发布里。`acquire/p2p.py` 串起
+「搜索引站 → 解析 `.torrent` 文件清单 → 交给本机客户端 → 逐文件核对 → 归位媒体库」：
+
+```bash
+python "<scripts-dir>/acquire/p2p.py" clients            # 客户端/下载目录/代理探测
+python "<scripts-dir>/acquire/p2p.py" search -q "<片名>" --limit 8
+python "<scripts-dir>/acquire/p2p.py" grab --torrent-id nyaa:<id> \
+  --series "<系列名>" --media-type tv --dry-run
+python "<scripts-dir>/acquire/p2p.py" status             # 按 .torrent 清单判完成
+python "<scripts-dir>/acquire/p2p.py" collect --series "<系列名>" --dry-run
+```
+
+- **`.torrent` 优先于磁力**：只有种子带文件清单，「下完没有」才可判定；
+- 客户端默认走迅雷（本机 VIP 加速），路径/下载目录自动探测，不写死本机信息；
+  `--thunder-exe` / `--download-dir` 可覆盖；
+- 迅雷 12 的新建任务面板要**人工点一次「立即下载」**（Electron 面板拿不到控件树，
+  自动确认待补，做法参考 kf-personal-service 的坐标点击）；
+- 落点可能是迅雷的「上次使用目录」而不是默认目录，`status/collect` 会两处都找；
+- 先在 `--dry-run` 里看体积和盘余量：BD 1080p 全集约 25 GiB。
+
+细节与选片参考见 [references/acquire.md](references/acquire.md) §11。
+
 **B 站字幕默认不当参考**：绝大多数是机器生成的 `ai-zh`，质量达不到翻译底线。
 只有用户明确说「这是别人手工上传的字幕」才用 `acquire/bili_subs.py` 取人工轨。
 配置分层见 [references/config.md](references/config.md)。
