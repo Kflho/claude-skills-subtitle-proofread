@@ -834,6 +834,8 @@ python "<scripts-dir>/fix/oped_fill.py" "<SUBTITLE_DIR>" \
 | `LLM_API_KEY not set`（翻译/润色） | 明确失败或保留原文；不要降级到传统机翻（已移除） |
 | `HTTP 400 invalid model` | 用 `deepseek-flash`，或更新 `lib/config.py:LLM_MODEL_DEFAULT` |
 | 翻译 exit 0 但成片仍是日文 | 推理 token 吃光预算：`LLM_REASONING_EFFORT=none`，必要时提高 `LLM_MAX_TOKENS` |
+| `--repair` 后 `echo`/术语全灭 | `--input` 给了译文而不是源文；QA 在拿中文和中文比。CLI 会报错退出 2 |
+| 整段译文错位一格 | 模型把两条并成一条或多吐一条；批次条数校验已按失败处理并拆批，仍出现就查 `[translate] ... returned N item(s)` 日志 |
 | 译文带编号原文（`1. 原文`） | glossary 回显；说明文字写 CLAUDE.md，不要写 JSON |
 | 接受循环把回显记成功 | 用 `is_untranslated()` 判断，不要只比 `out != src` |
 | OP/ED 对白被歌词覆写/变少 | 检查 OP/ED 窗口与歌词判定；与日文源逐条对数量 |

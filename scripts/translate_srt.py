@@ -895,6 +895,21 @@ def is_untranslated(src, out, source_lang=None):
     return o == s
 
 
+def result_count_ok(batch_cues, result):
+    """一批结果只有在「一条对一条」时才可用。
+
+    回填是按位置对位的：模型把两条并成一条、或多吐一条，后面的整批都会
+    错位一格（EP005 实测）；这种情况必须按失败处理，让上层重试并拆批，
+    不能按位置硬写。
+    """
+    return result is not None and len(result) == len(batch_cues)
+
+
+def repair_paths_ok(input_path, output_path):
+    """`--repair` 必须拿源文和译文两个文件；同路径会把中文当源文重算 QA。"""
+    return os.path.abspath(input_path) != os.path.abspath(output_path)
+
+
 def bad_ratio(batch_cues, result, source_lang=None):
     """一批里未翻译/回显条目的占比。result 为 None 时视为全失败。"""
     if not result:
@@ -1157,6 +1172,11 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
                                   ja_context=ja_ctx, source_lang=source_lang,
                                   max_chars=max_chars, max_cps=max_cps,
                                   context_limit=context_window)
+        if not result_count_ok(cues, result):
+            print(f'  [translate] batch {len(cues)} returned '
+                  f'{len(result) if result else 0} item(s) -> retry/split',
+                  file=sys.stderr)
+            result = None
         ratio = bad_ratio(cues, result, source_lang)
         # 单条回显不值得再发一次整批请求；20 条里坏 4 条以上才重试
         if ratio > 0.2:
@@ -1452,6 +1472,11 @@ def main():
         if not args.output:
             base = os.path.splitext(os.path.basename(args.input))[0]
             args.output = os.path.join(args.output_dir, f'{base}.srt')
+        if args.repair and not repair_paths_ok(args.input, args.output):
+            print('error: --repair needs the source file as --input and the '
+                  'translation as --output; got the same path, so QA would '
+                  'compare the translation with itself', file=sys.stderr)
+            return 2
         translate_file(args.input, args.output, glossary_str, ja_to_zh,
                        api_key, model, base_url, dry_run=args.dry_run,
                        source_lang=args.source_lang,

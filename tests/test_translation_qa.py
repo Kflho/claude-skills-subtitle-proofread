@@ -109,3 +109,25 @@ def test_qa_report_clean_sample_passes():
     report = qa_report(src, out)
     assert report['summary']['violations'] == 0
     assert report['summary']['coverage'] == 1.0
+
+
+def test_speaker_tags_ignore_reading_annotations():
+    """半角括号是注音（もん），不能当说话人标签；全角才是标签。"""
+    from lib.translation.qa import speaker_tags
+    assert speaker_tags('（チエ）元気？') == ['チエ']
+    assert speaker_tags('イヤな者(もん)や') == []
+    assert speaker_tags('（チエ）\n（テツ）どないや') == ['チエ', 'テツ']
+
+
+def test_qa_report_flags_lost_speaker_tag():
+    """源文两条标签、译文只剩一条 = 丢说话人（EP005 类问题）。"""
+    src = [{'text': '（チエ）元気？\n（テツ）ぼちぼちや',
+            'start_s': 0, 'end_s': 2}]
+    out = [{'text': '（千惠）还好吗', 'start_s': 0, 'end_s': 2}]
+    report = qa_report(src, out)
+    assert report['summary']['tag_loss'] == 1
+    assert 'tag_loss' in report['items'][0]['reasons']
+
+    out[0]['text'] = '（千惠）还好吗 （铁）还行'
+    report = qa_report(src, out)
+    assert report['summary']['tag_loss'] == 0

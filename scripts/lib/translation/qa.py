@@ -21,6 +21,20 @@ def count_kana(text: str) -> int:
     return len(KANA_RE.findall(text or ''))
 
 
+_FULL_TAG_RE = re.compile(r'（([^（）()]{1,16})）')
+_HIRAGANA_ONLY_RE = re.compile(r'^[\u3040-\u309fー・]+$')
+
+
+def speaker_tags(text: str) -> list[str]:
+    """说话人标签（全角括号），排除纯平假名注音如「（もん）」。
+
+    译文里丢标签等于丢「谁在说」，比名字译法更影响理解；但日文原文用
+    半角括号给汉字注音（`イヤな者(もん)`），那些不能当标签数。
+    """
+    return [name for name in _FULL_TAG_RE.findall(text or '')
+            if not _HIRAGANA_ONLY_RE.match(name)]
+
+
 TAG_RE = re.compile(r'<[^>]+>|\{[^}]*\}')
 # ASS 换行/硬空格标记：不是可见字符，不能算进长度和英文残留
 ASS_BREAK_RE = re.compile(r'\\[Nh]')
@@ -197,6 +211,7 @@ def qa_report(source_cues: list[dict], output_cues: list[dict], *,
         'japanese_residual': 0,
         'echo': 0,
         'glossary_miss': 0,
+        'tag_loss': 0,
         'max_chars': 0,
         'max_cps': 0,
         'timing': 0,
@@ -223,6 +238,10 @@ def qa_report(source_cues: list[dict], output_cues: list[dict], *,
         if misses:
             reasons.append('glossary_miss')
             counts['glossary_miss'] += 1
+        src_tags = speaker_tags(src_text)
+        if len(speaker_tags(tgt_text)) < len(src_tags):
+            reasons.append('tag_loss')
+            counts['tag_loss'] += 1
         violations = cue_violations(out, max_chars=max_chars, max_cps=max_cps)
         for v in violations:
             reasons.append(v['rule'])

@@ -461,14 +461,15 @@ def cmd_status(args) -> int:
     config = load_config(path)
     mcp = config.get('MCP') or {}
     download = config.get('Download') or {}
-    pc = _project_module()
-    project_file = pc.find_project()
+    reg = _registry_module()
+    project_dir = reg.project_dir()
+    project_download = str(reg.value(project_dir, 'bili23', 'download_dir') or '').strip()
     info = {'config': str(path), 'mcp_enabled': bool(mcp.get('mcp_enabled')),
             'mcp_port': mcp.get('mcp_port'), 'mcp_token_set': bool(mcp.get('mcp_token')),
             'download_path': download.get('download_path'),
-            'project_file': str(project_file) if project_file else None,
-            'project_download_path': pc.get(project_file, 'bili23',
-                                            'download_dir') if project_file else None,
+            'project': reg.project_key(project_dir),
+            'project_file': str(reg.registry_path()),
+            'project_download_dir': project_download or None,
             'global_download_path': skill_download_path() or None,
             'concurrency': read_concurrency(path),
             'server': None}

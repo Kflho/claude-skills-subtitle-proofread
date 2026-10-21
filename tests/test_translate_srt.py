@@ -584,3 +584,18 @@ def test_main_dry_run_writes_nothing(monkeypatch, tmp_path):
     tr.main()
 
     assert not out.exists()
+
+
+def test_result_count_ok_rejects_shifted_batch():
+    """模型多吐/少吐一条时，按位置回填会整体错位，必须判失败。"""
+    cues = [{'text': 'a'}, {'text': 'b'}, {'text': 'c'}]
+    assert tr.result_count_ok(cues, ['甲', '乙', '丙'])
+    assert not tr.result_count_ok(cues, ['甲', '乙'])
+    assert not tr.result_count_ok(cues, ['甲', '乙', '丙', '丁'])
+    assert not tr.result_count_ok(cues, None)
+
+
+def test_repair_requires_distinct_source_and_target():
+    """--repair 拿同一个文件当源和译文会把中文当源文，QA 全 echo。"""
+    assert tr.repair_paths_ok('data/ja/EP001.srt', 'data/zh_v2/EP001.srt')
+    assert not tr.repair_paths_ok('data/zh_v2/EP001.srt', 'data/zh_v2/EP001.srt')
