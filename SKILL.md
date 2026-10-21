@@ -31,6 +31,18 @@ description: >
 **资源驱动**：有什么用什么。有视频+ASR→修时间轴/补缺字幕；有参考字幕→注入 AI 校对上下文。
 缺资源也能残血运行——跳过缺失步骤，剩余步骤照常。
 
+**外部参考是第 0 步**：ASR 只回答「听到什么」，回答不了「正确写法是什么」。
+名字读音、招式、**OP/ED 歌词**、集号对照、时代用语都要在跑 ASR 之前从外部查到，
+写成 `bin/reference_docs/<作品>_外部参考.md`，再落进词表 / `_meta.readings` /
+`_meta.op_map`。查什么、去哪查、可信度阶梯和检查清单见
+[references/external-references.md](references/external-references.md)。
+
+- 上游结构（页数、每页时长、**有没有字幕轨**）先用
+  `python "<scripts-dir>/acquire/bili_meta.py" --bvid BV... --out data/reference/bili_meta.json`；
+- 歌词站（UtaTen / JOYSOUND）国内可直连；维基/番组计划常超时，拿不到就记缺口；
+- 换曲集号要记下来：本机实测「赤胴鈴之助」OP 全 52 集同一首，ED 在 **EP026** 换曲；
+- 歌词只做内部翻译参考，中文译文自己写，别整段搬进发布物。
+
 ## 专名审查（AI 驱动）
 
 > 旧词典扫描法噪声大，且会产生“幻觉标准名”（把「天間」定成「天间」，
