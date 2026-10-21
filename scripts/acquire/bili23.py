@@ -113,21 +113,43 @@ def _save_skill_download_path(directory: Path) -> None:
                     encoding='utf-8', newline='\n')
 
 
-def _project_module():
+def _registry_module():
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from lib import project_config
-    return project_config
+    from lib import projects_registry
+    return projects_registry
 
 
 def resolve_download_dir(config_path: Path, explicit: str = '',
-                         project: str = '') -> Path:
-    """CLI > project.json > local.json; ask the user if none is configured."""
-    pc = _project_module()
-    project_file = pc.find_project(project or None)
-    project_value = str(pc.get(project_file, 'bili23', 'download_dir') or '').strip()
+                         project: str = '', media_type: str = '',
+                         series: str = '') -> Path:
+    """CLI > registry > media library > local.json; ask if none is set.
+
+    ``--media-type`` + ``--series`` resolve the folder from the machine library
+    (``local.json`` → ``paths.media``) so a series always lands under
+    ``<root>/<category>/<TV|OVA|Movie>/<series>`` instead of a per-project path.
+    Project-level memory lives in the global registry (``projects_registry.json``
+    → ``<project>.bili23.download_dir``), never inside the project folder.
+    """
+    reg = _registry_module()
+    project_dir = reg.project_dir(project or None)
+    project_value = str(reg.abs_path(project_dir,
+                                     str(reg.value(project_dir, 'bili23', 'download_dir')
+                                         or ''))).strip()
     current = read_download_path(config_path)
     remembered = skill_download_path()
-    chosen = explicit.strip() or project_value or remembered
+    library_value = ''
+    if media_type:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from lib import media_paths
+        category = str(reg.value(project_dir, 'category') or 'animation')
+        library_value = media_paths.series_dir(
+            series or str(reg.value(project_dir, 'series') or '').strip(),
+            media_type, category)
+        if not library_value:
+            raise MCPError(
+                'media library is not configured: add paths.media.root to '
+                'local.json (or pass --download-dir / set-download-path)')
+    chosen = explicit.strip() or project_value or library_value or remembered
     if not chosen:
         hint = f' Bili23 currently points at {current!r}.' if current else ''
         raise MCPError(
@@ -153,22 +175,21 @@ def set_download_path(config_path: Path, directory: str,
     if bili23_running():
         raise MCPError('close Bili23 completely before changing its download '
                        'path (it rewrites config.json on exit)')
-    pc = _project_module()
+    reg = _registry_module()
     target = Path(directory).expanduser().resolve()
     target.mkdir(parents=True, exist_ok=True)
-    project_file = None
+    project_dir = ''
     chosen_scope = scope
-    if scope == 'project':
+    if project or scope == 'project':
         if not project:
             raise MCPError('--project is required with --scope project')
-        p = Path(project).expanduser().resolve()
-        project_file = p if p.name == pc.PROJECT_FILE else p / pc.PROJECT_FILE
-    elif scope == 'auto':
-        project_file = pc.find_project(project or None)
+        project_dir = reg.project_dir(project)
+        if not os.path.isdir(project_dir):
+            raise MCPError(f'project dir not found: {project_dir}')
     if scope == 'auto':
-        chosen_scope = 'project' if project_file else 'global'
-    if chosen_scope == 'project' and project_file is None:
-        raise MCPError('no project.json found; pass --project or --scope global')
+        chosen_scope = 'project' if project_dir else 'global'
+    if chosen_scope == 'project' and not project_dir:
+        raise MCPError('no project given; pass --project or --scope global')
     config = load_config(config_path)
     download = config.setdefault('Download', {})
     previous = download.get('download_path')
@@ -179,13 +200,12 @@ def set_download_path(config_path: Path, directory: str,
     config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2)
                            + '\n', encoding='utf-8', newline='\n')
     if chosen_scope == 'project':
-        pc.set_value(project_file, 'bili23', 'download_dir',
-                     value=str(target))
+        reg.set_value(project_dir, 'bili23', 'download_dir', value=str(target))
     else:
         _save_skill_download_path(target)
     return {'config': str(config_path), 'previous': previous,
             'download_path': str(target), 'scope': chosen_scope,
-            'project_file': str(project_file) if project_file else None}
+            'registry_project': reg.project_key(project_dir) if project_dir else None}
 
 
 def cmd_set_download_path(args) -> int:
@@ -450,6 +470,7 @@ def cmd_status(args) -> int:
             'project_download_path': pc.get(project_file, 'bili23',
                                             'download_dir') if project_file else None,
             'global_download_path': skill_download_path() or None,
+            'concurrency': read_concurrency(path),
             'server': None}
     if mcp.get('mcp_enabled') and mcp.get('mcp_token'):
         try:
@@ -488,7 +509,8 @@ def cmd_parse(args) -> int:
 def cmd_download(args) -> int:
     path = resolve_config_path(args.config)
     try:
-        directory = resolve_download_dir(path, args.download_dir, args.project)
+        directory = resolve_download_dir(path, args.download_dir, args.project,
+                                         args.media_type, args.series)
     except MCPError as exc:
         print(f'error: {exc}', file=sys.stderr)
         return 2
@@ -505,7 +527,7 @@ def cmd_download(args) -> int:
         'video_codec': args.codec,
         'container': args.container,
     }
-    created = client.create_download(ids, options)
+    created = client.create_download(ids, options, redownload=args.redownload)
     if args.json:
         _print_json(created)
     else:
@@ -514,6 +536,15 @@ def cmd_download(args) -> int:
             print(f"  {task.get('task_id')}\t{task.get('title')}")
         for note in created.get('notes') or []:
             print(f'  note: {note}')
+        concurrency = read_concurrency(path)
+        print(f"[download] Bili23 concurrency: parallel={concurrency['parallel']} "
+              f"threads={concurrency['threads']} "
+              f"(download_parallel / download_thread in its config)")
+        if concurrency['parallel'] is not None and concurrency['parallel'] < 2 \
+                and len(created.get('tasks') or []) > 1:
+            print('  hint: only one episode downloads at a time; raise '
+                  'download_parallel (close Bili23 first: it rewrites config)',
+                  file=sys.stderr)
     if args.wait and created.get('tasks'):
         task_ids = [str(t['task_id']) for t in created['tasks']]
         results = _wait_for_tasks(client, task_ids, args.wait_timeout)
@@ -521,6 +552,73 @@ def cmd_download(args) -> int:
             print('--- finished ---')
         for status in results:
             print(json.dumps(status, ensure_ascii=False))
+    return 0
+
+
+def read_concurrency(config_path: Path) -> dict:
+    """Bili23's own knobs: parallel = tasks at once, threads = chunks per file.
+
+    From the app source: ``DownloadListModel._manageConcurrentDownloads``
+    dispatches queued tasks while ``active_count < download_parallel``, and
+    ``Downloader.__init__`` calls ``thread_pool.setMaxThreadCount(
+    download_thread)`` per task.
+    """
+    try:
+        data = load_config(config_path)
+    except (OSError, json.JSONDecodeError):
+        return {'parallel': None, 'threads': None}
+    block = data.get('Download') or {}
+    return {'parallel': block.get('download_parallel'),
+            'threads': block.get('download_thread')}
+
+
+def suggest_media_type(parsed: dict) -> dict:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from lib import media_paths
+
+    episodes = _episode_rows(parsed)
+    durations = [float(item.get('duration') or 0) for item in episodes]
+    kind, reason = media_paths.suggest_media_type(len(episodes), durations)
+    return {'media_type': kind, 'reason': reason,
+            'target_dir': media_paths.series_dir(
+                str(parsed.get('title') or '').strip() or '<series>', kind)}
+
+
+def cmd_plan(args) -> int:
+    """Parse and show where this upload would land — before any download."""
+    path = resolve_config_path(args.config)
+    client = _client_from_config(path, args.timeout)
+    client.initialize()
+    parsed = client.parse(args.url, args.limit)
+    episodes = _episode_rows(parsed)
+    guess = suggest_media_type(parsed)
+    concurrency = read_concurrency(path)
+    target = ''
+    try:
+        if args.media_type in ('tv', 'ova', 'movie'):
+            target = str(resolve_download_dir(path, args.download_dir, args.project,
+                                              args.media_type, args.series))
+        else:
+            target = str(resolve_download_dir(path, args.download_dir, args.project))
+    except MCPError as exc:
+        target = f'(unresolved: {exc})'
+    payload = {
+        'title': parsed.get('title'),
+        'category': parsed.get('category'),
+        'total': parsed.get('total'),
+        'durations_min': sorted({round(float(e.get('duration') or 0) / 60, 1)
+                                 for e in episodes}),
+        'suggested': guess,
+        'declared_media_type': args.media_type,
+        'download_dir': target,
+        'bili23_concurrency': concurrency,
+        'available': parsed.get('available'),
+    }
+    _print_json(payload)
+    if args.media_type in ('auto', ''):
+        print(f"# 建议 media_type={guess['media_type']} ({guess['reason']})；"
+              f"确认后用 --media-type {guess['media_type']} --series '<系列名>'",
+              file=sys.stderr)
     return 0
 
 
@@ -553,7 +651,7 @@ def main(argv=None) -> int:
     set_path = sub.add_parser('set-download-path')
     set_path.add_argument('directory')
     set_path.add_argument('--project', default='',
-                          help='project dir (writes <project>/project.json)')
+                          help='project dir (writes its projects_registry entry)')
     set_path.add_argument('--scope', choices=('auto', 'project', 'global'),
                           default='auto')
 
@@ -564,6 +662,15 @@ def main(argv=None) -> int:
     parse = sub.add_parser('parse')
     parse.add_argument('url')
     parse.add_argument('--limit', type=int, default=100)
+
+    plan = sub.add_parser('plan', help='parse + suggest TV/OVA/MOVIE + target dir')
+    plan.add_argument('url')
+    plan.add_argument('--limit', type=int, default=100)
+    plan.add_argument('--media-type', default='auto',
+                      choices=('auto', 'tv', 'ova', 'movie'))
+    plan.add_argument('--series', default='')
+    plan.add_argument('--project', default='')
+    plan.add_argument('--download-dir', default='')
 
     download = sub.add_parser('download')
     download.add_argument('url')
@@ -578,8 +685,15 @@ def main(argv=None) -> int:
     download.add_argument('--container', default='mkv')
     download.add_argument('--download-dir', default='',
                           help='must match the project/Bili23 configured dir')
+    download.add_argument('--media-type', default='',
+                          choices=('', 'tv', 'ova', 'movie'),
+                          help='resolve the folder from local.json paths.media')
+    download.add_argument('--series', default='',
+                          help='series folder name under <category>/<KIND>/')
     download.add_argument('--project', default='',
-                          help='project dir with project.json')
+                          help='project dir whose registry entry holds the download dir')
+    download.add_argument('--redownload', action='store_true',
+                          help='re-create tasks Bili23 considers already downloaded')
     download.add_argument('--wait', action='store_true')
     download.add_argument('--wait-timeout', type=float, default=1800.0)
 
@@ -590,7 +704,7 @@ def main(argv=None) -> int:
 
     args = parser.parse_args(argv)
     handlers = {'status': cmd_status, 'enable': cmd_enable, 'parse': cmd_parse,
-                'download': cmd_download, 'tasks': cmd_tasks,
+                'plan': cmd_plan, 'download': cmd_download, 'tasks': cmd_tasks,
                 'search': cmd_search, 'set-download-path': cmd_set_download_path}
     try:
         return handlers[args.command](args)

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "paths": {
+    "models_dir": "<models-root>",
+    "qwen_python": "<models-root>/.venv-qwen/Scripts/python.exe",
+    "ffmpeg": "<ffmpeg-bin>",
+    "whisper_cli": "<whisper-cli>",
+    "whisper_model": "<whisper-model.bin>",
+    "whisper_retry_model": "<whisper-retry-model.bin>",
+    "asr_model": "",
+    "aligner_model": "",
+    "bili23_config": "<appdata>/Bili23 Downloader/config.json",
+    "bili23_exe": "",
+    "media": {
+      "root": "<media-library-root>",
+      "categories": {
+        "animation": ""
+      },
+      "kinds": {
+        "tv": "TV",
+        "ova": "ova",
+        "movie": "movie"
+      }
+    }
+  },
+  "llm": {
+    "api_key": "<llm-api-key>",
+    "base_url": "<llm-base-url>",
+    "model": "<llm-model>"
+  },
+  "video_roots": [],
+  "projects_root": "<subtitle-projects-root>"
+}

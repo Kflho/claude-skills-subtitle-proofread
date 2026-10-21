@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Write the harness-local ``local.json`` for this machine.
 
 The repo must not carry machine paths or keys.  Run this **inside the synced
@@ -30,6 +30,29 @@ def _settings_env() -> dict:
         return {}
     env = data.get('env') if isinstance(data, dict) else None
     return env if isinstance(env, dict) else {}
+
+
+def _existing_media(output: Path) -> dict:
+    """Keep whatever library root was already confirmed on this machine.
+
+    ``init_local --force`` must not replace a user-confirmed media root with a
+    guess just because ``~/Videos`` happens to exist.
+    """
+    try:
+        data = json.loads(output.read_text(encoding='utf-8-sig'))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    paths = data.get('paths') if isinstance(data, dict) else None
+    media = paths.get('media') if isinstance(paths, dict) else None
+    return media if isinstance(media, dict) else {}
+
+
+def _existing_projects_root(output: Path) -> str:
+    try:
+        data = json.loads(output.read_text(encoding='utf-8-sig'))
+    except (OSError, json.JSONDecodeError):
+        return ''
+    return str(data.get('projects_root') or '') if isinstance(data, dict) else ''
 
 
 def _detect(args) -> dict:
@@ -80,6 +103,28 @@ def _detect(args) -> dict:
         bili23_config = ''
     bili23_exe = args.bili23_exe or os.environ.get('BILI23_EXE') or ''
 
+    previous = _existing_media(Path(args.output))
+    media_root = args.media_root or os.environ.get('MEDIA_ROOT') or ''
+    if not media_root:
+        media_root = str(previous.get('root') or '')
+    if not media_root:
+        for candidate in (Path.home() / 'Videos' / 'Animation',
+                          Path.home() / 'Videos'):
+            if candidate.is_dir():
+                media_root = str(candidate)
+                break
+    projects_root = (args.projects_root or os.environ.get('PROJECTS_ROOT')
+                     or str(_existing_projects_root(Path(args.output)) or ''))
+    categories = previous.get('categories') if isinstance(previous.get('categories'), dict) else {}
+    if args.media_category or not categories:
+        categories = {'animation': args.media_category}
+    kinds = previous.get('kinds') if isinstance(previous.get('kinds'), dict) else {}
+    kinds = {
+        'tv': args.kind_tv or kinds.get('tv') or 'TV',
+        'ova': args.kind_ova or kinds.get('ova') or 'ova',
+        'movie': args.kind_movie or kinds.get('movie') or 'movie',
+    }
+
     return {
         'schema_version': 1,
         'paths': {
@@ -93,10 +138,15 @@ def _detect(args) -> dict:
             'aligner_model': args.aligner_model or '',
             'bili23_config': bili23_config,
             'bili23_exe': bili23_exe,
+            'media': {
+                'root': media_root,
+                'categories': categories,
+                'kinds': kinds,
+            },
         },
         'llm': llm,
         'video_roots': [v for v in (args.video_roots or '').split(';') if v],
-        'projects_root': args.projects_root or '',
+        'projects_root': projects_root,
     }
 
 
@@ -136,6 +186,13 @@ def main(argv=None):
     parser.add_argument('--projects-root', default='')
     parser.add_argument('--bili23-config', default='')
     parser.add_argument('--bili23-exe', default='')
+    parser.add_argument('--media-root', default='',
+                        help='media library root; discovered under ~/Videos when empty')
+    parser.add_argument('--media-category', default='',
+                        help="sub-folder under the root, e.g. 'Animation'; empty = kinds sit directly under the root")
+    parser.add_argument('--kind-tv', default='TV')
+    parser.add_argument('--kind-ova', default='ova')
+    parser.add_argument('--kind-movie', default='movie')
     parser.add_argument('--check', action='store_true')
     parser.add_argument('--force', action='store_true')
     args = parser.parse_args(argv)

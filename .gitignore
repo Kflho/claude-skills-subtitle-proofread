@@ -14,8 +14,11 @@ sk_01_dev/LOCAL_ENV.md
 local.json
 SYNCED.json
 
-# per-project config (absolute download paths)
-project.json
+# 本机项目总账：全是带盘符的绝对路径，由 lib/projects_index.py 生成
+projects_index.json
+
+# 本机项目登记表：系列/类型/风格/视频目录覆盖 + 下载目录（绝对路径）
+projects_registry.json
 
 # benchmark manifest：本机素材路径，只留 example
 eval/manifest.*.json

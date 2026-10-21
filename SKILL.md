@@ -327,7 +327,9 @@ python "<scripts-dir>/acquire/bili23.py" download "<url>" --episodes all \
   --container mp4 --project "<项目根目录>"
 ```
 
-下载目录必须由用户确认（CLI > project.json > 库推导 > `local.json` 兜底，都没有就报错）。
+下载目录必须由用户确认（CLI > `projects_registry.json` 该项目条目 > 库推导 > `local.json` 兜底，
+都没有就报错）。项目文件夹里不放配置——系列名/类型/风格/目录覆盖都在 skill 根的
+`projects_registry.json`，解析结果看 `projects_index.json`。
 Bili23 GUI 自己的设置必须同步（`set-download-path` 会改，需先完全退出 Bili23），
 否则 MCP 仍下到旧目录。字幕与视频同目录。
 
