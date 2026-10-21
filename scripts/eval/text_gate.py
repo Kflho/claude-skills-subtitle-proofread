@@ -24,11 +24,15 @@ import os
 import re
 import sys
 
+# 允许 `python <scripts>/eval/text_gate.py` 从任意目录直接跑（SKILL.md 就是这么写的）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import lib._path  # noqa: F401,E402
 
 from lib.glossary import build_normalizer, build_variant_map, load_glossary, load_meta  # noqa: E402
 from lib.subtitle_io import read_subtitles  # noqa: E402
-from lib.translation.qa import count_kana, cue_violations, is_untranslated  # noqa: E402
+from lib.translation.qa import (  # noqa: E402
+    count_kana, cue_violations, is_untranslated, strip_tags,
+)
 
 
 def _episode(path: str) -> str:
@@ -40,7 +44,23 @@ LATIN = re.compile(r"[A-Za-z][A-Za-z'’.\-]{1,}")
 # `--max-latin` 抓不到它（西里尔不属于 [A-Za-z]），必须单独计。
 CYRILLIC = re.compile(r"[\u0400-\u04FF]")
 # 汉字之间的裸空格：机翻/后处理拿空格当逗号，读起来断句全错。
+# 但不是所有空格都是缺陷：歌词用空格分句、招牌把字拆开、咒语用空格隔两段。
+# 只把「整条没有标点、空格承担断句作用」的算缺陷。
 CJK_SPACE = re.compile(r"[\u4e00-\u9fff]\s+[\u4e00-\u9fff]")
+PUNCT_ANY = re.compile(r"[，。！？…、,.!?~～；：]")
+LYRIC_STYLE = re.compile(r"(opening|ending|lyric|song)", re.I)
+
+
+def spaced_as_punctuation(text: str) -> bool:
+    """空格是否在代替标点断句。"""
+    if not CJK_SPACE.search(text):
+        return False
+    if PUNCT_ANY.search(text):
+        return False                       # 有标点，空格是排版
+    runs = re.split(r"\s+", text.strip())
+    if all(len(run) <= 1 for run in runs):
+        return False                       # 逐字间距（招牌/标题）
+    return True
 CREDIT = ('字幕制作', '翻译', '时间轴', 'Society', 'Skaro', 'Hokutono')
 
 
@@ -52,15 +72,21 @@ def check_file(zh_path: str, *, source_path: str = '', normalizer=None,
     kana = echo = variants = cps = latin = cyrillic = cjk_space = 0
     bad = []
     for i, cue in enumerate(cues):
-        text = str(cue.get('text') or '')
+        raw = str(cue.get('text') or '')
+        text = strip_tags(raw)      # 标签不是字幕内容，不能算进残留
         reasons = []
+        # 矢量绘图（`{\p1}m 3 19 b …`）：文字检查没有意义，坐标会被当成
+        # 拉丁字母和超长句。这类 cue 直接跳过。
+        if re.search(r'\\p\d', raw):
+            continue
         if count_kana(text):
             kana += 1
             reasons.append('kana')
         if CYRILLIC.search(text):
             cyrillic += 1
             reasons.append('cyrillic')
-        if CJK_SPACE.search(text):
+        style = str(((cue.get('_ass_dialogue') or {}).get('style')) or '')
+        if spaced_as_punctuation(text) and not LYRIC_STYLE.search(style):
             cjk_space += 1
             reasons.append('cjk_space')
         if src and i < len(src) and is_untranslated(

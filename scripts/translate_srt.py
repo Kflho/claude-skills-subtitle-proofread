@@ -317,7 +317,11 @@ def _translate_line_map(variants, api_key, model, base_url, dry_run=False,
                                   source_lang=source_lang)
         for j, line in enumerate(chunk):
             if result and j < len(result) and result[j]:
-                # 表里的值同时可能写进 ASS 和 SRT，折成空格最安全
+                # 表里的值会直接写进字幕，不经后面那条回显校验：
+                # 模型若原样退回源文，这首歌就会以俄语出现在每一集里。
+                if is_untranslated(line, result[j], source_lang=source_lang):
+                    continue
+                # 同时可能写进 ASS 和 SRT，折成空格最安全
                 out[line.strip()] = _flatten_newlines(result[j], '.srt')
     return out
 

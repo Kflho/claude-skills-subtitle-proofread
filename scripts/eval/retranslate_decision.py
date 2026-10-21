@@ -33,9 +33,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import lib._path  # noqa: F401,E402
 
-from eval.text_gate import CJK_SPACE, CYRILLIC  # noqa: E402
+from eval.text_gate import CYRILLIC, spaced_as_punctuation  # noqa: E402
 from lib.subtitle_io import read_subtitles  # noqa: E402
-from lib.translation.qa import count_kana, is_untranslated  # noqa: E402
+from lib.translation.qa import count_kana, is_untranslated, strip_tags  # noqa: E402
 
 PUNCT = re.compile(r'[，。！？…、,.!?~～；：]')
 # 成本估算用的经验值；都是「每 cue」量级，不是精确计费，用来比较修 vs 翻。
@@ -62,7 +62,8 @@ DEFAULT_RULES = {
 
 
 def _text(cue):
-    return str(cue.get('text') or '').strip()
+    """可见正文（去掉 ASS/HTML 标签）——标签里的 `fad` 之类会被当成英文残留。"""
+    return strip_tags(str(cue.get('text') or '')).strip()
 
 
 def score_episode(zh_cues, src_cues=None):
@@ -77,7 +78,7 @@ def score_episode(zh_cues, src_cues=None):
             cyrillic += 1
         if count_kana(text):
             kana += 1
-        if CJK_SPACE.search(text):
+        if spaced_as_punctuation(text):
             cjk_space += 1
         if len(text) > 8 and not PUNCT.search(text):
             nopunct += 1

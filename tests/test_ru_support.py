@@ -141,7 +141,42 @@ def test_gate_passes_clean_ru_translation(tmp_path, capsys):
     assert 'PASS' in capsys.readouterr().err
 
 
-def test_gate_check_file_reports_new_counters():
+def test_gate_skips_vector_drawing_cues(tmp_path, capsys):
+    """`{\\p1}m 3 19 b …` 是矢量图形，不是字幕文本。"""
+    body = ('Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,'
+            '{\\p1}m 3 19 b 2 18 -2 18 -4 17{\\p0}')
+    path = tmp_path / 'EP001.ass'
+    path.write_text(ASS_HEAD + body + '\n', encoding='utf-8')
+
+    result = text_gate.check_file(str(path))
+    assert result['latin'] == 0
+    assert result['cps'] == 0
+    assert result['cyrillic'] == 0
+
+
+def test_gate_ignores_latin_inside_tags(tmp_path):
+    body = ('Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,'
+            '{\\fad(100,100)}莎莉来了')
+    path = tmp_path / 'EP002.ass'
+    path.write_text(ASS_HEAD + body + '\n', encoding='utf-8')
+
+    result = text_gate.check_file(str(path))
+    assert result['latin'] == 0      # `fad` 不是英文残留
+
+
+def test_gate_does_not_flag_lyrics_with_spaces(tmp_path):
+    """歌词用空格分句，有标点就不算「空格当逗号」。"""
+    assert text_gate.spaced_as_punctuation('玛哈-里库 玛哈-里塔！') is False
+    assert text_gate.spaced_as_punctuation('出 云 服 饰') is False      # 逐字间距
+    assert text_gate.spaced_as_punctuation('妈妈又没空 爸爸很忙') is True
+
+
+def test_gate_skips_cjk_space_for_lyric_style(tmp_path):
+    body = ('Dialogue: 0,0:00:01.00,0:00:03.00,Opening Rus,,0,0,0,,'
+            '晚霞渐浓 天色暗下来')
+    path = tmp_path / 'EP003.ass'
+    path.write_text(ASS_HEAD + body + '\n', encoding='utf-8')
+    assert text_gate.check_file(str(path))['cjk_space'] == 0
     payload = text_gate.check_file
     assert payload is not None
     # 计数键必须存在，下游 report 才拿得到

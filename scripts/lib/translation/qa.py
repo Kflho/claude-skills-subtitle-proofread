@@ -24,6 +24,15 @@ def count_kana(text: str) -> int:
 TAG_RE = re.compile(r'<[^>]+>|\{[^}]*\}')
 
 
+def strip_tags(text: str) -> str:
+    """去掉 ASS 覆盖标签 / HTML 标签，只留可见正文。
+
+    闸门必须按可见正文判：`{\\fad(100,100)}` 里的 fad 会被拉丁字母检测
+    当成英文残留，标签内的西里尔也可能误报。长度/CPS 另用 clean_text。
+    """
+    return TAG_RE.sub('', text or '')
+
+
 def clean_text(text: str) -> str:
     """Visible characters for length/CPS: drop whitespace, HTML/ASS tags."""
     return re.sub(r'\s+', '', TAG_RE.sub('', text or ''))
