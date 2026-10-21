@@ -228,6 +228,22 @@ ROMAJI = ['Maha-riku, maha-rita!', 'Kuni kara yattekita',
           'Chotto charmu-na onna no ko']
 
 
+def test_missing_lyric_line_is_left_for_normal_translation():
+    """逐句表里没有的歌词不能被「窗口里最多的那句」顶替。"""
+    cues = [{'text': 'Ещё одна строка'}]
+    oped = {
+        'op_map': {'другая строка': '别的句子'},
+        'ed_map': {}, 'op_alias': {}, 'ed_alias': {},
+        'op_texts': {'EP001.ass': [(0, 'Ещё одна строка')]},
+        'ed_texts': {}, 'op_zh': '喂，别得意忘形！', 'ed_zh': None,
+        'op_src': 'Волшебное мамбо', 'ed_src': None,
+        'op_variants': {'Ещё одна строка': 99}, 'ed_variants': {},
+    }
+    replaced = tr.apply_oped_pre_replace(cues, 'EP001.ass', oped)
+    assert replaced == 0
+    assert cues[0]['text'] == 'Ещё одна строка'
+
+
 def test_dual_track_translates_source_track_only(tmp_path, fake_translate):
     cues = []
     for i, (romaji, rus) in enumerate(zip(ROMAJI, OP_LINES)):

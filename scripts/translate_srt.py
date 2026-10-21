@@ -386,15 +386,16 @@ def _canonicalize_lyrics(positions, aliases):
     """按歌词位置归一：每个位置取最常见写法，近似写法收进别名表。
 
     不做这一步，110 集里同一句 OP 会翻出三四种中文（源写法有细微差异），
-    观众换一集就发现歌词变了。
+    观众换一集就发现歌词变了。位置之间互不影响：某个位置每集都不同
+    （片尾曲各集不同）时，只是多几条各自独立的条目，不会张冠李戴。
     """
     canon_counter = Counter()
     for _pos, counts in positions.items():
-        canon = counts.most_common(1)[0][0]
-        canon_counter[canon] += 1
-        for text in counts:
-            if text != canon and _lyric_similar(text, canon):
-                aliases.setdefault(text, canon)
+        text = counts.most_common(1)[0][0]
+        canon_counter[text] += 1
+        for other in counts:
+            if other != text and _lyric_similar(other, text):
+                aliases.setdefault(other, text)
     return canon_counter
 
 
@@ -531,11 +532,11 @@ def collect_oped_across_episodes(input_dir, api_key, model, base_url, dry_run=Fa
     ed_src = _pick_oped_canonical(ed_canon)
 
     # 逐句表：整部作品的 OP/ED 只翻一次，各集按原文复用
-    op_map = _translate_line_map(op_canon or op_variants, api_key, model,
+    op_map = _translate_line_map(op_canon, api_key, model,
                                  base_url, dry_run=dry_run, label='OP',
                                  source_lang=source_lang,
                                  glossary_str=glossary_str)
-    ed_map = _translate_line_map(ed_canon or ed_variants, api_key, model,
+    ed_map = _translate_line_map(ed_canon, api_key, model,
                                  base_url, dry_run=dry_run, label='ED',
                                  source_lang=source_lang,
                                  glossary_str=glossary_str)
@@ -598,6 +599,10 @@ def apply_oped_pre_replace(cues, srt_file, oped):
         canonical = oped.get(key_src)
         cross = oped.get(key_var) or Counter()
         within = Counter(t for _, t in entries[srt_file])
+        # 有逐句表就以表为准：表里没有的句子留给正常翻译。
+        # 绝不能退回去用「该窗口出现最多的那一句」兜底——那会把歌词整段
+        # 换成一句话（实测 ED 六行全变成「喂，别得意忘形！」）。
+        use_canonical_fallback = not line_map
         for idx, text in entries[srt_file]:
             if idx >= len(cues):
                 continue
@@ -615,7 +620,7 @@ def apply_oped_pre_replace(cues, srt_file, oped):
                 cues[idx]['text'] = prefix + mapped + suffix
                 replaced += 1
                 continue
-            if not zh:
+            if not use_canonical_fallback or not zh:
                 continue
             if not _is_lyric(text, canonical, within, cross):
                 continue
