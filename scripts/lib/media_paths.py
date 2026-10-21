@@ -14,7 +14,7 @@ Resolution order for every value, same as everywhere else in this skill::
 Library layout (``local.json`` → ``paths.media``)::
 
     {
-      "root": "D:\\\\videos",              # anything under here is the library
+      "root": "<library-root>",            # anything under here is the library
       "categories": {"animation": "Animation"},
       "kinds": {"tv": "TV", "ova": "OVA", "movie": "Movie"}
     }
@@ -22,7 +22,7 @@ Library layout (``local.json`` → ``paths.media``)::
 which yields ``<root>/<category>/<KIND>/<series>``.  Explicit per-kind paths
 win over the derivation, so a machine can keep TV somewhere else::
 
-    "kinds": {"tv": "D:\\\\videos\\\\Animation\\\\TV", ...}
+    "kinds": {"tv": "<library-root>/<category>/TV", ...}
 
 Call ``python scripts/lib/media_paths.py --check`` to print what this machine
 resolves to.
