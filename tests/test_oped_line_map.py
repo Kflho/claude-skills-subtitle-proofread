@@ -73,9 +73,21 @@ def _episode(path, body_lines, op=True, ed=True):
 
 @pytest.fixture
 def fake_translate(monkeypatch):
-    """把 LLM 换成本地映射：原文 → '中:' + 原文。"""
+    """把 LLM 换成本地假翻译：每个源句一个固定的中文标签。
+
+    不能回 `'中:' + 原文`——译文带西里尔会被 `is_untranslated` 判成没翻，
+    逐句表直接拒收（那正是产品代码该做的事）。
+    """
+    labels = {}
+
     def fake_batch(cues, *args, **kwargs):
-        return [f"中:{c['text']}" for c in cues]
+        out = []
+        for cue in cues:
+            text = cue['text']
+            if text not in labels:
+                labels[text] = f'译文{len(labels)}'
+            out.append(labels[text])
+        return out
     monkeypatch.setattr(tr, '_translate_batch', fake_batch)
     return fake_batch
 
@@ -94,8 +106,7 @@ def test_each_distinct_lyric_line_gets_its_own_translation(tmp_path, fake_transl
     oped = _collect(tmp_path)
     assert set(oped['op_map']) == set(OP_LINES)
     assert set(oped['ed_map']) == set(ED_LINES)
-    assert oped['op_map']['Волшебная страна - хороша!' if False else
-                          OP_LINES[0]] == f'中:{OP_LINES[0]}'
+    assert oped['op_map'][OP_LINES[0]].startswith('译文')
 
 
 def test_op_block_at_file_end_is_detected_by_timestamp(tmp_path, fake_translate):
@@ -159,10 +170,11 @@ def test_apply_writes_each_line_not_one_collapsed_sentence(tmp_path, fake_transl
     cues = read_subtitles(path, mark_garbled=False)
     replaced = tr.apply_oped_pre_replace(cues, 'EP001.ass', oped)
 
-    op_texts = [c['text'] for c in cues
-                if any(c['text'] == f'中:{line}' for line in OP_LINES)]
+    op_values = set(oped['op_map'].values())
+    op_texts = [c['text'] for c in cues if c['text'] in op_values]
     assert replaced >= len(OP_LINES) + len(ED_LINES)
-    assert len(set(op_texts)) == len(OP_LINES)   # 三条不同，没有被压成一句
+    assert len(op_values) == len(OP_LINES)       # 三句各自有译文
+    assert len(op_texts) == len(OP_LINES)        # 没有被压成一句
 
 
 def test_apply_leaves_body_dialogue_untouched(tmp_path, fake_translate):
@@ -275,7 +287,7 @@ def test_dual_track_romaji_reuses_russian_translation(tmp_path, fake_translate):
     for start, texts in by_start.items():
         assert len(texts) == 2
         assert texts[0] == texts[1]            # 两条轨措辞一致
-        assert texts[0].startswith('中:')      # 用的是俄语轨的译文
+        assert texts[0].startswith('译文')      # 用的是俄语轨的译文
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -357,5 +369,5 @@ def test_variant_lyrics_share_one_canonical_translation(tmp_path, fake_translate
         cues = read_subtitles(path, mark_garbled=False)
         tr.apply_oped_pre_replace(cues, name, oped)
         texts.append([c['text'] for c in cues
-                      if c['text'].startswith('中:')])
+                      if c['text'].startswith('译文')])
     assert texts[0] == texts[1]                    # 两集歌词措辞一致

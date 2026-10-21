@@ -188,6 +188,41 @@ print(len(read_subtitles('out/EP001.ass', mark_garbled=False)))"
 默认取安全侧：VAD 删条只出清单，`missing` 只列不插。
 新增会写盘的功能时，先在 `lib/gates.py` 加一条 `Gate(...)`，再写实现。
 
+## 接手已有字幕：先量再决定
+
+拿到别人做的字幕（机翻稿、上一版交付、别组转让）时，第一步不是润色，是量。
+`eval/retranslate_decision.py` 给三个数：缺陷结构、修 vs 翻的调用量、墙钟时间，
+并据此给 KEEP / PATCH / RETRANSLATE 三档结论。
+
+```bash
+python "<scripts>/eval/retranslate_decision.py" \
+  --zh-dir "<已有字幕>" --source-dir "<源字幕>" \
+  --report "data/reports/decision.json"
+# 只算成本不判质量
+python "<scripts>/eval/retranslate_decision.py" --zh-dir "<已有字幕>" --cost-only
+# 折算成钱（元/百万 token）
+python "<scripts>/eval/retranslate_decision.py" ... --price-in 1 --price-out 2
+```
+
+判据（`--rules <json>` 可覆盖）：
+
+| 信号 | 阈值 | 为什么致命 |
+|---|---|---|
+| 源语言残留（西里尔/假名） | > 0 | 有整条没翻或半句没翻 |
+| 原文回显 | > 0.5% | 模型照抄源文，逐条修不如重译 |
+| 条数漂移 | > 5% | 丢条/合并过，逐条修救不回来 |
+| 标点缺陷（空格断句 + 长句无标点） | > 25% | 断句逻辑整体崩了 |
+| 其余缺陷 5%–25% | | 判 PATCH：只重写问题条 |
+| 其余缺陷 < 5% | | 判 KEEP：按 QA 清单人工过 |
+
+读结论时注意三件事：
+
+- **PATCH 用定点修，不要全局润色**：把问题条挑出来逐条重写（`--repair` 或
+  `translate_srt` 的 QA 修复），整体润色会动到本来正确的句子；
+- **成本要跟效果一起看**：修 1 万条和重翻 4 万条的调用量可能只差一倍，
+  但修完还是旧底子（译名、语体都已定型）；
+- **判定依赖源语言**：ru→zh 的残留看西里尔，ja→zh 看假名；工具按源文自动认。
+
 ## 首次使用？
 
 检查项目 `CLAUDE.md` 末尾是否有 `## SKILL INITIALIZED: true`。
@@ -272,26 +307,37 @@ python scripts/run_all.py --asr qwen3 --audio-hints
 
 ### 资源获取（B 站链接）
 
-只有 B 站链接时，用 Bili23 Downloader（v2.20，GUI）自带的 MCP 下载视频+字幕：
+只有 B 站链接时，用 Bili23 Downloader（v2.20，GUI）自带的 MCP 下载视频+字幕。
+
+**媒体库根目录写在 `local.json` 的 `paths.media`**（跟模型路径同一个思路），项目只记
+`video.series` + `video.media_type`，目录由库规则推出 `<root>/<category>/<TV|OVA|MOVIE>/<系列名>`。
+根目录必须先问用户；不知道就先 `python "<scripts-dir>/lib/media_paths.py" --discover` 扫出来再确认。
+所有项目的资源路径汇总在 `projects_index.json`（`python "<scripts-dir>/lib/projects_index.py"`）。
 
 ```bash
 # 首次：完全退出 Bili23 -> 开启 MCP -> 重新启动
 python "<scripts-dir>/acquire/bili23.py" enable
 python "<scripts-dir>/acquire/bili23.py" status
 
-# 下载前必须先问用户保存目录（不要猜/复用上一项目）
-python "<scripts-dir>/acquire/bili23.py" set-download-path "<用户给的目录>" \
-  --project "<项目根目录>"        # 写 <项目>/project.json（随项目变）
-python "<scripts-dir>/acquire/bili23.py" parse "<url>"
+# 先定类型再落盘：plan 给出 TV/OVA/MOVIE 猜测、理由和目标目录
+python "<scripts-dir>/acquire/bili23.py" plan "<url>"
+
 python "<scripts-dir>/acquire/bili23.py" download "<url>" --episodes all \
-  --project "<项目根目录>" --subtitle-format srt --subtitle-lang zh-CN --wait
+  --media-type tv --series "<系列名>" --quality 1080P --codec AVC/H.264 \
+  --container mp4 --project "<项目根目录>"
 ```
 
-下载目录必须由用户确认：优先写项目 `project.json` 的 `bili23.download_dir`；
-没有项目上下文时才用 `local.json` 的全局兜底。Bili23 GUI 自己的设置必须同步
-（`set-download-path` 会改，需先完全退出 Bili23），否则 MCP 仍下到旧目录。
-字幕与视频同目录。配置分层见 [references/config.md](references/config.md)，
-下载细节见 [references/acquire.md](references/acquire.md)。
+下载目录必须由用户确认（CLI > project.json > 库推导 > `local.json` 兜底，都没有就报错）。
+Bili23 GUI 自己的设置必须同步（`set-download-path` 会改，需先完全退出 Bili23），
+否则 MCP 仍下到旧目录。字幕与视频同目录。
+
+两个坑写在 [references/acquire.md](references/acquire.md)：改 Bili23 的 `config.json` 绝不能带
+UTF-8 BOM（会被当成旧版配置，把登录态和下载目录一起重置）；默认 `download_parallel=1`
+是**一集一集下**，要并发得先关应用改配置，但实测瓶颈在带宽不在并发数。
+
+**B 站字幕默认不当参考**：绝大多数是机器生成的 `ai-zh`，质量达不到翻译底线。
+只有用户明确说「这是别人手工上传的字幕」才用 `acquire/bili_subs.py` 取人工轨。
+配置分层见 [references/config.md](references/config.md)。
 
 ### 跑 pipeline
 
@@ -408,6 +454,8 @@ python "<scripts-dir>/asr/retime_crosslingual.py" \
 | 重新打轴（文字不改） | `asr/align_cues.py` |
 | 跨语言重打轴（译文 vs 原音） | `asr/retime_crosslingual.py` |
 | 切段修复 | `whisper_spot_fix.py` |
+| 接手旧稿：质量评估 + 修/翻成本 | `eval/retranslate_decision.py` |
+| 交付前文本闸门 | `eval/text_gate.py` |
 
 **常用单步**：
 
@@ -590,7 +638,9 @@ python "<scripts>/eval/text_gate.py" --zh-dir "data/zh" \
 **OP/ED 匹配**：有 ASS 样式名（`Opening*` / `Ending*` / `Lyrics`）就按样式认歌词段，
 没有才退回固定时间窗——180s 的窗口会把开篇对白当成 OP（实测 EP001 正片 1:44 就开场）。
 整部作品只翻一次，按原文逐句复用；同一时间点有罗马音和译本两轨时，只翻源语言那条，
-另一轨复用同一句中文。
+另一轨复用同一句中文。逐句表存在时，表里没命中的句子留给正常翻译，
+**不要**退回「窗口里出现最多的那句」兜底——那会把整段歌词换成一句（实测 ED 六行全变成
+同一句台词）。canonical 兜底只用于完全没有逐句表的旧数据。
 
 **旧稿要不要重翻**：先量再决定。
 
@@ -599,10 +649,8 @@ python "<scripts>/eval/retranslate_decision.py" \
   --zh-dir "<旧译文>" --source-dir "<源字幕>" --report "data/reports/decision.json"
 ```
 
-判 RETRANSLATE 的四条：西里尔/假名残留、原文回显 > 0.5%、标点缺陷 > 25%、
-与源字幕条数漂移 > 5%（丢条/合并是修不回来的）。5%–25% 判 PATCH，只重写问题条；
-< 5% 判 KEEP。输出同时列出「重译」和「定向修」的调用量与墙钟时间，
-`--price-in/--price-out`（元/百万 token）可折成钱。
+判定标准与三档结论见上方「接手已有字幕：先量再决定」，这里只换成 ru 的源目录。
+ru 项目的残留信号看西里尔；旧稿若同时有 20% 以上的空格断句，基本可以直接判重译。
 
 翻译项目**必须先准备 `temp/noun_mappings.json`**（ja→zh 幻觉控制表），否则专名翻译不一致。
 
