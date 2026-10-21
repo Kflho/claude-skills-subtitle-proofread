@@ -47,6 +47,11 @@ eval/text_gate.py      kana / echo / variants / CPS 计数，超阈值退出 1
 | 普通词不碰 | 市场/小偷/强盗/笨蛋 | `test_normalizer_leaves_decoy_words_alone` |
 | 不修改入参 | 便于 dry-run 与回滚 | `test_normalize_cues_does_not_mutate_input` |
 
+> **单字变体是盲区**：`翠 → 小绿`（Midori 的另一种译法）会被「变体 < 2 字」规则丢弃，
+> 所以 `normalize_variants.py` 静默不改。实测佐武项目 44 处「翠」分布在 18 个文件、
+> 两条翻译线都有。这类变体只能人工确认后定向替换（留 `.bak`），或给工具加
+> `--allow-short-variants` 白名单；不要为了省事放宽全局规则。
+
 ### 一次真实的误伤（已变成回归测试）
 
 第一版把 `圣诞` 作为 `三太` 的变体，结果 EP001/EP010 的
