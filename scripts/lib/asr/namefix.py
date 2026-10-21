@@ -94,6 +94,10 @@ class NameEntry:
     canonical_ja: str
     canonical_zh: str
     readings: list[str] = field(default_factory=list)
+    # katakana spellings copied from the glossary keys: unambiguous enough to
+    # replace by surface, because janome splits them (ライノシン → ライ/ノ/シン)
+    # and the token-window match never sees the whole name.
+    surfaces: list[str] = field(default_factory=list)
 
 
 def load_name_entries(glossary: dict, meta: dict) -> list[NameEntry]:
@@ -107,7 +111,7 @@ def load_name_entries(glossary: dict, meta: dict) -> list[NameEntry]:
     readings = (meta.get('readings') or {}) if isinstance(meta, dict) else {}
     canonical_ja = (meta.get('canonical_ja') or {}) if isinstance(meta, dict) else {}
     entries = []
-    seen = set()
+    by_key = {}
     for ja_form, zh in glossary.items():
         surface = str(canonical_ja.get(ja_form) or ja_form)
         reading_list = readings.get(ja_form) or readings.get(surface) or []
@@ -119,11 +123,20 @@ def load_name_entries(glossary: dict, meta: dict) -> list[NameEntry]:
         if not norm:
             continue
         key = (surface, zh, tuple(norm))
-        if key in seen:
+        katakana_surfaces = [str(ja_form)] if (
+            _has_katakana(ja_form) and str(ja_form) != surface) else []
+        if key in by_key:
+            # Same name spelled in kanji and katakana: merge the surface so the
+            # katakana pass still sees it (ライノシン and 雷之進 are one entry).
+            existing = by_key[key]
+            for form in katakana_surfaces:
+                if form not in existing.surfaces:
+                    existing.surfaces.append(form)
             continue
-        seen.add(key)
-        entries.append(NameEntry(canonical_ja=surface, canonical_zh=str(zh),
-                                 readings=norm))
+        entry = NameEntry(canonical_ja=surface, canonical_zh=str(zh),
+                          readings=norm, surfaces=katakana_surfaces)
+        by_key[key] = entry
+        entries.append(entry)
     return entries
 
 
@@ -145,6 +158,10 @@ def _has_kanji(text: str) -> bool:
 
 def _has_katakana(text: str) -> bool:
     return any('\u30a1' <= ch <= '\u30fa' or ch == 'ー' for ch in str(text or ''))
+
+
+def _is_katakana_char(ch: str) -> bool:
+    return bool(ch) and ('\u30a1' <= ch <= '\u30fa' or ch == 'ー')
 
 
 def propose_repairs(text: str, entries: list[NameEntry], tokenizer=None,
@@ -187,14 +204,45 @@ def propose_repairs(text: str, entries: list[NameEntry], tokenizer=None,
             index.setdefault(reading, entry)
 
     proposals = []
+    taken = []          # char ranges already claimed by a surface proposal
+    # Katakana spellings first: janome splits ライノシン into ライ/ノ/シン, so
+    # the token-window path below cannot see that name at all.
+    for entry in entries:
+        for surface_form in entry.surfaces:
+            if len(surface_form) < MIN_EXACT_LEN:
+                continue
+            start = text.find(surface_form)
+            while start >= 0:
+                end = start + len(surface_form)
+                # サブ inside サブタイトル is a loanword, not the name: a match
+                # may not continue into katakana on the right.  On the left it
+                # may, because Japanese glues the name to the previous katakana
+                # word (ライバルライノシン) — but only for longer names.
+                left = text[start - 1] if start > 0 else ''
+                right = text[end] if end < len(text) else ''
+                embedded = _is_katakana_char(right) or (
+                    _is_katakana_char(left) and len(surface_form) < 4)
+                if not embedded and not any(s < end and start < e
+                                            for s, e in taken):
+                    proposals.append({'start': start, 'end': end,
+                                      'from': surface_form,
+                                      'to': entry.canonical_ja,
+                                      'reading': surface_form, 'distance': 0,
+                                      'source': 'surface', 'context': text})
+                    taken.append((start, end))
+                start = text.find(surface_form, end)
+
     used = set()
     for i in range(len(spans)):
-        for width in (3, 2, 1):
+        for width in (5, 4, 3, 2, 1):
             j = i + width
             if j > len(spans):
                 continue
             window = spans[i:j]
             if any(idx in used for idx in range(i, j)):
+                continue
+            if any(any(start < w[1] and w[0] < end for start, end in taken)
+                   for w in (window[0], window[-1])):
                 continue
             if not all(_is_nounish(s[3]) for s in window):
                 continue

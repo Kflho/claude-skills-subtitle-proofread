@@ -137,3 +137,29 @@ def test_overlapping_characters_between_tokens(entries, tokenizer):
     spans = [(h['start'], h['end']) for h in hits]
     assert spans == sorted(spans)
     assert len({h['start'] for h in hits}) == len(hits)
+
+
+def test_katakana_name_split_by_janome_is_repaired():
+    """janome splits ライノシン into ライ/ノ/シン; the surface pass catches it."""
+    entries = load_name_entries({'ライノシン': '雷之进'},
+                                {'canonical_ja': {'ライノシン': '雷之進'}})
+    out, hits = fix_text('ライノシンさん、待ってくれ', entries)
+    assert out == '雷之進さん、待ってくれ'
+    assert hits[0]['source'] == 'surface'
+
+
+def test_katakana_surface_inside_loanword_is_left_alone():
+    """サブ in サブタイトル is part of a longer katakana run, not the name."""
+    entries = load_name_entries({'サブ': '佐武'},
+                                {'canonical_ja': {'サブ': '佐武'},
+                                 'readings': {'サブ': ['サブ']}})
+    out, hits = fix_text('サブタイトルを表示', entries)
+    assert out == 'サブタイトルを表示' and hits == []
+
+
+def test_long_katakana_name_glued_to_a_word_is_repaired():
+    """ライバルライノシン: the name follows a katakana word without a space."""
+    entries = load_name_entries({'ライノシン': '雷之进'},
+                                {'canonical_ja': {'ライノシン': '雷之進'}})
+    out, _hits = fix_text('ライバルライノシンには勝ちたい', entries)
+    assert out == 'ライバル雷之進には勝ちたい'
