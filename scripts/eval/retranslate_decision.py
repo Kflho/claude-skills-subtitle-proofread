@@ -33,11 +33,15 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import lib._path  # noqa: F401,E402
 
-from eval.text_gate import CYRILLIC, spaced_as_punctuation  # noqa: E402
+from eval.text_gate import (  # noqa: E402
+    CYRILLIC, LYRIC_STYLE, SIGN_STYLE, spaced_as_punctuation,
+)
 from lib.subtitle_io import read_subtitles  # noqa: E402
 from lib.translation.qa import count_kana, is_untranslated, strip_tags  # noqa: E402
 
 PUNCT = re.compile(r'[，。！？…、,.!?~～；：]')
+# 矢量绘图（`{\p1}m 3 19 b …`）不是文本，别算进任何文本指标
+DRAWING = re.compile(r'\\p\d')
 # 成本估算用的经验值；都是「每 cue」量级，不是精确计费，用来比较修 vs 翻。
 DEFAULT_COST = {
     'batch_size': 20,        # translate_srt 默认批大小
@@ -66,11 +70,24 @@ def _text(cue):
     return strip_tags(str(cue.get('text') or '')).strip()
 
 
+def _cue_style(cue):
+    return str(((cue.get('_ass_dialogue') or {}).get('style')) or '')
+
+
+def _layout_cue(cue):
+    """歌词/招牌/标题：空格与省略句号都是排版，不计入标点缺陷。"""
+    style = _cue_style(cue)
+    return bool(LYRIC_STYLE.search(style) or SIGN_STYLE.search(style))
+
+
 def score_episode(zh_cues, src_cues=None):
     """单集质量画像。src_cues 缺失时跳过 echo / 条数漂移。"""
     total = len(zh_cues)
     cyrillic = kana = echo = cjk_space = nopunct = overlong = 0
     for i, cue in enumerate(zh_cues):
+        raw = str(cue.get('text') or '')
+        if DRAWING.search(raw):
+            continue
         text = _text(cue)
         if not text:
             continue
@@ -78,10 +95,11 @@ def score_episode(zh_cues, src_cues=None):
             cyrillic += 1
         if count_kana(text):
             kana += 1
-        if spaced_as_punctuation(text):
-            cjk_space += 1
-        if len(text) > 8 and not PUNCT.search(text):
-            nopunct += 1
+        if not _layout_cue(cue):
+            if spaced_as_punctuation(text):
+                cjk_space += 1
+            if len(text) > 8 and not PUNCT.search(text):
+                nopunct += 1
         if len(text) > 22:
             overlong += 1
         if src_cues is not None and i < len(src_cues):

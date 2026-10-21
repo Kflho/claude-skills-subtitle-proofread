@@ -22,20 +22,22 @@ def count_kana(text: str) -> int:
 
 
 TAG_RE = re.compile(r'<[^>]+>|\{[^}]*\}')
+# ASS 换行/硬空格标记：不是可见字符，不能算进长度和英文残留
+ASS_BREAK_RE = re.compile(r'\\[Nh]')
 
 
 def strip_tags(text: str) -> str:
-    """去掉 ASS 覆盖标签 / HTML 标签，只留可见正文。
+    """去掉 ASS 覆盖标签 / HTML 标签 / `\\N` 换行标记，只留可见正文。
 
     闸门必须按可见正文判：`{\\fad(100,100)}` 里的 fad 会被拉丁字母检测
-    当成英文残留，标签内的西里尔也可能误报。长度/CPS 另用 clean_text。
+    当成英文残留，`\\N-` 里的 `N-` 也会。长度/CPS 另用 clean_text。
     """
-    return TAG_RE.sub('', text or '')
+    return ASS_BREAK_RE.sub('', TAG_RE.sub('', text or ''))
 
 
 def clean_text(text: str) -> str:
     """Visible characters for length/CPS: drop whitespace, HTML/ASS tags."""
-    return re.sub(r'\s+', '', TAG_RE.sub('', text or ''))
+    return re.sub(r'\s+', '', ASS_BREAK_RE.sub('', TAG_RE.sub('', text or '')))
 
 
 def is_untranslated(source: str, target: str) -> bool:

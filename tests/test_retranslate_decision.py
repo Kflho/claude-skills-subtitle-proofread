@@ -65,6 +65,15 @@ def test_score_reports_cue_count_drift():
     assert score['src_cues'] == 4
 
 
+def test_score_ignores_vector_drawing_cues():
+    """`{\\p1}m 3 19 b …` 是图形，不是没翻译的字幕。"""
+    cues = [_cue(r'{\p1}m 3 19 b 2 18 -2 18{\p0}'), _cue('你好')]
+    score = rd.score_episode(cues, cues)
+    assert score['echo'] == 0
+    assert score['overlong'] == 0
+    assert score['nopunct'] == 0
+
+
 def test_aggregate_uses_cue_count_as_denominator():
     scores = [rd.score_episode([_cue('Привет')] * 3),
               rd.score_episode([_cue('你好')] * 7)]

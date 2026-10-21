@@ -177,13 +177,22 @@ def test_gate_skips_cjk_space_for_lyric_style(tmp_path):
     path = tmp_path / 'EP003.ass'
     path.write_text(ASS_HEAD + body + '\n', encoding='utf-8')
     assert text_gate.check_file(str(path))['cjk_space'] == 0
-    payload = text_gate.check_file
-    assert payload is not None
-    # 计数键必须存在，下游 report 才拿得到
+
+
+def test_gate_check_file_reports_new_counters():
     import inspect
     src = inspect.getsource(text_gate.check_file)
     assert "'cyrillic': cyrillic" in src
     assert "'cjk_space': cjk_space" in src
+
+
+def test_strip_tags_removes_line_break_markers():
+    """`\\N` 不是可见字符；`\\N-` 里的 `N-` 曾被算成英文残留。"""
+    from lib.translation.qa import clean_text, strip_tags
+
+    assert strip_tags(r'第一行\N第二行') == '第一行第二行'
+    assert strip_tags(r'{\fad(100,100)}\N- 喂') == '- 喂'
+    assert clean_text(r'甲\N乙') == '甲乙'
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -49,6 +49,8 @@ CYRILLIC = re.compile(r"[\u0400-\u04FF]")
 CJK_SPACE = re.compile(r"[\u4e00-\u9fff]\s+[\u4e00-\u9fff]")
 PUNCT_ANY = re.compile(r"[，。！？…、,.!?~～；：]")
 LYRIC_STYLE = re.compile(r"(opening|ending|lyric|song)", re.I)
+# 招牌/标题/字幕组署名这类样式用空格排版是常态（「圣 诞 蛋 糕」「鬼泽 愚」）
+SIGN_STYLE = re.compile(r"(title|display|sign|episode|credit|roboto)", re.I)
 
 
 def spaced_as_punctuation(text: str) -> bool:
@@ -79,6 +81,8 @@ def check_file(zh_path: str, *, source_path: str = '', normalizer=None,
         # 拉丁字母和超长句。这类 cue 直接跳过。
         if re.search(r'\\p\d', raw):
             continue
+        if not text:
+            continue                # 空白 cue 是刻意的静音行，不是没翻译
         if count_kana(text):
             kana += 1
             reasons.append('kana')
@@ -86,7 +90,9 @@ def check_file(zh_path: str, *, source_path: str = '', normalizer=None,
             cyrillic += 1
             reasons.append('cyrillic')
         style = str(((cue.get('_ass_dialogue') or {}).get('style')) or '')
-        if spaced_as_punctuation(text) and not LYRIC_STYLE.search(style):
+        if (spaced_as_punctuation(text)
+                and not LYRIC_STYLE.search(style)
+                and not SIGN_STYLE.search(style)):
             cjk_space += 1
             reasons.append('cjk_space')
         if src and i < len(src) and is_untranslated(
