@@ -117,3 +117,23 @@ def test_allow_surfaces_can_whitelist_a_kanji_homophone(entries, tokenizer):
                          allow_surfaces=['位置'])
     assert out == '市に行く'
     assert hits[0]['from'] == '位置'
+
+
+def test_repeated_characters_do_not_shift_the_span(entries, tokenizer):
+    """Offsets come from token surfaces, not ``text.find``.
+
+    Regression: 鈴野スケを was rewritten as 鈴鈴之助お because ``find``
+    re-located an already-consumed 鈴.
+    """
+    out, hits = fix_text('次週はサブをお楽しみに', entries, tokenizer=tokenizer)
+    assert out == '次週は佐武をお楽しみに'
+    assert (hits[0]['start'], hits[0]['end']) == (3, 5)
+
+
+def test_overlapping_characters_between_tokens(entries, tokenizer):
+    """Two names back to back keep their own spans (no char drift)."""
+    out, hits = fix_text('サブとイチサブ', entries, tokenizer=tokenizer)
+    assert out == '佐武と市佐武'
+    spans = [(h['start'], h['end']) for h in hits]
+    assert spans == sorted(spans)
+    assert len({h['start'] for h in hits}) == len(hits)

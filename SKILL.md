@@ -305,6 +305,26 @@ python scripts/run_all.py --asr qwen3 --audio-hints
 
 > Whisper 系按用户规则**不下载、不再测试**；本机只保留 whisper.cpp CUDA（路径由 `WHISPER_CLI` 指定）。
 
+### Qwen3-ASR 单集转写：先测吞吐，再铺全量
+
+52 集 × 25 分钟 = 21 小时音频，参数选错就是十几小时差价。本机（3080 Ti Laptop）
+实测，`qwen3_transcribe.py` 三个旋钮：
+
+| 旋钮 | 建议 | 原因 |
+|---|---|---|
+| `--chunk-sec` | **20** | 60 秒块在旧片源上会出现 50 秒长 cue、对齐塌到块尾；20 秒 ≈ 16 条/集 0 时长，最长 cue 16 秒 |
+| `--max-batch` | **8** | worker 旧版把 `max_inference_batch_size` 写死成 1，GPU 只有 24% 利用率 |
+| token 预算（自动） | 块长×14 | 一块 20 秒给 ~280 token；不设上限时脏块会一直生成到 1024，EP002 单集从 4 分钟变 30+ 分钟 |
+
+- `--max-batch` 是每次 `generate()` 的块数，8 块 × 20 秒 ≈ 160 秒音频一批；显存 16 GB 上占 ~13 GB，想更稳降到 4；
+- **不要并行跑两个 worker**：显存顶到 16 GB、GPU 87 °C 降频，两集合计比串行还慢；
+- 串行实测：对话密集集 3.5–6 分钟/集，片头唱段多的集会慢一些（幻觉块撞预算）；
+- 全套 52 集约 4 小时，中途中断直接重跑同一命令即可（已有 SRT 会跳过）。
+
+> 片头/片尾唱段：ASR 对唱词基本是乱写（`超大な鼓動へ` 这类），且 ForcedAligner 不给
+> 时间戳（0 时长 cue 集中在 OP/ED）。合成片要发之前，OP/ED 用 `_meta.fixed_lines`
+> 或 oped_fixer 统一，别指望 ASR 出对歌词。
+
 ### 资源获取（B 站链接）
 
 只有 B 站链接时，用 Bili23 Downloader（v2.20，GUI）自带的 MCP 下载视频+字幕。

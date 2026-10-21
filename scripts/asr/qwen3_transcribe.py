@@ -140,6 +140,13 @@ def main(argv: list[str] | None = None) -> int:
                         choices=['bfloat16', 'float16', 'float32'])
     parser.add_argument('--output', default='', help='ASR JSON output path')
     parser.add_argument('--srt', default='', help='optional SRT output path')
+    parser.add_argument('--chunk-sec', type=float, default=0.0,
+                        help='seconds per ASR chunk; 0 = engine default. '
+                             '20 beats 60 on noisy 1972 TV audio (fewer run-on '
+                             'cues, ~15x faster)')
+    parser.add_argument('--max-batch', type=int, default=8,
+                        help='chunks decoded per generate() call; 1 leaves the '
+                             'GPU mostly idle')
     parser.add_argument('--work-dir', default='temp/qwen3_asr')
     parser.add_argument('--check', action='store_true',
                         help='check interpreter/model deps and exit')
@@ -188,7 +195,9 @@ def main(argv: list[str] | None = None) -> int:
         python=args.python or '',
         device=args.device,
         dtype=args.dtype,
-        options={'whisper_model': whisper_model},
+        options={'whisper_model': whisper_model,
+                 'chunk_sec': args.chunk_sec,
+                 'max_batch': args.max_batch},
     )
 
     router = ASRRouter(engine=engine, fallback='none', config=config)

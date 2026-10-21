@@ -22,6 +22,11 @@ Deliberate limits
 -----------------
 - the reading table is review-built: janome reads 佐武 as サタケ and 市 as シ,
   so its readings cannot be trusted for names;
+- a kanji homophone is only rewritten when its surface is listed in
+  ``_meta.namefix_allow_surfaces`` (赤道 read セキドウ for 赤胴), otherwise the
+  repair would hit ordinary words;
+- the table has to key on what **janome** reads, not on the true reading:
+  赤道 (ASR's spelling of 赤胴) reads セキドウ, so the entry says セキドウ;
 - short katakana near-misses (<5 mora, no kanji) are *not* rewritten — that is
   where loanwords live (サプリ/サブレ…), and a wrong rewrite is worse than a
   residual error;
@@ -160,12 +165,18 @@ def propose_repairs(text: str, entries: list[NameEntry], tokenizer=None,
         tokenizer = Tokenizer()
     tokens = list(tokenizer.tokenize(text))
     spans = []          # (char_start, char_end, surface, token, reading)
+    # Walk by accumulated surface length: janome surfaces concatenate back to
+    # the input, while ``text.find(surface, cursor)`` drifts as soon as a
+    # character repeats (鈴野スケを → 鈴鈴之助お on EP002).
     cursor = 0
     for token in tokens:
         surface = token.surface
-        start = text.find(surface, cursor)
-        if start < 0:
-            start = cursor
+        start = cursor
+        if text[start:start + len(surface)] != surface:
+            found = text.find(surface, cursor)
+            if found < 0:
+                continue
+            start = found
         end = start + len(surface)
         spans.append((start, end, surface, token, _reading_of(token)))
         cursor = end
@@ -233,14 +244,25 @@ def propose_repairs(text: str, entries: list[NameEntry], tokenizer=None,
 
 
 def apply_repairs(text: str, repairs: list[dict]) -> str:
-    """Apply approved proposals to one line (idempotent for the same set)."""
+    """Apply approved proposals to one line (idempotent for the same set).
+
+    Spans are positions in the *original* text, so every repair for a cue has
+    to go through one call: applying them one by one against the shrinking
+    text shifts the later ones by a character (鈴野スケ→鈴之助 then a second
+    repair one char to the right produced 鈴鈴之助).  Overlapping spans are
+    skipped rather than allowed to corrupt the line.
+    """
     if not repairs:
         return text
     out, pos = [], 0
-    for hit in sorted(repairs, key=lambda h: h['start']):
-        out.append(text[pos:hit['start']])
-        out.append(hit['to'])
-        pos = hit['end']
+    for hit in sorted(repairs, key=lambda h: (h.get('start', 0),
+                                              h.get('end', 0))):
+        start, end = hit.get('start', 0), hit.get('end', 0)
+        if start < pos or end <= start:
+            continue
+        out.append(text[pos:start])
+        out.append(str(hit.get('to') or ''))
+        pos = end
     out.append(text[pos:])
     return ''.join(out)
 

@@ -274,11 +274,16 @@ def main(argv=None):
             for episode, rows in by_episode.items():
                 path, cues = files[episode]
                 repaired = list(cues)
+                # Group per cue and apply in one call: the spans are positions
+                # in the original text, so applying them one by one against
+                # the already-shortened text shifts every later repair.
+                by_cue = {}
                 for row in rows:
-                    idx = row['cue'] - 1
+                    by_cue.setdefault(row['cue'] - 1, []).append(row)
+                for idx, group in by_cue.items():
                     text = str(repaired[idx].get('text') or '')
                     repaired[idx] = dict(repaired[idx],
-                                         text=apply_repairs(text, [row]))
+                                         text=apply_repairs(text, group))
                 if args.in_place:
                     _backup(path)
                     target = path

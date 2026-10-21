@@ -209,7 +209,7 @@ class QwenRuntime:
                 dtype=dtype, device_map=self.args.device)
         self.model = Qwen3ASRModel.from_pretrained(
             self.args.asr,
-            max_inference_batch_size=1,
+            max_inference_batch_size=int(getattr(self.args, 'max_batch', 8) or 8),
             max_new_tokens=self.args.max_new_tokens,
             **kwargs,
         )
@@ -314,6 +314,11 @@ class QwenRuntime:
         the split here keeps every alignment request short and gives us the
         offsets explicitly.
 
+        All chunks go through one ``transcribe()`` call so qwen_asr batches
+        them by ``max_inference_batch_size``.  Calling it per chunk (the old
+        behaviour) left the GPU ~75 % idle: the 1.7B model on a 3080 Ti took
+        0.42x realtime that way.
+
         ``chunk_boundaries`` (seconds) lets the caller cut at AED speech gaps
         instead of fixed ``chunk_sec`` intervals.
         """
@@ -337,21 +342,35 @@ class QwenRuntime:
                                             max_chunk_sec=chunk_sec)
         joiner = '' if language_name(requested_language) == 'Japanese' else ' '
 
+        # Cap the decode budget per chunk: Japanese dialogue needs roughly
+        # 8-12 tokens per second, so a 20 s chunk is done by ~250 tokens.
+        # Leaving the flat 1024-token ceiling in place lets one hallucinating
+        # chunk burn 100 s (measured on EP002: 53 chunks took 30+ minutes
+        # because every chunk ran to max_new_tokens).
+        longest = max((len(w) / float(sr or SAMPLE_RATE)) for w, _ in parts) \
+            if parts else 0.0
+        budget = max(96, int(longest * 14))
+        self.model.max_new_tokens = min(int(self.args.max_new_tokens), budget)
+
+        language = language_name(requested_language)
+        results = self.model.transcribe(
+            audio=[(chunk_wav, sr) for chunk_wav, _ in parts],
+            context=context,
+            language=language,
+            return_time_stamps=want_ts,
+        ) or []
+
         texts: list[str] = []
         tokens: list[Token] = []
         segments: list[Segment] = []
 
-        for chunk_wav, offset in parts:
-            results = self.model.transcribe(
-                audio=(chunk_wav, sr),
-                context=context,
-                language=language_name(requested_language),
-                return_time_stamps=want_ts,
-            )
-            if not results:
+        for index, (chunk_wav, offset) in enumerate(parts):
+            part = results[index] if index < len(results) else None
+            if part is None:
+                # The library answers one item per chunk; anything shorter is
+                # a truncated response, not something to guess around.
                 continue
-            part = results[0]
-            part_text = part.text or ''
+            part_text = getattr(part, 'text', '') or ''
             texts.append(part_text)
 
             part_tokens = _align_items_to_tokens(
@@ -375,7 +394,9 @@ class QwenRuntime:
         duration = len(wav) / float(sr or SAMPLE_RATE)
         if tokens:
             _fill_zero_durations(tokens)   # cross-chunk boundary runs
-        _log(f'chunked: {len(parts)} chunks, {len(tokens)} tokens')
+        _log(f'chunked: {len(parts)} chunks, {len(tokens)} tokens, '
+             f'batch={getattr(self.args, "max_batch", "?")}, '
+             f'token_budget={self.model.max_new_tokens}')
         return joiner.join(texts), tokens, segments, duration, len(parts)
 
     def align(self, payload: dict) -> dict:
@@ -494,6 +515,11 @@ def main(argv: list[str] | None = None) -> int:
                         choices=['bfloat16', 'float16', 'float32'])
     parser.add_argument('--attn-implementation', default='')
     parser.add_argument('--max-new-tokens', type=int, default=1024)
+    parser.add_argument(
+        '--max-batch', type=int, default=8,
+        help='chunks decoded per generate() call; 1 serialises everything and '
+             'leaves the GPU ~75%% idle (measured on a 3080 Ti: single chunk '
+             '0.42x realtime, batch 8 several times faster)')
     parser.add_argument(
         '--chunk-sec', type=float, default=60.0,
         help='split long audio into <=N-second low-energy chunks before ASR; '

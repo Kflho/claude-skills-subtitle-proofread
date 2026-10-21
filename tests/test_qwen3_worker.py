@@ -410,16 +410,18 @@ class TestChunkedTranscribe:
         assert result['audio_duration'] == 5.0
         assert result['tokens'][0]['start'] == 1.0
         assert result['text'] == '短い。'
-        chunk_audio, sample_rate = model.calls[0]['audio']
+        audios = model.calls[0]['audio']
+        assert isinstance(audios, list) and len(audios) == 1
+        chunk_audio, sample_rate = audios[0]
         assert (len(chunk_audio), sample_rate) == (5, 1.0)
 
     def test_chunk_boundaries_split_at_given_cuts(self, tmp_path, fake_qwen_asr):
         fake_qwen_asr(duration=10.0)
-        model = FakeModel([
-            [_part('あ。', _item('あ', 0.2, 0.4))],
-            [_part('い。', _item('い', 0.2, 0.4))],
-            [_part('う。', _item('う', 0.2, 0.4))],
-        ])
+        model = FakeModel([[
+            _part('あ。', _item('あ', 0.2, 0.4)),
+            _part('い。', _item('い', 0.2, 0.4)),
+            _part('う。', _item('う', 0.2, 0.4)),
+        ]])
         runtime = _runtime(model, chunk_sec=0.0)
 
         result = runtime.transcribe({
@@ -427,24 +429,27 @@ class TestChunkedTranscribe:
             'chunk_boundaries': [2.0, 5.0],
         })
 
-        assert len(model.calls) == 3
+        assert len(model.calls) == 1
+        assert len(model.calls[0]['audio']) == 3
         assert result['meta']['chunks'] == 3
         assert result['meta']['chunk_boundaries'] == [2.0, 5.0]
         assert [t['start'] for t in result['tokens']] == [0.2, 2.2, 5.2]
 
     def test_long_audio_offsets_are_merged(self, tmp_path, fake_qwen_asr):
         fake_qwen_asr(duration=130.0)
-        model = FakeModel([
-            [_part('あ。', _item('あ', 0.2, 0.4))],
-            [_part('い。', _item('い', 0.2, 0.4))],
-            [_part('う。', _item('う', 0.2, 0.4))],
-        ])
+        model = FakeModel([[
+            _part('あ。', _item('あ', 0.2, 0.4)),
+            _part('い。', _item('い', 0.2, 0.4)),
+            _part('う。', _item('う', 0.2, 0.4)),
+        ]])
         runtime = _runtime(model)
 
         result = runtime.transcribe({'audio': _audio_path(tmp_path),
                                      'language': 'ja', 'timestamps': True})
 
-        assert len(model.calls) == 3
+        # One batched call, three chunks inside it.
+        assert len(model.calls) == 1
+        assert len(model.calls[0]['audio']) == 3
         assert result['meta']['chunks'] == 3
         assert result['text'] == 'あ。い。う。'
         assert [t['text'] for t in result['tokens']] == ['あ', 'い', 'う']
@@ -456,10 +461,10 @@ class TestChunkedTranscribe:
 
     def test_english_chunks_join_with_space(self, tmp_path, fake_qwen_asr):
         fake_qwen_asr(duration=90.0)
-        model = FakeModel([
-            [_part('hello', _item('hello', 0.1, 0.4))],
-            [_part('world', _item('world', 0.1, 0.4))],
-        ])
+        model = FakeModel([[
+            _part('hello', _item('hello', 0.1, 0.4)),
+            _part('world', _item('world', 0.1, 0.4)),
+        ]])
         runtime = _runtime(model)
 
         result = runtime.transcribe({'audio': _audio_path(tmp_path),
@@ -472,45 +477,51 @@ class TestChunkedTranscribe:
 
     def test_payload_chunk_sec_overrides_args(self, tmp_path, fake_qwen_asr):
         fake_qwen_asr(duration=130.0)
-        model = FakeModel([[_part('x', _item('x', 0.0, 0.1))]])
+        model = FakeModel([[
+            _part('x', _item('x', 0.0, 0.1)),
+            _part('x', _item('x', 0.0, 0.1)),
+            _part('x', _item('x', 0.0, 0.1)),
+            _part('x', _item('x', 0.0, 0.1)),
+            _part('x', _item('x', 0.0, 0.1)),
+        ]])
         runtime = _runtime(model, chunk_sec=60.0)
 
         result = runtime.transcribe({'audio': _audio_path(tmp_path),
                                      'chunk_sec': 30, 'timestamps': True})
 
-        assert len(model.calls) == 5
+        assert len(model.calls[0]['audio']) == 5
         assert result['meta']['chunk_sec'] == 30.0
         assert result['meta']['chunks'] == 5
         assert [t['start'] for t in result['tokens']] == [0.0, 30.0, 60.0,
                                                           90.0, 120.0]
 
-    def test_chunk_without_result_is_skipped(self, tmp_path, fake_qwen_asr):
+    def test_short_result_list_pads_missing_chunks(self, tmp_path,
+                                                   fake_qwen_asr):
+        """A truncated batched response must not shift later chunks' offsets."""
         fake_qwen_asr(duration=130.0)
-        model = FakeModel([
-            [],
-            [_part('い。', _item('い', 0.1, 0.2))],
-            [],
-        ])
+        model = FakeModel([[
+            _part('い。', _item('い', 0.1, 0.2)),
+        ]])
         runtime = _runtime(model)
 
         result = runtime.transcribe({'audio': _audio_path(tmp_path),
                                      'timestamps': True})
 
-        assert len(model.calls) == 3
+        assert len(model.calls[0]['audio']) == 3
         assert result['text'] == 'い。'
         assert result['meta']['chunks'] == 3
         assert [(t['start'], t['end']) for t in result['tokens']] == [
-            (60.1, 60.2)]
-        assert [s['start'] for s in result['segments']] == [60.1]
+            (0.1, 0.2)]
+        assert [s['start'] for s in result['segments']] == [0.1]
 
     def test_chunk_without_timestamps_uses_chunk_span(self, tmp_path,
                                                       fake_qwen_asr):
         fake_qwen_asr(duration=130.0)
-        model = FakeModel([
-            [],
-            [SimpleNamespace(text='本文', time_stamps=None)],
-            [],
-        ])
+        model = FakeModel([[
+            SimpleNamespace(text='', time_stamps=None),
+            SimpleNamespace(text='本文', time_stamps=None),
+            SimpleNamespace(text='', time_stamps=None),
+        ]])
         runtime = _runtime(model)
 
         result = runtime.transcribe({'audio': _audio_path(tmp_path),
@@ -525,12 +536,12 @@ class TestChunkedTranscribe:
     def test_zero_durations_filled_within_and_across_chunks(
             self, tmp_path, fake_qwen_asr):
         fake_qwen_asr(duration=120.0)
-        model = FakeModel([
-            [_part('あい', _item('あ', 59.4, 59.6),
-                  _item('い', 59.6, 59.6))],
-            [_part('うえお。', _item('う', 0.1, 0.3), _item('え', 0.3, 0.3),
-                  _item('お', 0.4, 0.6))],
-        ])
+        model = FakeModel([[
+            _part('あい', _item('あ', 59.4, 59.6),
+                  _item('い', 59.6, 59.6)),
+            _part('うえお。', _item('う', 0.1, 0.3), _item('え', 0.3, 0.3),
+                  _item('お', 0.4, 0.6)),
+        ]])
         runtime = _runtime(model)
 
         result = runtime.transcribe({'audio': _audio_path(tmp_path),
@@ -550,16 +561,13 @@ class TestChunkedTranscribe:
 
     def test_chunk_error_propagates(self, tmp_path, fake_qwen_asr):
         fake_qwen_asr(duration=130.0)
-        model = FakeModel([
-            [_part('あ。', _item('あ', 0.1, 0.2))],
-            RuntimeError('CUDA out of memory'),
-        ])
+        model = FakeModel([RuntimeError('CUDA out of memory')])
         runtime = _runtime(model)
 
         with pytest.raises(RuntimeError, match='out of memory'):
             runtime.transcribe({'audio': _audio_path(tmp_path),
                                 'timestamps': True})
-        assert len(model.calls) == 2
+        assert len(model.calls) == 1
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -783,7 +791,8 @@ class TestRuntimeLoading:
         kwargs = captured['kwargs']
         assert kwargs['dtype'] is fake_torch.float32
         assert kwargs['device_map'] == 'cpu'
-        assert kwargs['max_inference_batch_size'] == 1
+        # Batching is required for throughput: batch 1 left the GPU ~75% idle.
+        assert kwargs['max_inference_batch_size'] == 8
         assert kwargs['max_new_tokens'] == 1024
         assert kwargs['attn_implementation'] == 'sdpa'
         assert kwargs['forced_aligner'] == 'fake-aligner'

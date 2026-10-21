@@ -58,6 +58,7 @@ class Qwen3WorkerClient:
                  device: str | None = None,
                  dtype: str = 'bfloat16',
                  max_new_tokens: int = 4096,
+                 max_batch: int = 8,
                  attn_implementation: str = '',
                  project_root: str | Path | None = None,
                  startup_timeout: float = 60.0,
@@ -70,6 +71,7 @@ class Qwen3WorkerClient:
         self.device = device or ASR_DEVICE
         self.dtype = dtype
         self.max_new_tokens = max_new_tokens
+        self.max_batch = int(max_batch or 8)
         self.attn_implementation = attn_implementation
         self.project_root = Path(project_root) if project_root else self.worker_script.parents[2]
         self.startup_timeout = startup_timeout
@@ -115,6 +117,7 @@ class Qwen3WorkerClient:
             '--device', str(self.device),
             '--dtype', self.dtype,
             '--max-new-tokens', str(self.max_new_tokens),
+            '--max-batch', str(self.max_batch),
         ]
         if self.attn_implementation:
             cmd.extend(['--attn-implementation', self.attn_implementation])
@@ -373,12 +376,14 @@ def build(config: ASRConfig, **kwargs) -> Qwen3ASRBackend:
         dtype=kwargs.get('dtype') or config.dtype,
         max_new_tokens=(kwargs.get('max_new_tokens')
                         or config.max_new_tokens or 4096),
+        max_batch=(kwargs.get('max_batch')
+                   or config.option('max_batch', 8)),
         request_timeout=(kwargs.get('request_timeout')
                          or config.request_timeout or 1800),
         chunk_sec=(kwargs.get('chunk_sec')
                    or config.option('chunk_sec', 0.0)),
         **{k: v for k, v in kwargs.items()
            if k not in {'python_exe', 'asr_model', 'aligner_model',
-                        'device', 'dtype', 'max_new_tokens',
+                        'device', 'dtype', 'max_new_tokens', 'max_batch',
                         'request_timeout', 'chunk_sec'}},
     )

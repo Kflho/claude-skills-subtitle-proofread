@@ -155,6 +155,24 @@ class TestJsonOutput:
         assert '[qwen3] wrote' in err
         assert '[qwen3] done:' in err
 
+    def test_chunk_sec_forwarded_to_engine_options(self, tmp_path,
+                                                   fake_router):
+        fake_router.result = _result()
+        audio = _audio_file(tmp_path)
+
+        rc = cli.main(['--audio', str(audio), '--chunk-sec', '20'])
+
+        assert rc == 0
+        assert fake_router.instances[0].config.option('chunk_sec') == 20.0
+
+    def test_chunk_sec_defaults_to_engine_choice(self, tmp_path, fake_router):
+        fake_router.result = _result()
+
+        cli.main(['--audio', str(_audio_file(tmp_path))])
+
+        # 0 means "engine default" — the adapter decides the real chunk size.
+        assert fake_router.instances[0].config.option('chunk_sec') == 0.0
+
     def test_prints_json_when_no_output_path(self, tmp_path, fake_router,
                                              capsys):
         fake_router.result = _result()
