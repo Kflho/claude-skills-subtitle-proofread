@@ -156,6 +156,23 @@ python "<scripts-dir>/nouns/context_review.py" ... --mode oped \
 
 > **注意**：如果项目是 ASS 格式，`--input-dir` 指向包含 `.ass` 文件的目录即可。Pipeline 会像处理 SRT 一样处理 ASS，输出保持 ASS 格式。
 
+写回 ASS 时有四条已经踩过的坑，改 `lib/subtitle_io.py` 前先看 `tests/test_ass_writeback.py`：
+
+- **样式/层/边距跟着 cue 走**：新文件模式不再把所有行写成 `Default`，否则标题、
+  招牌、歌词轨的定位全丢（实测 443 条全掉到底部）；
+- **时间码按位数判精度**：ASS 是百分秒（`44.54`），SRT 是毫秒（`44,540`），
+  混着当毫秒读会把整集轴往前缩；
+- **`{\fad}`/`{\pos}` 不进翻译**：翻译前拆出来，写盘前拼回去，模型看不到标签就不会删；
+- **译文里的真换行折成 `\N`**：模型偶尔在 JSON 里写 `\n`，直接写进 `Dialogue:`
+  会把一条拆成两行、后面那条变成孤立文本。
+
+```bash
+# 写完先扫结构：条数应与源一致，且没有以非 Dialogue 开头的游离行
+python -c "
+from lib.subtitle_io import read_subtitles
+print(len(read_subtitles('out/EP001.ass', mark_garbled=False)))"
+```
+
 ## 行为分级：哪些默认做，哪些等指令
 
 每个会**写盘**的行为都在 `lib/gates.py` 登记一个级别。判据只有一条：
@@ -520,6 +537,7 @@ export LLM_BASE_URL='https://api.deepseek.com/v1'
 | 专名分类 | ✅ (jamdict) | ✅ (jieba + 规则) | ❌ | ❌ |
 | Glossary 清洗 | ✅ (JMdict + 规则) | ✅ (jieba 词典 + 规则) | ❌ | ❌ |
 | AI 润色（去翻译腔） | ❌ (日语原文无需) | ✅ (OpenAI 兼容 API) | ✅ (同 zh) | ✅ (同 zh) |
+| 质量闸门 | ✅ 假名/回显 | ✅ 假名/回显 | ✅ **西里尔残留**/空格断句 | — |
 
 > `translate_srt.py` **自动检测源语言**（ja/ru/zh），动态切换 system prompt，无需手动指定。
 > 日语检测到假名时启用专用规则（敬语、主语省略等），非日语跳过。
@@ -549,6 +567,42 @@ export LLM_BASE_URL='https://api.deepseek.com/v1'
 > python "<scripts>/translate_srt.py" --input-dir "<源字幕>" --output-dir "<中文输出>"
 > # 源语言自动检测，system prompt 动态适配
 > ```
+
+### 俄语源（ru→zh）项目
+
+`translate_srt.py` 对 ru 自动换提示词：专名按「固定译名参考」音译、禁止把西里尔字母
+留在译文里、中文全角标点、保留原文的 `\N` 分行。前两条要落到 `--mappings` 才稳：
+先给一份 `ru→zh` 扁平表，同一角色的每种俄语写法各写一条，否则一集里会出现两三个名字。
+
+```bash
+# 1. 重译（保留 ASS 样式和时间轴，条数不动）
+python "<scripts>/translate_srt.py" \
+  --input-dir "references/俄语参考字幕/TV" --output-dir "data/zh" \
+  --mappings "data/glossaries/<series>.ru-zh.json" \
+  --max-chars 20 --max-cps 12
+
+# 2. 闸门：西里尔残留和「空格断句」都必须是 0
+python "<scripts>/eval/text_gate.py" --zh-dir "data/zh" \
+  --source-dir "references/俄语参考字幕/TV" \
+  --max-cyrillic 0 --max-cjk-space 0 --max-kana 0
+```
+
+**OP/ED 匹配**：有 ASS 样式名（`Opening*` / `Ending*` / `Lyrics`）就按样式认歌词段，
+没有才退回固定时间窗——180s 的窗口会把开篇对白当成 OP（实测 EP001 正片 1:44 就开场）。
+整部作品只翻一次，按原文逐句复用；同一时间点有罗马音和译本两轨时，只翻源语言那条，
+另一轨复用同一句中文。
+
+**旧稿要不要重翻**：先量再决定。
+
+```bash
+python "<scripts>/eval/retranslate_decision.py" \
+  --zh-dir "<旧译文>" --source-dir "<源字幕>" --report "data/reports/decision.json"
+```
+
+判 RETRANSLATE 的四条：西里尔/假名残留、原文回显 > 0.5%、标点缺陷 > 25%、
+与源字幕条数漂移 > 5%（丢条/合并是修不回来的）。5%–25% 判 PATCH，只重写问题条；
+< 5% 判 KEEP。输出同时列出「重译」和「定向修」的调用量与墙钟时间，
+`--price-in/--price-out`（元/百万 token）可折成钱。
 
 翻译项目**必须先准备 `temp/noun_mappings.json`**（ja→zh 幻觉控制表），否则专名翻译不一致。
 

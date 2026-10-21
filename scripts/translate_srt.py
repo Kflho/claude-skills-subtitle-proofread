@@ -35,8 +35,9 @@ import re
 import sys
 import time
 import urllib.request
-from collections import Counter
+from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from difflib import SequenceMatcher
 
 import lib._path  # noqa: F401
 from lib.whisper_utils import parse_subtitles, write_subtitles, OP_BOUNDARY_SEC, ED_BOUNDARY_SEC
@@ -54,6 +55,7 @@ from lib.translation.qa import qa_report
 # ═══════════════════════════════════════════════════════════════
 
 BATCH_SIZE = 20   # cues per API call; 20 beat 5/10/30/50 on EP001–003
+MIN_SPLIT_BATCH = 5   # halve a failing batch no further than this
 DELAY = 1.0       # seconds between batches
 
 # ═══════════════════════════════════════════════════════════════
@@ -106,13 +108,21 @@ def _build_system_prompt(source_lang, max_chars: int = 0,
     """Build system prompt with language-specific rules."""
     lang_name = {'ja': '日语', 'ru': '俄语', 'zh': '中文', 'other': '外语'}.get(source_lang, '外语')
 
+    # 专名规则按源语言分叉：日语取「不改变原文」，俄语必须音译成中文，
+    # 否则模型会照抄西里尔字母（实测整条留俄文）。
+    if source_lang == 'ru':
+        noun_rule = ('角色名、地名、咒语按「固定译名参考」写；表里没有的俄语专名'
+                     '音译成中文，禁止把西里尔字母留在译文里')
+    else:
+        noun_rule = '角色名、地名、组织名、术语不改变原文'
+
     base = f"""你是动画字幕翻译专家。将{lang_name}字幕翻译为自然口语化的中文。
 
 规则：
 1. **准确翻译**：保持原意，不增不减
 2. **口语化**：用自然中文口语表达，避免翻译腔
    - 书面词换口语词（"如何"→"怎么"、"迅速"→"快"）
-3. **保持专有名词**：角色名、地名、组织名、术语不改变原文
+3. **专有名词**：{noun_rule}
 4. **字幕长度适中**：翻译后不应明显变长或变短"""
 
     # Japanese-specific rules
@@ -120,6 +130,18 @@ def _build_system_prompt(source_lang, max_chars: int = 0,
         base += """
    - 省略冗余主语（日语主语常可省略）
    - 敬语适度（です/ます 不一定翻成"请"）"""
+
+    # Russian-specific rules
+    if source_lang == 'ru':
+        base += """
+5. **俄语特有**：
+   - 俄语语序（前置词短语后置、否定前置）按中文习惯重排，不要逐词直译
+   - 呼语、-тян/-чка 这类亲昵后缀不单独译出（写"莎莉"而不是"莎莉酱"），
+     除非「固定译名参考」明确要求
+   - 全程中文全角标点；一条字幕内部用"，"断句，禁止用空格代替逗号
+   - 保留原文的分行：原文用 \\N 分两行，译文照旧分两行
+   - 原文里混入的乌克兰语/方言（俄语字幕常用它表现关西腔）译成带口语
+     色彩的中文，不要当成俄语错误或照搬原文"""
 
     if max_chars > 0 or max_cps > 0:
         limits = []
@@ -138,10 +160,10 @@ def _build_system_prompt(source_lang, max_chars: int = 0,
     return base
 
 
-USER_TEMPLATE = """上下文（前几条日文原文，帮助理解语流）：
+USER_TEMPLATE = """上下文（前几条{lang_name}原文，帮助理解语流）：
 {context_before}
 
-本次要翻译的字幕（日文）：
+本次要翻译的字幕（{lang_name}）：
 {targets}
 
 固定译名参考（必须使用）：
@@ -245,6 +267,15 @@ def _time_to_seconds(ts):
     return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3)) + int(m.group(4)) / 1000
 
 
+def _cue_style(cue):
+    """ASS 里取样式名；SRT 没有样式信息，返回空串。"""
+    return str(((cue.get('_ass_dialogue') or {}).get('style')) or '')
+
+
+# 字幕组给 OP/ED 起的样式名：Opening Romaji / Ending / Lyrics / Song ...
+LYRIC_STYLE_RE = re.compile(r'(opening|ending|lyric|song|kashi)', re.I)
+
+
 def _is_oped_region(cue_start_s, cue_end_s, total_duration_s):
     """Check if a cue falls in OP (first N s) or ED (last N s) region."""
     if cue_start_s <= OP_BOUNDARY_SEC:
@@ -262,13 +293,120 @@ def _pick_oped_canonical(variants):
     return max(variants, key=variants.get)
 
 
-def collect_oped_across_episodes(input_dir, api_key, model, base_url, dry_run=False):
+def _translate_line_map(variants, api_key, model, base_url, dry_run=False,
+                        label='OP', source_lang='ja', glossary_str=''):
+    """把 OP/ED 窗口里出现过的**每一句不同歌词**各翻一次，返回 {原文: 译文}。
+
+    旧实现只翻「出现最多的那一句」，然后把它覆写到整个窗口。对 Whisper
+    幻觉（同一句刷屏）没问题，但对真正有 30 多句歌词的 OP/ED 是灾难：
+    每一句都被替换成同一句中文。这里按原文逐句建表，应用时按文本匹配，
+    跨集自然一致，也不依赖 cue 下标。
+    """
+    if not variants:
+        return {}
+    lines = [t for t, _ in variants.most_common() if len(t.strip()) >= 2]
+    out = {}
+    if dry_run:
+        return out
+    print(f'  [oped] {label}: {len(lines)} unique line(s) -> translate once',
+          file=sys.stderr)
+    for i in range(0, len(lines), 20):
+        chunk = lines[i:i + 20]
+        result = _translate_batch([{'text': t} for t in chunk], api_key, model,
+                                  base_url, glossary_str=glossary_str,
+                                  source_lang=source_lang)
+        for j, line in enumerate(chunk):
+            if result and j < len(result) and result[j]:
+                # 表里的值同时可能写进 ASS 和 SRT，折成空格最安全
+                out[line.strip()] = _flatten_newlines(result[j], '.srt')
+    return out
+
+
+def _flatten_newlines(text, output_path=''):
+    """把译文里的真实换行折成目标格式的换行标记。
+
+    模型偶尔在 JSON 字符串里写 `\\n`（合法转义），解析后就是真换行；
+    直接写进 ASS 会把一条 Dialogue 拆成两行，后面那条变成孤立文本，
+    整集时间轴错位（实测 EP001 cue 64 中招）。
+    """
+    text = str(text or '')
+    if '\n' not in text and '\r' not in text:
+        return text
+    marker = '\\N' if os.path.splitext(output_path)[1].lower() == '.ass' else ' '
+    # 用函数当替换值：字符串替换模板里的 `\N` 会被当成非法转义
+    return re.sub(r'\s*[\r\n]+\s*', lambda _m: marker, text).strip()
+
+
+# ASS 覆盖标签：`{\fad(100,100)}`、`{\pos(512,143)}`。标签不是文本，不能进
+# 翻译（模型要么照抄、要么删掉）；拆出来、写回时原样拼回去。
+TAG_HEAD_RE = re.compile(r'^(?:\{[^}]*\})+')
+TAG_TAIL_RE = re.compile(r'(\{[^}]*\})+$')
+
+
+def split_ass_tags(text):
+    """返回 (前缀标签, 可见正文, 后缀标签)。"""
+    raw = str(text or '')
+    m = TAG_HEAD_RE.match(raw)
+    prefix = m.group(0) if m else ''
+    rest = raw[len(prefix):]
+    m2 = TAG_TAIL_RE.search(rest)
+    suffix = m2.group(0) if m2 else ''
+    visible = rest[:len(rest) - len(suffix)] if suffix else rest
+    return prefix, visible, suffix
+
+
+def _pick_primary_lyric(members, source_lang):
+    """同一时间点的多轨歌词里挑「主文本」：优先源语言那条。
+
+    俄语项目的 OP 有两轨——罗马音日文 + 俄语翻译。挑俄语那条去翻，
+    罗马音记成别名复用同一句中文，避免两条轨译出两种措辞。
+    """
+    if source_lang == 'ru':
+        for _, text in members:
+            if re.search(r'[\u0400-\u04FF]', text):
+                return text
+    elif source_lang == 'ja':
+        for _, text in members:
+            if re.search(r'[\u3040-\u30ff]', text):
+                return text
+    return members[0][1]
+
+
+def _lyric_similar(a, b, threshold=0.6):
+    """两句歌词是否只是同一句的不同写法（漏标点、改一两个词）。"""
+    a, b = (a or '').strip(), (b or '').strip()
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    return SequenceMatcher(None, a, b).ratio() >= threshold
+
+
+def _canonicalize_lyrics(positions, aliases):
+    """按歌词位置归一：每个位置取最常见写法，近似写法收进别名表。
+
+    不做这一步，110 集里同一句 OP 会翻出三四种中文（源写法有细微差异），
+    观众换一集就发现歌词变了。
+    """
+    canon_counter = Counter()
+    for _pos, counts in positions.items():
+        canon = counts.most_common(1)[0][0]
+        canon_counter[canon] += 1
+        for text in counts:
+            if text != canon and _lyric_similar(text, canon):
+                aliases.setdefault(text, canon)
+    return canon_counter
+
+
+def collect_oped_across_episodes(input_dir, api_key, model, base_url, dry_run=False,
+                                 source_lang='ja', glossary_str=''):
     """Scan all episodes to collect OP/ED text across episodes.
 
     Returns dict:
-        op_zh, ed_zh: str|None — canonical Chinese OP/ED text
-        op_texts, ed_texts: {ep_name: [(cue_idx, ja_text)]} — 各集窗口内 cue 位置
-        op_ja, ed_ja: str|None — canonical Japanese text
+        op_map, ed_map: {原文: 中文} — 逐句歌词表（首选，按文本匹配覆写）
+        op_zh, ed_zh: str|None — canonical 单句译文（兼容旧调用/幻觉场景）
+        op_texts, ed_texts: {ep_name: [(cue_idx, text)]} — 各集窗口内 cue 位置
+        op_src, ed_src: str|None — canonical 原文
         op_variants, ed_variants: Counter — 跨集文本频次（判歌词用）
     """
     srt_files = sorted([
@@ -278,14 +416,25 @@ def collect_oped_across_episodes(input_dir, api_key, model, base_url, dry_run=Fa
 
     if not srt_files:
         return {'op_zh': None, 'ed_zh': None, 'op_texts': {}, 'ed_texts': {},
-                'op_ja': None, 'ed_ja': None,
+                'op_src': None, 'ed_src': None, 'op_ja': None, 'ed_ja': None,
+                'op_map': {}, 'ed_map': {}, 'op_alias': {}, 'ed_alias': {},
                 'op_variants': Counter(), 'ed_variants': Counter()}
+
+    if source_lang in (None, '', 'auto'):
+        probe = parse_subtitles(os.path.join(input_dir, srt_files[0]),
+                                mark_garbled=False)
+        source_lang = _detect_source_lang(probe)
 
     # Collect OP/ED text from each episode
     op_variants = Counter()
     ed_variants = Counter()
     op_texts = {}
     ed_texts = {}
+    op_alias, ed_alias = {}, {}
+    # 同一首歌每一集都会出现，但写法常有细小明差（漏标点、改词）。
+    # 按「歌词位置」归一，才能保证 110 集的 OP 是同一句中文。
+    op_pos = defaultdict(Counter)
+    ed_pos = defaultdict(Counter)
 
     for srt_file in srt_files:
         path = os.path.join(input_dir, srt_file)
@@ -298,57 +447,108 @@ def collect_oped_across_episodes(input_dir, api_key, model, base_url, dry_run=Fa
         last_end = _time_to_seconds(cues[-1].get('end', cues[-1].get('start', '00:00:00')))
         total_duration = last_end + 10  # add padding
 
+        # ASS 若带专用歌词样式，就只认这些样式的 cue。时间窗是固定 180s，
+        # 而 EP001 的正片 1:44 就开始了——不按样式区分会把开篇对白当成 OP。
+        styles = {_cue_style(c) for c in cues if _cue_style(c)}
+        lyric_mode = any(LYRIC_STYLE_RE.search(s) for s in styles)
+
         ep_op = []
         ep_ed = []
+        op_groups = {}
+        ed_groups = {}
 
         for i, cue in enumerate(cues):
             start_s = _time_to_seconds(cue.get('start', '00:00:00'))
             end_s = _time_to_seconds(cue.get('end', cue.get('start', '00:00:00')))
-            region = _is_oped_region(start_s, end_s, total_duration)
             text = cue.get('text', '').strip()
+
+            if lyric_mode:
+                if not LYRIC_STYLE_RE.search(_cue_style(cue)):
+                    continue
+                region = 'OP' if start_s <= OP_BOUNDARY_SEC else 'ED'
+            else:
+                region = _is_oped_region(start_s, end_s, total_duration)
 
             if not text or len(text) < 2:
                 continue
+            # 歌词表只收可见正文：`{\fad(100,100)}` 这类标签跟着 cue 走，
+            # 进了表就会送进模型（被照抄或删掉），跨集也对不上。
+            _, visible, _ = split_ass_tags(text)
+            visible = visible.strip()
+            if len(visible) < 2:
+                continue
+
+            if lyric_mode:
+                # 同一时间点常有两条轨：罗马音（日文）与俄语译文。
+                # 只翻源语言那条，另一条复用同一句中文，否则一个字幕文件里
+                # 会出现两种措辞的歌词（上一版就是两条轨各翻各的）。
+                group = op_groups if region == 'OP' else ed_groups
+                group.setdefault(round(start_s, 2), []).append((i, visible))
+                continue
 
             if region == 'OP':
-                op_variants[text] += 1
-                ep_op.append((i, text))
+                op_variants[visible] += 1
+                ep_op.append((i, visible))
             elif region == 'ED':
-                ed_variants[text] += 1
-                ep_ed.append((i, text))
+                ed_variants[visible] += 1
+                ep_ed.append((i, visible))
+
+        # 双轨归并：源语言那条当主文本，其余记作别名
+        for groups, variants, entries, aliases, pos_counter in (
+                (op_groups, op_variants, ep_op, op_alias, op_pos),
+                (ed_groups, ed_variants, ep_ed, ed_alias, ed_pos)):
+            for pos, (_, members) in enumerate(sorted(groups.items())):
+                primary = _pick_primary_lyric(members, source_lang)
+                variants[primary] += 1
+                entries.append((next(i for i, t in members if t == primary),
+                                primary))
+                pos_counter[pos][primary] += 1
+                for idx, text in members:
+                    if text != primary:
+                        aliases[text] = primary
+                        entries.append((idx, text))
+                    pos_counter[pos][text] += 1
 
         if ep_op:
             op_texts[srt_file] = ep_op
         if ep_ed:
             ed_texts[srt_file] = ep_ed
 
-    # Pick canonical Japanese form (most frequent)
-    op_ja = _pick_oped_canonical(op_variants)
-    ed_ja = _pick_oped_canonical(ed_variants)
+        # 没有 ASS 歌词样式时（SRT/普通 ASS），按窗口内出现顺序补位置，
+        # 供跨集归一使用；同一集窗口里重复的句子权重更高。
+        if not lyric_mode:
+            for pos, (_idx, text) in enumerate(ep_op):
+                op_pos[pos][text] += 1
+            for pos, (_idx, text) in enumerate(ep_ed):
+                ed_pos[pos][text] += 1
 
-    # Translate canonical OP/ED once
-    op_zh = None
-    ed_zh = None
+    # 跨集归一（同一句歌词只留一种写法）；原始计数保留给诊断用
+    op_canon = _canonicalize_lyrics(op_pos, op_alias)
+    ed_canon = _canonicalize_lyrics(ed_pos, ed_alias)
 
-    if op_ja and not dry_run:
-        print(f'  [oped] Translating OP canonical ({len(op_variants)} variants across {len(op_texts)} eps)...',
-              file=sys.stderr)
-        result = _translate_batch([{'text': op_ja}], api_key, model, base_url, glossary_str='')
-        if result and len(result) > 0:
-            op_zh = result[0]
-            print(f'  [oped] OP: {op_ja[:40]}... → {op_zh[:40]}...', file=sys.stderr)
+    # Pick canonical source form (most frequent) — kept for the hallucination case
+    op_src = _pick_oped_canonical(op_canon)
+    ed_src = _pick_oped_canonical(ed_canon)
 
-    if ed_ja and not dry_run:
-        print(f'  [oped] Translating ED canonical ({len(ed_variants)} variants across {len(ed_texts)} eps)...',
-              file=sys.stderr)
-        result = _translate_batch([{'text': ed_ja}], api_key, model, base_url, glossary_str='')
-        if result and len(result) > 0:
-            ed_zh = result[0]
-            print(f'  [oped] ED: {ed_ja[:40]}... → {ed_zh[:40]}...', file=sys.stderr)
+    # 逐句表：整部作品的 OP/ED 只翻一次，各集按原文复用
+    op_map = _translate_line_map(op_canon or op_variants, api_key, model,
+                                 base_url, dry_run=dry_run, label='OP',
+                                 source_lang=source_lang,
+                                 glossary_str=glossary_str)
+    ed_map = _translate_line_map(ed_canon or ed_variants, api_key, model,
+                                 base_url, dry_run=dry_run, label='ED',
+                                 source_lang=source_lang,
+                                 glossary_str=glossary_str)
+
+    op_zh = op_map.get((op_src or '').strip()) if op_src else None
+    ed_zh = ed_map.get((ed_src or '').strip()) if ed_src else None
 
     return {'op_zh': op_zh, 'ed_zh': ed_zh,
             'op_texts': op_texts, 'ed_texts': ed_texts,
-            'op_ja': op_ja, 'ed_ja': ed_ja,
+            'op_src': op_src, 'ed_src': ed_src,
+            'op_ja': op_src, 'ed_ja': ed_src,   # 旧字段名，兼容既有调用
+            'op_map': op_map, 'ed_map': ed_map,
+            'op_alias': op_alias, 'ed_alias': ed_alias,
             'op_variants': op_variants, 'ed_variants': ed_variants}
 
 
@@ -376,30 +576,50 @@ def _is_lyric(text, canonical_ja, within_file, cross_episodes):
 def apply_oped_pre_replace(cues, srt_file, oped):
     """Pre-replace OP/ED **lyric** cues with pre-translated Chinese.
 
-    ⚠️ 只覆盖判定为歌词的 cue（`_is_lyric`）。早先的实现把 OP/ED 时间窗
-    内的 cue **无条件全部覆写**——窗口是固定 180s 的常量，OP 只有 90s 的
-    作品里，窗口会一路吃进正片对白，把整段对白替换成同一句歌词中文。
+    首选 `op_map`/`ed_map`（逐句表，按原文匹配）：一句歌词一个译文，同一句
+    在各集写法一致，不会把整段歌词压成一句。
+    没有逐句表时退回 canonical 单句（只适合 Whisper 幻觉刷屏的旧数据），
+    且只覆盖 `_is_lyric` 判定为歌词的 cue——早先的实现把窗口内的 cue
+    无条件覆写，窗口是固定常量，会吃掉窗口里恰好出现的正片对白。
     """
     replaced = 0
 
-    for region, key_zh, key_texts, key_ja, key_var in (
-            ('OP', 'op_zh', 'op_texts', 'op_ja', 'op_variants'),
-            ('ED', 'ed_zh', 'ed_texts', 'ed_ja', 'ed_variants')):
-        zh = oped.get(key_zh)
+    for region, key_map, key_alias, key_zh, key_texts, key_src, key_var in (
+            ('OP', 'op_map', 'op_alias', 'op_zh', 'op_texts', 'op_src',
+             'op_variants'),
+            ('ED', 'ed_map', 'ed_alias', 'ed_zh', 'ed_texts', 'ed_src',
+             'ed_variants')):
         entries = oped.get(key_texts) or {}
-        if not zh or srt_file not in entries:
+        if srt_file not in entries:
             continue
-        canonical = oped.get(key_ja)
+        line_map = oped.get(key_map) or {}
+        alias = oped.get(key_alias) or {}
+        zh = oped.get(key_zh)
+        canonical = oped.get(key_src)
         cross = oped.get(key_var) or Counter()
         within = Counter(t for _, t in entries[srt_file])
-        for idx, ja_text in entries[srt_file]:
+        for idx, text in entries[srt_file]:
             if idx >= len(cues):
                 continue
-            if cues[idx].get('text', '').strip() != ja_text:
+            prefix, visible, suffix = split_ass_tags(cues[idx].get('text', ''))
+            if visible.strip() != text:
                 continue  # 预替换过的（专名）或已改动，跳过
-            if not _is_lyric(ja_text, canonical, within, cross):
+            mapped = line_map.get(alias.get(text, text).strip())
+            if not mapped:
+                # 别名可能指向另一层别名（罗马音 → 某种俄语写法 → 规范句）
+                key = text
+                for _ in range(3):
+                    key = alias.get(key, key)
+                mapped = line_map.get(key.strip()) or line_map.get(text.strip())
+            if mapped:
+                cues[idx]['text'] = prefix + mapped + suffix
+                replaced += 1
                 continue
-            cues[idx]['text'] = zh
+            if not zh:
+                continue
+            if not _is_lyric(text, canonical, within, cross):
+                continue
+            cues[idx]['text'] = prefix + zh + suffix
             replaced += 1
 
     return replaced
@@ -485,12 +705,24 @@ def _call_llm(messages, api_key, model, base_url):
         return None
 
 
+# ASS 换行 `\N` / 硬空格 `\h` 不是合法 JSON 转义。模型按字幕习惯把它们
+# 直接写进 translation 字符串，`json.loads` 整批报错 —— 实测一条 `\N`
+# 就能让 20 条字幕全部作废（EP001 因此留了 80 条俄语）。
+_BAD_ESCAPE_RE = re.compile(r'(?<!\\)\\(?!["\\/bfnrtu])')
+
+
+def _sanitize_json_escapes(text):
+    r"""把非法反斜杠转义（如 ASS 的 \N、\h）补成合法 JSON 转义。"""
+    return _BAD_ESCAPE_RE.sub(r'\\\\', text)
+
+
 def _parse_json_response(response):
     """Parse JSON array from LLM response, handling markdown code blocks
     and common JSON formatting errors."""
     if not response:
         return None
 
+    response = _sanitize_json_escapes(response)
     strategies = []
 
     # Strategy 1: direct parse after stripping markdown fences
@@ -612,6 +844,8 @@ def _translate_batch(cues, api_key, model, base_url, glossary_str, ja_context=No
     targets = '\n'.join(f'{i+1}. {t}' for i, t in enumerate(texts) if t)
 
     user_msg = USER_TEMPLATE.format(
+        lang_name={'ja': '日语', 'ru': '俄语', 'zh': '中文'}.get(
+            source_lang, '外语'),
         context_before=context_before or '(无)',
         targets=targets,
         glossary=glossary_str or '(无)',
@@ -634,20 +868,25 @@ def _translate_batch(cues, api_key, model, base_url, glossary_str, ja_context=No
 _ECHO_PREFIX_RE = re.compile(r'^\s*\d+\s*[.、)）]\s*')
 
 
-def is_untranslated(src, out):
+def is_untranslated(src, out, source_lang=None):
     """译文是否只是原文回显（含照抄带编号的 prompt 行）。
 
     不判这个的话，「1. どうか」会被 `out != src` 判成翻译成功——
     文本确实不同（多了编号），人看到却是整片日文。
+
+    `source_lang='ru'` 时额外判西里尔残留：俄语源下译文只要还带西里尔字母，
+    就是没翻完（可能是模型只翻了半句、或整批回退）。中文译文里不该出现它。
     """
     if not out or not str(out).strip():
         return True
     s = _ECHO_PREFIX_RE.sub('', str(src).strip()).strip()
     o = _ECHO_PREFIX_RE.sub('', str(out).strip()).strip()
+    if source_lang == 'ru' and re.search(r'[\u0400-\u04FF]', o):
+        return True
     return o == s
 
 
-def bad_ratio(batch_cues, result):
+def bad_ratio(batch_cues, result, source_lang=None):
     """一批里未翻译/回显条目的占比。result 为 None 时视为全失败。"""
     if not result:
         return 1.0
@@ -656,7 +895,8 @@ def bad_ratio(batch_cues, result):
         return 0.0
     bad = sum(1 for j, c in enumerate(batch_cues)
               if is_untranslated(c.get('text', ''),
-                                 result[j] if j < len(result) else None))
+                                 result[j] if j < len(result) else None,
+                                 source_lang=source_lang))
     return bad / n
 
 
@@ -835,10 +1075,19 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
 
     # Step 1: OP/ED pre-replace（只覆盖歌词，见 apply_oped_pre_replace）
     oped_replaced = 0
-    if oped and (oped.get('op_zh') or oped.get('ed_zh')):
+    if oped and (oped.get('op_map') or oped.get('ed_map')
+                 or oped.get('op_zh') or oped.get('ed_zh')):
+        before = [c.get('text', '') for c in cues]
         oped_replaced = apply_oped_pre_replace(cues, fname, oped)
+        # 预替换过的条目不能再送进翻译：它们已是中文，模型只会照抄回显，
+        # 既浪费调用又被判成「未翻译」（实测 EP001 因此多出 112 条失败计数）。
+        done_idx = {i for i, (a, c) in enumerate(zip(before, cues))
+                    if a != c.get('text', '')}
         if oped_replaced:
-            print(f'  {fname}: OP/ED pre-replaced {oped_replaced} cues', file=sys.stderr)
+            print(f'  {fname}: OP/ED pre-replaced {oped_replaced} cues',
+                  file=sys.stderr)
+    else:
+        done_idx = set()
 
     # Step 2: Proper noun pre-replace
     noun_replaced = 0
@@ -846,6 +1095,15 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
         noun_replaced = apply_noun_pre_replace(cues, ja_to_zh)
     if noun_replaced:
         print(f'  {fname}: noun pre-replaced {noun_replaced} occurrences', file=sys.stderr)
+
+    # Step 2.5: 拆出 ASS 覆盖标签（`{\fad}`/`{\pos}`），翻译只送可见正文。
+    # 标签跟着 cue 走，模型看不到也就不会照抄或删掉；写盘前再拼回去。
+    tag_frames = {}
+    for i, cue in enumerate(cues):
+        prefix, visible, suffix = split_ass_tags(cue.get('text', ''))
+        if prefix or suffix:
+            tag_frames[i] = (prefix, suffix)
+            cue['text'] = visible
 
     # Step 3: Batch translate remaining cues (intra-episode parallel)
     translated = 0
@@ -860,47 +1118,63 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
           file=sys.stderr)
 
     # Build batch list with pre-computed JA context (no dependency on translation order)
+    pending = [i for i in range(total) if i not in done_idx]
     batches = []
-    for i in range(0, total, BATCH_SIZE):
-        batch_cues = cues[i:i + BATCH_SIZE]
+    for start in range(0, len(pending), BATCH_SIZE):
+        idxs = pending[start:start + BATCH_SIZE]
+        batch_cues = [cues[j] for j in idxs]
         if len(batch_cues) < 1:
             continue
         # JA context: preceding source cues.  Default 0; `None` = full past
         # (WMT26 full-video-context setup).  Opt-in only until A/B supports it.
+        head = idxs[0]
         if context_window is None:
-            ja_ctx = cues[:i]
+            ja_ctx = cues[:head]
         elif context_window <= 0:
             ja_ctx = []
         else:
-            ja_ctx = cues[max(0, i - context_window):i]
+            ja_ctx = cues[max(0, head - context_window):head]
         batch_gloss = _glossary_for_batch(glossary_str, ja_to_zh, batch_cues)
-        batches.append((i, batch_cues, ja_ctx, batch_gloss))
+        batches.append((idxs, batch_cues, ja_ctx, batch_gloss))
 
     # Submit all batches in parallel
-    def _translate_one(idx_batch):
-        """Translate a single batch with retry. Returns (batch_idx, result_list_or_None)."""
-        batch_idx, batch_cues, ja_ctx, batch_gloss = idx_batch
-        result = _translate_batch(batch_cues, api_key, model, base_url, batch_gloss,
+    def _translate_span(cues, gloss, ja_ctx):
+        """翻译一段 cue；解析失败就对半拆，拆到 MIN_SPLIT_BATCH 为止。
+
+        整批 JSON 被截断时旧代码只重试一次，再失败就整批留原文——实测
+        EP001 因此留下 80 条俄语。拆批后同一批能过，代价只是多几次调用。
+        """
+        result = _translate_batch(cues, api_key, model, base_url, gloss,
                                   ja_context=ja_ctx, source_lang=source_lang,
                                   max_chars=max_chars, max_cps=max_cps,
                                   context_limit=context_window)
-        if result is None:
+        ratio = bad_ratio(cues, result, source_lang)
+        # 单条回显不值得再发一次整批请求；20 条里坏 4 条以上才重试
+        if ratio > 0.2:
             time.sleep(1)
-            result = _translate_batch(batch_cues, api_key, model, base_url, batch_gloss,
-                                      ja_context=ja_ctx, source_lang=source_lang,
-                                      max_chars=max_chars, max_cps=max_cps,
-                                      context_limit=context_window)
-        # 整批回显/未翻译也重试一次：prompt 过长或语义混乱时，模型会直接
-        # 把带编号的原文照抄回来。这类结果非 None、且与原文"不同"（多了编号），
-        # 光看 None 判不出来。
-        elif bad_ratio(batch_cues, result) > 0.5:
-            time.sleep(1)
-            retry = _translate_batch(batch_cues, api_key, model, base_url, batch_gloss,
+            retry = _translate_batch(cues, api_key, model, base_url, gloss,
                                      ja_context=ja_ctx, source_lang=source_lang,
                                      max_chars=max_chars, max_cps=max_cps,
                                      context_limit=context_window)
-            if retry is not None and bad_ratio(batch_cues, retry) < bad_ratio(batch_cues, result):
-                result = retry
+            if retry is not None and bad_ratio(cues, retry, source_lang) < ratio:
+                result, ratio = retry, bad_ratio(cues, retry, source_lang)
+        # 只清洗明显整批崩掉的情况；个别条回显不必拆批（拆了反而多花调用）
+        if ratio > 0.5 and len(cues) >= MIN_SPLIT_BATCH * 2:
+            mid = len(cues) // 2
+            left = _translate_span(cues[:mid], gloss, [])
+            right = _translate_span(cues[mid:], gloss, [])
+            merged = ((left or [None] * mid)
+                      + (right or [None] * (len(cues) - mid)))
+            print(f'  [translate] batch {len(cues)} split -> '
+                  f'{mid}+{len(cues) - mid} (ratio was {ratio:.2f})',
+                  file=sys.stderr)
+            return merged
+        return result
+
+    def _translate_one(idx_batch):
+        """Translate a single batch with retry. Returns (batch_idx, result_list_or_None)."""
+        batch_idx, batch_cues, ja_ctx, batch_gloss = idx_batch
+        result = _translate_span(batch_cues, batch_gloss, ja_ctx)
         return batch_idx, batch_cues, result
 
     print(f'    [{len(batches)} batches in parallel]', end='', file=sys.stderr)
@@ -908,13 +1182,15 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
     with ThreadPoolExecutor(max_workers=min(len(batches), 16)) as executor:
         futures = {executor.submit(_translate_one, b): b[0] for b in batches}
         for future in as_completed(futures):
-            batch_idx, batch_cues, result = future.result()
+            idxs, batch_cues, result = future.result()
             for j, cue in enumerate(batch_cues):
                 translated_text = result[j] if result and j < len(result) else None
                 # 判据是「不是原文回显」，不是「和原文不同」——整批照抄成
                 # "1. どうか" 也算「不同」，但那是失败，不能记成功写进输出。
-                if not is_untranslated(cue['text'], translated_text):
-                    result_cues[batch_idx + j]['text'] = translated_text
+                if not is_untranslated(cue['text'], translated_text,
+                                       source_lang=source_lang):
+                    result_cues[idxs[j]]['text'] = _flatten_newlines(
+                        translated_text, output_path)
                     translated += 1
                 else:
                     failed += 1
@@ -924,6 +1200,12 @@ def translate_file(input_path, output_path, glossary_str, ja_to_zh,
             print(f'\r    [{done}/{len(batches)} batches] {pct}%', end='', file=sys.stderr)
 
     print(file=sys.stderr)
+
+    # 把拆出去的覆盖标签拼回来（含 OP/ED 预替换的那些）
+    for i, cue in enumerate(result_cues):
+        prefix, suffix = tag_frames.get(i, ('', ''))
+        if prefix or suffix:
+            cue['text'] = prefix + str(cue.get('text') or '') + suffix
 
     # Write output
     if not dry_run and translated > 0:
@@ -1034,14 +1316,15 @@ def translate_dir(input_dir, output_dir, glossary_str, ja_to_zh,
     if not skip_oped:
         print('[oped] Scanning OP/ED across episodes...', file=sys.stderr)
         oped = collect_oped_across_episodes(
-            input_dir, api_key, model, base_url, dry_run
+            input_dir, api_key, model, base_url, dry_run,
+            source_lang=source_lang, glossary_str=glossary_str
         )
-        if oped.get('op_zh'):
-            print(f'  [oped] OP pre-translated: '
-                  f'{len(oped["op_texts"])} episodes', file=sys.stderr)
-        if oped.get('ed_zh'):
-            print(f'  [oped] ED pre-translated: '
-                  f'{len(oped["ed_texts"])} episodes', file=sys.stderr)
+        if oped.get('op_map') or oped.get('op_zh'):
+            print(f'  [oped] OP lines: {len(oped.get("op_map") or {})} '
+                  f'across {len(oped["op_texts"])} episodes', file=sys.stderr)
+        if oped.get('ed_map') or oped.get('ed_zh'):
+            print(f'  [oped] ED lines: {len(oped.get("ed_map") or {})} '
+                  f'across {len(oped["ed_texts"])} episodes', file=sys.stderr)
     else:
         print('[oped] Skipped (--skip-oped)', file=sys.stderr)
 

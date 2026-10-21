@@ -551,10 +551,16 @@ def _read_ass_cues(path: str, mark_garbled: bool = True,
 
 
 def _ass_time(srt_time: str) -> str:
-    """SRT 时间码 → ASS 时间码（`0:01:23.46`，百分秒，小时不补零）。"""
+    """时间码 → ASS 时间码（`0:01:23.46`，百分秒，小时不补零）。
+
+    ASS 原文是百分秒（`44.54`），SRT 是毫秒（`00:01:44,540`）。早先的实现
+    一律按毫秒读小数位，把 `.54`（54 cs）当成 54 ms 写成 `.05`：每条时间码
+    都往回缩，整集轴偏到没法看。这里按位数补齐再换算，两种格式都对。
+    """
     h, m, rest = srt_time.split(':')
-    s, ms = rest.replace(',', '.').split('.')
-    return f'{int(h)}:{m}:{s}.{int(round(int(ms[:3]) / 10)):02d}'
+    s, frac = rest.replace(',', '.').split('.')
+    ms = int(frac.ljust(3, '0')[:3])
+    return f'{int(h)}:{m}:{s}.{int(round(ms / 10)):02d}'
 
 
 def _write_ass_cues(path: str, cues: list[dict], template_path: str = None,
@@ -595,6 +601,14 @@ def _write_ass_cues(path: str, cues: list[dict], template_path: str = None,
 
     lines = read_ass_file(read_path)
 
+    # 上一次写盘中途失败会留下只有表头的文件。此时 in-place 模式按行号
+    # 匹配一个都对不上，会把「表头」当成结果写回去——整集字幕静默消失。
+    # 输出存在但没有一条 Dialogue 时，按新文件处理。
+    if not is_new and not any(l.startswith('Dialogue:') for l in lines):
+        is_new = True
+        read_path = template_path or path
+        lines = read_ass_file(read_path)
+
     if is_new:
         ev = next((i for i, l in enumerate(lines)
                    if l.strip().lower() == '[events]'), None)
@@ -607,12 +621,20 @@ def _write_ass_cues(path: str, cues: list[dict], template_path: str = None,
 
         out = list(lines[:fmt + 1])
         for c in cues:
+            # 保留原 cue 的层/样式/边距/特效：ASS 项目里标题、招牌、歌词轨
+            # 各有自己的样式，统一写回 Default 会把画面定位全部丢掉
+            # （实测整集 443 条全变成 Default，OP 也掉到底部）。
+            src = c.get('_ass_dialogue') or {}
             out.append(build_dialogue_line({
-                'format': 'Dialogue: 0', 'layer': '0',
+                'format': src.get('format', 'Dialogue: 0'),
+                'layer': src.get('layer', '0'),
                 'start': _ass_time(c['start']), 'end': _ass_time(c['end']),
-                'style': style, 'name': '',
-                'margin_l': '0', 'margin_r': '0', 'margin_v': '0',
-                'effect': '', 'text': c['text'],
+                'style': src.get('style') or style,
+                'name': src.get('name', ''),
+                'margin_l': src.get('margin_l', '0'),
+                'margin_r': src.get('margin_r', '0'),
+                'margin_v': src.get('margin_v', '0'),
+                'effect': src.get('effect', ''), 'text': c['text'],
             }) + '\n')
         write_ass_file(path, out, template_path=read_path)
         return

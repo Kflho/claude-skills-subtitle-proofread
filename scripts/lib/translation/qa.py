@@ -13,6 +13,8 @@ from collections import Counter
 
 KANA_RE = re.compile(r'[\u3040-\u30ff\u31f0-\u31ff]')
 NUMBERING_RE = re.compile(r'^\s*(?:\d+[.、)]|[-*])\s*')
+# 俄语等西里尔源：整条照抄原文时译文里会留着西里尔字母，必须和假名/拉丁同等看待。
+CYRILLIC_RE = re.compile(r'[\u0400-\u04FF]')
 
 
 def count_kana(text: str) -> int:
@@ -32,7 +34,8 @@ def is_untranslated(source: str, target: str) -> bool:
 
     A kanji-only line can be a legitimate proper noun (武之内空 / 泉光子郎),
     so exact equality is only an echo when the source is actually Japanese
-    (contains kana) or Latin script.  Numbered echoes still count.
+    (contains kana), Cyrillic (ru→zh projects) or Latin script.
+    Numbered echoes still count.
     """
     src = (source or '').strip()
     tgt = (target or '').strip()
@@ -44,7 +47,8 @@ def is_untranslated(source: str, target: str) -> bool:
         return False
     if NUMBERING_RE.match(tgt):
         return True
-    return bool(KANA_RE.search(src) or re.search(r'[A-Za-z]', src))
+    return bool(KANA_RE.search(src) or CYRILLIC_RE.search(src)
+                or re.search(r'[A-Za-z]', src))
 
 
 def cue_violations(cue: dict, *, max_chars: int = 20,

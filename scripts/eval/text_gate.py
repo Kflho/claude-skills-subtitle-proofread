@@ -36,6 +36,11 @@ def _episode(path: str) -> str:
 
 
 LATIN = re.compile(r"[A-Za-z][A-Za-z'’.\-]{1,}")
+# 西里尔残留：ru→zh 项目里最常见的失败形态——整条或半条原文没翻。
+# `--max-latin` 抓不到它（西里尔不属于 [A-Za-z]），必须单独计。
+CYRILLIC = re.compile(r"[\u0400-\u04FF]")
+# 汉字之间的裸空格：机翻/后处理拿空格当逗号，读起来断句全错。
+CJK_SPACE = re.compile(r"[\u4e00-\u9fff]\s+[\u4e00-\u9fff]")
 CREDIT = ('字幕制作', '翻译', '时间轴', 'Society', 'Skaro', 'Hokutono')
 
 
@@ -44,7 +49,7 @@ def check_file(zh_path: str, *, source_path: str = '', normalizer=None,
     cues = read_subtitles(zh_path, mark_garbled=False)
     src = read_subtitles(source_path, mark_garbled=False) if (
         source_path and os.path.isfile(source_path)) else []
-    kana = echo = variants = cps = latin = 0
+    kana = echo = variants = cps = latin = cyrillic = cjk_space = 0
     bad = []
     for i, cue in enumerate(cues):
         text = str(cue.get('text') or '')
@@ -52,6 +57,12 @@ def check_file(zh_path: str, *, source_path: str = '', normalizer=None,
         if count_kana(text):
             kana += 1
             reasons.append('kana')
+        if CYRILLIC.search(text):
+            cyrillic += 1
+            reasons.append('cyrillic')
+        if CJK_SPACE.search(text):
+            cjk_space += 1
+            reasons.append('cjk_space')
         if src and i < len(src) and is_untranslated(
                 str(src[i].get('text') or ''), text):
             echo += 1
@@ -76,6 +87,7 @@ def check_file(zh_path: str, *, source_path: str = '', normalizer=None,
                         'reasons': reasons, 'text': text[:60]})
     return {'episode': _episode(zh_path), 'cues': len(cues), 'kana': kana,
             'echo': echo, 'variants': variants, 'cps': cps, 'latin': latin,
+            'cyrillic': cyrillic, 'cjk_space': cjk_space,
             'items': bad}
 
 
@@ -90,6 +102,11 @@ def main(argv=None):
     parser.add_argument('--max-variants', type=int, default=0)
     parser.add_argument('--max-latin', type=int, default=-1,
                         help='allowed Latin-script tokens (-1 = do not gate)')
+    parser.add_argument('--max-cyrillic', type=int, default=-1,
+                        help='allowed cues containing Cyrillic (-1 = do not gate)')
+    parser.add_argument('--max-cjk-space', type=int, default=-1,
+                        help='allowed cues with a bare space between CJK '
+                             'chars (-1 = do not gate)')
     parser.add_argument('--max-cps', type=int, default=-1,
                         help='allowed CPS-violating cues (-1 = do not gate)')
     parser.add_argument('--max-chars', type=int, default=20)
@@ -102,21 +119,24 @@ def main(argv=None):
         normalizer = build_normalizer(load_glossary(args.glossary),
                                       load_meta(args.meta))
 
-    files = sorted(glob.glob(os.path.join(args.zh_dir, '*.srt')))
+    files = sorted(glob.glob(os.path.join(args.zh_dir, '*.srt'))
+                   + glob.glob(os.path.join(args.zh_dir, '*.ass')))
     if not files:
         print(f'[gate] no subtitles in {args.zh_dir}', file=sys.stderr)
         return 2
 
     results = []
     for path in files:
-        source_path = os.path.join(args.source_dir, _episode(path) + '.srt') \
+        source_path = os.path.join(args.source_dir,
+                                   _episode(path) + os.path.splitext(path)[1]) \
             if args.source_dir else ''
         results.append(check_file(
             path, source_path=source_path, normalizer=normalizer,
             max_chars=args.max_chars, max_cps=args.cps_limit))
 
     totals = {key: sum(r[key] for r in results)
-              for key in ('kana', 'echo', 'variants', 'cps', 'latin')}
+              for key in ('kana', 'echo', 'variants', 'cps', 'latin',
+                          'cyrillic', 'cjk_space')}
     failures = []
     if totals['kana'] > args.max_kana:
         failures.append(f"kana {totals['kana']}>{args.max_kana}")
@@ -126,22 +146,30 @@ def main(argv=None):
         failures.append(f"variants {totals['variants']}>{args.max_variants}")
     if args.max_latin >= 0 and totals['latin'] > args.max_latin:
         failures.append(f"latin {totals['latin']}>{args.max_latin}")
+    if args.max_cyrillic >= 0 and totals['cyrillic'] > args.max_cyrillic:
+        failures.append(f"cyrillic {totals['cyrillic']}>{args.max_cyrillic}")
+    if args.max_cjk_space >= 0 and totals['cjk_space'] > args.max_cjk_space:
+        failures.append(f"cjk_space {totals['cjk_space']}>{args.max_cjk_space}")
     if args.max_cps >= 0 and totals['cps'] > args.max_cps:
         failures.append(f"cps {totals['cps']}>{args.max_cps}")
 
     print(f'[gate] {len(results)} episode(s): kana {totals["kana"]}, '
           f'echo {totals["echo"]}, variants {totals["variants"]}, '
-          f'cps {totals["cps"]}, latin {totals["latin"]}', file=sys.stderr)
+          f'cps {totals["cps"]}, latin {totals["latin"]}, '
+          f'cyrillic {totals["cyrillic"]}, cjk_space {totals["cjk_space"]}',
+          file=sys.stderr)
     for result in results:
-        if any(result[k] for k in ('kana', 'echo', 'variants')):
+        if any(result[k] for k in ('kana', 'echo', 'variants', 'cyrillic')):
             print(f"  {result['episode']}: kana {result['kana']}, "
-                  f"echo {result['echo']}, variants {result['variants']}",
+                  f"echo {result['echo']}, variants {result['variants']}, "
+                  f"cyrillic {result['cyrillic']}",
                   file=sys.stderr)
 
     payload = {'totals': totals, 'thresholds': {
         'kana': args.max_kana, 'echo': args.max_echo,
         'variants': args.max_variants, 'cps': args.max_cps,
-        'latin': args.max_latin},
+        'latin': args.max_latin, 'cyrillic': args.max_cyrillic,
+        'cjk_space': args.max_cjk_space},
         'failures': failures, 'files': results}
     if args.report:
         os.makedirs(os.path.dirname(args.report) or '.', exist_ok=True)

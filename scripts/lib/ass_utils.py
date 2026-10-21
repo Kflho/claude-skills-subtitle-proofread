@@ -243,8 +243,15 @@ def write_ass_file(path: str, lines: list[str], template_path: str = None):
         # mode would translate each '\n' to os.linesep, turning the existing
         # '\r\n' into '\r\r\n' — one spurious blank line per header line, and
         # the file stops being idempotent under read → write.
+        body = ''.join(lines)
+        try:
+            body.encode(encoding)
+        except (UnicodeEncodeError, LookupError):
+            # 模板是单字节编码（俄语源常见 cp1251）：装不下中文。
+            # 交付文件宁可换成 UTF-8，也不能让整集字幕写不出来。
+            encoding = 'utf-8-sig'
         with open(path, 'w', encoding=encoding, newline='') as f:
-            f.writelines(lines)
+            f.write(body)
 
 
 # ═══════════════════════════════════════════════════════════════
