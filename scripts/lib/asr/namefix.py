@@ -224,12 +224,20 @@ def propose_repairs(text: str, entries: list[NameEntry], tokenizer=None,
                     _is_katakana_char(left) and len(surface_form) < 4)
                 if not embedded and not any(s < end and start < e
                                             for s, e in taken):
-                    proposals.append({'start': start, 'end': end,
-                                      'from': surface_form,
-                                      'to': entry.canonical_ja,
+                    # Keep the honorific in the span so the review agent sees
+                    # サブ君 → 佐武君 instead of a bare name replacement.
+                    honorific = ''
+                    for suffix, _kana in SUFFIXES:
+                        if text.startswith(suffix, end):
+                            honorific = suffix
+                            break
+                    proposals.append({'start': start,
+                                      'end': end + len(honorific),
+                                      'from': surface_form + honorific,
+                                      'to': entry.canonical_ja + honorific,
                                       'reading': surface_form, 'distance': 0,
                                       'source': 'surface', 'context': text})
-                    taken.append((start, end))
+                    taken.append((start, end + len(honorific)))
                 start = text.find(surface_form, end)
 
     used = set()
