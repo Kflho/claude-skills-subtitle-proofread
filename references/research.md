@@ -17,27 +17,34 @@
 | 英文字幕 | 可作参考字幕（复用/重打轴），不当源语言 | 见 [reuse-reference-subs.md](reuse-reference-subs.md) |
 | 什么都没有 | 走 ASR（[subtitle.md](subtitle.md) 段 2） | 结论要写进项目档案：**没有就是没有**，别拿 AI 字幕凑 |
 
-四类站点各查一遍（语种、覆盖范围不同，别只查一个）：
+四类站点各查一遍（语种、覆盖范围不同，别只查一个）。**下表是 2026-10 的实测结论**，
+不是「一般来说」：
 
-| 站点 | 语种/范围 | 检索方式 | 自动化 |
-|---|---|---|---|
-| jimaku.cc | 日文字幕，动漫为主 | 网站检索 + API | 待实测确认接口与鉴权 |
-| kitsunekko.net | 日文字幕（老番多） | 站点目录/检索 | 待实测确认目录结构 |
-| assrt.net（射手网） | 中文字幕为主 | 网站检索 | 待实测（部分接口要登录 token） |
-| opensubtitles.org / .com | 多语言，量大 | REST API（.com） | 待实测（API key 需申请） |
+| 站点 | 语种/范围 | 实测到的检索入口 | 自动化 | 结论 |
+|---|---|---|---|---|
+| jimaku.cc | ja，动漫 | ① OpenSearch 建议 `https://jimaku.cc/opensearch/suggest?anime=true&query=<词>`：免 key，回 `"<entry_id>: <罗马名>"`；② 条目页 `/entry/<id>` 免登录可见下载链接；③ `/api/entries/search` 要 `Authorization` key（无 key 一律 401，key 在 `/account` 生成） | **半自动** | 脚本能探条目，拿文件清单要 key |
+| kitsunekko.net | ja，老番 | 只有全量目录页 `dirlist.php?dir=subtitles%2Fjapanese%2F`（619 KB，一次就是全部片名）；**没有站内搜索**（`&search=` 被忽略、`/search.php` 404）；robots.txt 两行 `User-agent: *` + `Disallow: /` | 人工 | 浏览器里找；尊重 robots，不脚本抓 |
+| assrt.net（射手网） | zh 为主 | 存档文档写明 `api.assrt.net/v1/sub/search?token=&q=&cnt=`，JSON，20 次/分；**本机实测整站 TLS 不通** | 人工（需 token） | 先打通网络，再用 token |
+| opensubtitles | 多语言 | REST 无 key 一律 403；老站 XML-RPC 通道活着但 `status` 是 `401 Unauthorized`，要先 LogIn 换 token | 人工（需 key） | 申请 key 之后才谈适配 |
 
 > 「待实测」不是省事，是底线：没有实测过的端点和字段不许写进适配器。
-> 查一次的实际形态（URL、返回格式、是否要 key）补进上表，再按
-> [acquire.md](acquire.md) 里索引站的写法加适配器（离线用例喂固定响应）。
+> 上表加过的站点，接适配器时按 [acquire.md](acquire.md) 索引站的写法来，并配离线用例
+> （喂固定响应，不联网）。
 
 四类站点各查一遍，用脚本生成清单再填结论（**未实测的站点不会拼 URL**，只列入口和
 「人工检索」，避免写错的端点浪费时间）：
 
 ```bash
 python "<scripts-dir>/acquire/subs_search.py" sites      # 站点、语种、自动化程度
+python "<scripts-dir>/acquire/subs_search.py" search -q "<日文原名>" # 跑能自动检索的站
 python "<scripts-dir>/acquire/subs_search.py" plan -q "<日文原名>" \
   --out "bin/reference_docs/字幕调研.md" --json "data/temp/subs_search.json"
 ```
+
+> **本机网络坑（实测）**：Clash TUN 开的 fake-IP 会让内置抓取工具把站点解析成
+> `198.18.x.x`，报「非公网 IP」直接拒。这时候别以为站点挂了——用
+> `pwsh` + `Invoke-WebRequest`/`curl.exe` 走系统代理实测，并拿 `example.com`
+> 做对照。写进结论时要区分「站点没有」和「本机没打通」。
 
 **判定与记录**：查到/查不到都要落盘到项目 `bin/reference_docs/`（通常写进
 `<作品>_外部参考.md` 的「字幕可用性」一节）：哪些站查了、结果是什么、缺口是什么。
