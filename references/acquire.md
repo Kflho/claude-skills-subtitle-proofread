@@ -226,8 +226,16 @@ python scripts/acquire/p2p.py collect --series 小麻烦千惠 --dry-run
 - 迅雷路径/下载目录**自动探测**（`magnet:` 协议处理器 + `Profiles/config.json`），
   本机路径不写进仓库；`--thunder-exe` / `--download-dir` 可覆盖；
 - 迅雷 12 的「新建任务面板」需要**人工点一次「立即下载」**。面板是 Electron，
-  UIA 拿不到控件树；要自动点就用 `kf-personal-service` 的
-  `scripts/ui/clicker.py`（相对坐标 + 截图核对，见那边 `references/ui-clicker.md`）；
+  UIA 拿不到控件树；自动确认统一走 `kf-personal-service` 的
+  **GUI 任务脚本**（`scripts/ui/clicker.py` 的窗口相对坐标锚点，见那边
+  `references/ui-clicker.md`），本 skill 不再自带一套点击逻辑；
+- **远程协作期间禁止开启迅雷等占用型软件**。远程同步开发时迅雷会吃满带宽、磁盘
+  和 CPU，把远程会话和同步挤掉。`grab` 派单前会跑远程守卫
+  （`acquire/remote_guard.py`：进程表里出现 `GameViewerServer.exe` / `GameViewer.exe`，
+  或显式 `KF_REMOTE_SESSION=1`），命中就**在拉起迅雷之前**退出 3。确需现在下载，
+  由用户明确同意后加 `--allow-thunder`；`--dry-run` 只提示不拦；
+  - 只看 `GameViewerService` 不算数：它是自启动服务，常驻不代表有人正在远控；
+  - 探测不到的信号（换了别的远控软件）用 `KF_REMOTE_SESSION=1` 手动声明；
 - **落点先确认再点下载**：面板「下载到」用的是迅雷自己的「上次使用」目录
   （`PathAndCategory.LastUsedPath`），不一定等于 `local.json` 的媒体库根。
   要改路径：面板右下角文件夹图标 →「传统选择方式」→ 在**地址栏**输入目标目录。
@@ -246,6 +254,21 @@ python scripts/acquire/p2p.py collect --series 小麻烦千惠 --dry-run
 
 选片参考（同一部片实测）：BD 1080p HEVC 全集 ≈ 25 GiB；BD-BOX + 剧场版 ≈ 55 GiB；
 BDMV 原盘 ≈ 185 GiB。**先看目标盘余量再下**，宁可选小一档。
+
+### 索引站：接入了哪些、还差哪些
+
+`search` 默认跑四个站（`DEFAULT_SITES`），都是 RSS/HTML 适配器：
+
+| 站 | 适配器 | 检索入口 | 状态 |
+|---|---|---|---|
+| nyaa.si | `search_nyaa` | RSS `?page=rss&q=` | 可用（老片主力） |
+| share.dmhy.org 动花园 | `search_dmhy` | `/topics/list?keyword=` | 可用 |
+| mikanani.me 蜜柑 | `search_mikan` | `/RSS/Search?searchstr=` | 可用 |
+| acg.rip | `search_acg` | `/.xml?term=` | 可用 |
+| ta.sefan.cc | — | 端点**未验证** | **未接入**：先实测一次检索/RSS 形态，再按上面四个的写法加适配器 |
+
+想加下一档（如 AnimeGarden 的开放 BT 接口）时，先确认真实端点与字段，
+再写适配器 + 一个离线用例（喂固定 HTML/XML，不联网）；不清楚端点就不要猜。
 
 > 仅个人非商业使用；公开分发、批量抓取都不在支持范围内。
 

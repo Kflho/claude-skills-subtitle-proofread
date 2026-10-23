@@ -52,6 +52,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from acquire import remote_guard  # noqa: E402
 from lib.local_config import local_value  # noqa: E402
 
 UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
@@ -561,6 +562,13 @@ def cmd_grab(args) -> int:
     exe = find_thunder(args.thunder_exe)
     download_dir = thunder_download_dir(exe, args.download_dir)
 
+    blocked = remote_guard.block_reason(allow=getattr(args, 'allow_thunder', False))
+    if blocked:
+        if not args.dry_run:
+            print(f'[p2p] {blocked}', file=sys.stderr)
+            return 3
+        print(f'[p2p] would refuse: {blocked}', file=sys.stderr)
+
     if args.magnet and not (args.torrent_id or args.torrent):
         if not download_dir:
             print('[p2p] 迅雷 download folder unknown; pass --download-dir', file=sys.stderr)
@@ -755,6 +763,8 @@ def main(argv=None) -> int:
     grab.add_argument('--series', default='')
     grab.add_argument('--media-type', default='tv', choices=['tv', 'ova', 'movie'])
     grab.add_argument('--dry-run', action='store_true')
+    grab.add_argument('--allow-thunder', action='store_true',
+                      help='远程协作进行中仍要派单（需用户明确同意）')
     common(grab)
 
     status = sub.add_parser('status', help='compare manifests with the disk')
