@@ -265,7 +265,7 @@ BDMV 原盘 ≈ 185 GiB。**先看目标盘余量再下**，宁可选小一档�
 | share.dmhy.org 动花园 | `search_dmhy` | `/topics/list?keyword=` | 可用 |
 | mikanani.me 蜜柑 | `search_mikan` | `/RSS/Search?searchstr=` | 可用 |
 | acg.rip | `search_acg` | `/.xml?term=` | 可用 |
-| ta.sefan.cc | — | 端点**未验证** | **未接入**：先实测一次检索/RSS 形态，再按上面四个的写法加适配器 |
+| ta.sefan.cc | — | 无公开检索接口 | **不接入**：2026-10 实测首页是混淆过的 iframe 壳（解出 `cdn.sofan.one:65533`，用 base64 + 混淆 JS 拼路径），没有可稳定复用的检索端点；别为它写猜测式适配器 |
 
 想加下一档（如 AnimeGarden 的开放 BT 接口）时，先确认真实端点与字段，
 再写适配器 + 一个离线用例（喂固定 HTML/XML，不联网）；不清楚端点就不要猜。
