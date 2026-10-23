@@ -26,3 +26,6 @@ eval/manifest.*.json
 
 # kf-personal-service 的 skill 验证台账（manage.py record）
 /dev/
+
+# pytest 缓存（指到项目 dev/ 也行，但别让它进版本库）
+.pytest_cache/
