@@ -132,7 +132,7 @@ python "<scripts-dir>/nouns/context_review.py" ... --mode oped \
 
 > **注意**：如果项目是 ASS 格式，`--input-dir` 指向包含 `.ass` 文件的目录即可。Pipeline 会像处理 SRT 一样处理 ASS，输出保持 ASS 格式。
 
-写回 ASS 时有四条已经踩过的坑，改 `lib/subtitle_io.py` 前先看 `tests/test_ass_writeback.py`：
+写回 ASS 时有四条已经踩过的坑，改 `lib/subtitle_io.py` 前先看 `tests/subtitle/test_ass_writeback.py`：
 
 - **样式/层/边距跟着 cue 走**：新文件模式不再把所有行写成 `Default`，否则标题、
   招牌、歌词轨的定位全丢（实测 443 条全掉到底部）；

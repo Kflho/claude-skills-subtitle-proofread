@@ -3,7 +3,7 @@
 import re
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 DOCS = [ROOT / 'SKILL.md', ROOT / 'README.md']
 DOCS += sorted((ROOT / 'references').rglob('*.md'))
 

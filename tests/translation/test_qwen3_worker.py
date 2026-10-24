@@ -14,7 +14,7 @@ import pytest
 
 import asr.qwen3_worker as worker_mod
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 WORKER = ROOT / 'scripts' / 'asr' / 'qwen3_worker.py'
 
 
