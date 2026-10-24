@@ -557,6 +557,68 @@ def _resolve_torrent_bytes(args, proxy: str) -> tuple[bytes, str]:
     raise SystemExit('[p2p] grab needs --torrent-id, --torrent or --magnet')
 
 
+def kf_service_dir() -> str:
+    """kf-personal-service 的根目录：``KF_SERVICE_DIR`` > ``local.json paths.kf_service``。
+
+    迅雷这类 GUI 的点击归 kf-personal-service（``scripts/ui/tasks.py``），
+    本 skill 只调用、不复制脚本，所以这里只做「找它」这一件事。
+    """
+    for name in ('KF_SERVICE_DIR', 'kf_service_dir'):
+        value = (os.environ.get(name, '') or '').strip()
+        if value:
+            return value
+    return str(local_value('paths', 'kf_service', default='') or '').strip()
+
+
+def kf_tasks_script() -> str:
+    root = kf_service_dir()
+    if not root:
+        return ''
+    script = os.path.join(root, 'scripts', 'ui', 'tasks.py')
+    return script if os.path.isfile(script) else ''
+
+
+def confirm_via_tasks(torrent: str = '', save_dir: str = '', magnet: str = '',
+                      dry_run: bool = False, timeout: float = 300.0) -> int:
+    """调 kf-service 的任务脚本确认迅雷面板。
+
+    返回子进程退出码；找不到脚本返回 ``-1``（调用方据此退回「请人工确认」）。
+    退出码约定沿用 tasks.py：0 成功、2 输入有问题、3 被守卫拦下。
+    """
+    script = kf_tasks_script()
+    if not script:
+        return -1
+    command = [sys.executable, script, 'run', 'thunder-download']
+    if torrent:
+        command += ['--torrent', torrent]
+    if magnet:
+        command += ['--magnet', magnet]
+    if save_dir:
+        command += ['--save-dir', save_dir]
+    if dry_run:
+        command.append('--dry-run')
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True,
+                                   timeout=timeout)
+    except (OSError, subprocess.SubprocessError) as error:
+        print(f'[p2p] 任务脚本跑不起来：{error}', file=sys.stderr)
+        return -2
+    for line in ((completed.stdout or '') + (completed.stderr or '')).splitlines():
+        if line.strip():
+            print(f'[p2p] {line}')
+    return completed.returncode
+
+
+def should_confirm(args) -> bool:
+    """``--confirm`` 显式开、``--no-confirm`` 显式关；默认「找到脚本就确认」。"""
+    flag = getattr(args, 'confirm', None)
+    if flag is True:
+        return True
+    if flag is False:
+        return False
+    return bool(kf_tasks_script())
+
+
 def cmd_grab(args) -> int:
     proxy = '' if args.no_proxy else (args.proxy or system_proxy())
     exe = find_thunder(args.thunder_exe)
@@ -569,15 +631,22 @@ def cmd_grab(args) -> int:
             return 3
         print(f'[p2p] would refuse: {blocked}', file=sys.stderr)
 
+    confirm = should_confirm(args)
+    save_dir = getattr(args, 'save_dir', '')
+
     if args.magnet and not (args.torrent_id or args.torrent):
         if not download_dir:
             print('[p2p] 迅雷 download folder unknown; pass --download-dir', file=sys.stderr)
             return 2
         if args.dry_run:
             print(f"[p2p] would launch: {exe} \"{args.magnet[:60]}...\" -StartType:magnet")
+            if confirm:
+                print(f'[p2p] would run: tasks.py run thunder-download --magnet …'
+                      f'{" --save-dir " + save_dir if save_dir else ""} --dry-run')
             return 0
         thunder_add(exe, args.magnet, 'magnet')
         print('[p2p] magnet handed to 迅雷 (no manifest: no file list without metadata)')
+        _maybe_confirm(confirm, save_dir=save_dir, magnet=args.magnet)
         return 0
 
     raw, ident = _resolve_torrent_bytes(args, proxy)
@@ -596,6 +665,9 @@ def cmd_grab(args) -> int:
     print(f'[p2p] client: {exe or "(none)"}  download dir: {download_dir}')
     if args.dry_run:
         print(f'[p2p] would launch: {exe} "{torrent_file}" -StartType:torrent')
+        if confirm:
+            print(f'[p2p] would run: tasks.py run thunder-download --torrent "{torrent_file}"'
+                  f'{" --save-dir " + save_dir if save_dir else ""} --dry-run')
         return 0
 
     payload = dict(manifest)
@@ -605,8 +677,28 @@ def cmd_grab(args) -> int:
     path = save_manifest(torrent_id, payload)
     thunder_add(exe, torrent_file, 'torrent')
     print(f'[p2p] task handed to 迅雷; manifest -> {path}')
+    _maybe_confirm(confirm, torrent=torrent_file, save_dir=save_dir)
     print('[p2p] check with: p2p.py status')
     return 0
+
+
+def _maybe_confirm(confirm: bool, torrent: str = '', save_dir: str = '',
+                   magnet: str = '') -> None:
+    """面板弹出后让 kf-service 的任务脚本点确认；拿不到脚本就明说，不假装成功。"""
+    if not confirm:
+        return
+    if not kf_tasks_script():
+        print('[p2p] kf-service 任务脚本不可用（设 KF_SERVICE_DIR 或 local.json '
+              'paths.kf_service）；迅雷面板需要人工点「立即下载」', file=sys.stderr)
+        return
+    code = confirm_via_tasks(torrent=torrent, save_dir=save_dir, magnet=magnet)
+    if code == 0:
+        print('[p2p] 面板已由 kf-service 任务脚本确认')
+    elif code == 3:
+        print('[p2p] 任务脚本拒绝执行（远程协作/缺锚点）；请人工确认，'
+              '远程会话结束后再试', file=sys.stderr)
+    else:
+        print(f'[p2p] 任务脚本退出 {code}；看上面的输出，必要时人工接管', file=sys.stderr)
 
 
 def _candidate_roots(manifest: dict, args, exe: str) -> list[str]:
@@ -763,6 +855,12 @@ def main(argv=None) -> int:
     grab.add_argument('--series', default='')
     grab.add_argument('--media-type', default='tv', choices=['tv', 'ova', 'movie'])
     grab.add_argument('--dry-run', action='store_true')
+    grab.add_argument('--save-dir', default='',
+                      help='落点目录（绝对路径）：交给 kf-service 任务脚本改「下载到」')
+    grab.add_argument('--confirm', dest='confirm', action='store_true', default=None,
+                      help='派单后用 kf-service 任务脚本点「立即下载」（默认：找到脚本就做）')
+    grab.add_argument('--no-confirm', dest='confirm', action='store_false',
+                      help='只派单，不自动确认面板')
     grab.add_argument('--allow-thunder', action='store_true',
                       help='远程协作进行中仍要派单（需用户明确同意）')
     common(grab)

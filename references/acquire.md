@@ -226,9 +226,13 @@ python scripts/acquire/p2p.py collect --series 小麻烦千惠 --dry-run
 - 迅雷路径/下载目录**自动探测**（`magnet:` 协议处理器 + `Profiles/config.json`），
   本机路径不写进仓库；`--thunder-exe` / `--download-dir` 可覆盖；
 - 迅雷 12 的「新建任务面板」需要**人工点一次「立即下载」**。面板是 Electron，
-  UIA 拿不到控件树；自动确认统一走 `kf-personal-service` 的
-  **GUI 任务脚本**（`scripts/ui/clicker.py` 的窗口相对坐标锚点，见那边
-  `references/ui-clicker.md`），本 skill 不再自带一套点击逻辑；
+  UIA 拿不到控件树；自动确认统一走 `kf-personal-service` 的 **GUI 任务脚本**
+  （`scripts/ui/tasks.py run thunder-download`，本 skill 只调用、不复制点击逻辑）：
+  - 脚本位置：`KF_SERVICE_DIR` 环境变量，或 `local.json` 的 `paths.kf_service`；
+  - `grab` 派单成功后默认就会调它点确认；`--no-confirm` 只派单不点，
+    `--confirm` 强制要求（找不到脚本就明说「请人工点」，不假装成功）；
+  - 落点：`grab --save-dir <绝对路径>` 透传给任务脚本，走「传统选择方式」改「下载到」；
+  - 退出码：0 已确认 / 2 输入有问题 / 3 被远程守卫拦下（此时请人工确认或等会话结束）；
 - **远程协作期间禁止开启迅雷等占用型软件**。远程同步开发时迅雷会吃满带宽、磁盘
   和 CPU，把远程会话和同步挤掉。`grab` 派单前会跑远程守卫
   （`acquire/remote_guard.py`：进程表里出现 `GameViewerServer.exe` / `GameViewer.exe`，

@@ -82,8 +82,10 @@ B 站还有的 → Bili23；老片只在公开 BT 发布里 → `p2p.py`。两�
 
 - 迅雷路径/下载目录自动探测，本机路径不写进仓库；`--thunder-exe` / `--download-dir` 可覆盖；
 - 迅雷 12 的「新建任务面板」要人工确认一次「立即下载」（Electron 面板拿不到控件树）。
-  自动确认的统一做法是**调 `kf-personal-service` 的 GUI 任务脚本**
-  （`scripts/ui/clicker.py` 的锚点 + 记录的任务脚本），本 skill 不自己写一套点击；
+  自动确认统一走**调 `kf-personal-service` 的 GUI 任务脚本**
+  （`tasks.py run thunder-download`，本 skill 只调用）：`grab` 派单后默认就调，
+  `--no-confirm` 关掉，`--save-dir` 顺便改落点；脚本位置配置见
+  [references/acquire.md](references/acquire.md) §11；
 - **远程协作期间禁止开启迅雷等占用型软件**：远程同步开发时迅雷吃带宽/磁盘/CPU，
   会把远程会话和同步挤掉。`p2p.py grab` 派单前会检查远程会话信号，检测到就拒绝；
   确实要用时由用户明确同意后加 `--allow-thunder`；
