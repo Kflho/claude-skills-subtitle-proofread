@@ -49,7 +49,7 @@ description: >
 | 转录 + 修轴 + 专名 + 翻译一条龙 | `run_all.py`（`--asr qwen3`、`--translate`、`--skip-whisper`） | 自己排阶段、自己拼调用 |
 | 单集转写 / 单集翻译 | `asr/qwen3_transcribe.py`、`translate_srt.py --input` | 再包一层 wrapper |
 | 批量翻译 + QA（单集模式才有 QA） | `translate_srt.py` 逐集跑，或直接 `video_to_zh.py` | 并发驱动、watch 轮询 |
-| OP/ED 边界、唱词聚类、固定台词统一 | `fix/oped_fixer.py` + `lib/oped_detect.py` + `nouns/context_review.py --mode oped` | 正则唱词探测、时间窗猜测、跨集去重 |
+| OP/ED 边界、唱词聚类、固定台词统一 | `audio/oped_boundaries.py`（音频指纹定窗口 + `--frames-dir` 抽帧复核）、`fix/oped_fixer.py`、`fix/oped_region.py`（窗口内换定本歌词）、`nouns/context_review.py --mode oped` | 正则唱词探测、时间窗猜测、跨集去重 |
 | 专名归一 / 变体替换 / 文本闸门 / 交付 | `nouns/normalize_variants.py`、`nouns/apply_map.py`、`eval/text_gate.py`、`eval/release_gate.py` | 自己数条数、自己查残留 |
 | 参考字幕复用 | `reuse/*` | 手写配对/重打轴 |
 

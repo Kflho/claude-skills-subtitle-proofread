@@ -687,6 +687,38 @@ python "<scripts-dir>/fix/oped_fill.py" "<SUBTITLE_DIR>" \
 **执行顺序**：先 `oped_fill` 填空白 → 再 `oped_fixer` 统一文本变体。
 **边界检测**：两个工具都支持 `--detect-boundaries`（API 语义分析 cue 列表）和手动 `--op-boundary`/`--ed-boundary`。
 
+### 唱词全是乱码时：音频定窗口 → 画面复核 → 换定本
+
+ASR 对 OP/ED 唱段基本是乱写，`--detect-boundaries` 又是按 cue 文本猜的，
+两边都不可靠。可靠顺序是**先定时间，再换文本**：
+
+```bash
+# 1) 音频指纹定每集的 OP/ED 窗口（参考集给一段已知的 OP/ED 时间）
+python "<scripts-dir>/audio/oped_boundaries.py" --video-dir "<VIDEO_DIR>" \
+  --op-ref "<EP001.avi>@40-110" --ed-ref "<EP001.avi>@1442-1486" \
+  --output data/temp/oped_windows.json --frames-dir data/temp/oped_frames
+
+# 2) 画面复核：看 data/temp/oped_frames/<EP>_op_start.png 等边界帧
+#    （片头应落在报幕/标题卡，片尾应落在人员名单或结尾画）
+
+# 3) 窗口内换成定本歌词（一行一句的 txt），默认只写副本
+python "<scripts-dir>/fix/oped_region.py" "<中文目录>" \
+  --windows data/temp/oped_windows.json \
+  --op-lines data/temp/op_zh.txt --ed-lines data/temp/ed_zh.txt \
+  --out-dir data/temp/oped_out
+```
+
+要点：
+
+- **同一部片子 OP/ED 的曲子通常每集一样**（换的只是画面），所以音频互相关分数会到
+  0.93–1.00；分数掉到 0.5 以下说明换曲/换剪辑/没有这一段，工具记 `null`，别硬套。
+- `--frames-dir` 抽的是 start/mid/end 三帧，专门给「画面复核」用；片头落点应当是
+  报幕卡或标题，片尾应当是人员名单/结尾画。
+- 定本歌词按**行字数**分配时长（不是按 ASR 的 cue 边界——那些块长能从 1 秒跳到 16 秒）。
+- 行数少于/多于原 cue 都能收：替换后该段条数会变，这是有意的合并，不要拿
+  「条数与日文源完全一致」去卡 OP/ED 段。
+
+
 ### AI 润色（--lang zh）
 
 **触发**: Pipeline 末尾交互提问 `是否对最终字幕进行 AI 润色？(y/n)`
