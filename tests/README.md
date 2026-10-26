@@ -37,7 +37,15 @@ python -m pytest -q --cov --cov-report=term-missing    # 覆盖率（需 pytest-
 
 ## 覆盖现状
 
-当前 **1817 passed / 4 skipped**（无网络、无模型、无真实项目）。
+当前 **1837 passed / 4 skipped**（无网络、无模型、无真实项目，2026-10-26）。
 主链（Whisper 编排 / VAD、翻译、专名、OP/ED、`run_all` 各 step、scanner、apply、
 worker / CLI、`whisper_utils`、`episode_workflow`、reuse、eval）已覆盖；
 缺口按文档分册记在各目录的用例里，补测时先补夹具再补断言。
+
+OP/ED 这条线现在是三件套，测试都在 `tests/subtitle/`：
+
+| 能力 | 测试 | 锁什么 |
+|---|---|---|
+| 音频指纹定窗口 `audio/oped_boundaries.py` | `subtitle/test_oped_boundaries.py`（11 项） | 参考段解析、频带特征归一、已知位移检出（±0.15s）、缺席时返回 null、搜索窗口、集号解析 |
+| 窗口内换定本 `fix/oped_region.py` | `subtitle/test_oped_region.py`（7 项） | 按字数分配时长、行数多于/少于原 cue、区域外不动、默认写副本、`--in-place` 造 `.bak`、`--dry-run` 不写 |
+| 编排透传 `video_to_zh.py` | `subtitle/test_video_to_zh.py`（5 项） | `--chunk-sec/--max-batch` 透传、不给时不往命令行塞 0、转写/翻译命令拼装 |

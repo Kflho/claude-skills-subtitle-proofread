@@ -238,7 +238,7 @@ python scripts\eval\diagnose_timeline.py --asr-json temp\asr\digimon_ep002_main.
 | glossary-first → ASR context（P1） | 🟡 context 通到 worker；run_all 不传，`ASR_CONTEXT_FILE` 未使用 | ✅ glossary 可生成 | ❌ | ⬜ 零新资产，可立即接 |
 | LLM 主翻译 + glossary（P1） | ✅ 独立 `scripts/translate_srt.py`；百度路径已删除 | ✅ `~/.claude/settings.json` 已配 DeepSeek，短句实测通过 | ❌ | 🟡 工具在，未进 run_all；**翻译是唯一 LLM 例外**（ADR-011） |
 | 人声分离默认关（P2） | ✅ demucs，仅 Whisper 路径 | ✅ HTDemucs | ❌ ASR 路径 | ⛔ 审计：老模型，只作 fallback |
-| OP/ED AED + 指纹（P2） | ⬜ | 依赖 FireRedVAD | ⬜ | ⛔ |
+| OP/ED 音频指纹（P2） | ✅ `audio/oped_boundaries.py`（参考段指纹 + 滑窗互相关 + 边界帧复核）；`fix/oped_region.py` 按窗口换定本 | ✅ 无网/无模型，11+7 项测试 | ✅ 足球健将 52 集 104 区间全中（0.92–1.00），OP 恒 70s / ED 恒 44s，边界帧人工复核 | ✅ 可用（AED 仍只作提示） |
 | 切片重对齐（P2） | ⬜（还是旧 spot fix） | ✅ FA | ❌ | ⬜ |
 | 说话人分离（P5） | ⛔ 已删除（用户决定说话人无用） | — | — | 不再考虑 |
 | VibeVoice（P5） | ⛔ 已删除（资产/运行时已清理） | — | — | 不再考虑 |

@@ -3,7 +3,8 @@
 字幕校对 + 日语→中文翻译 skill。支持：
 **已有日文字幕**校对/翻译，或**只有视频**的一键粗剪（Qwen3 转写 → LLM 翻译 → QA）。
 
-> 当前边界：视频一键出的是句子级粗剪，不是最终字幕；OP/ED 尚未接入。
+> 当前边界：视频一键出的是句子级粗剪，不是最终字幕。
+> OP/ED 走「音频指纹定窗口 + 画面复核 + 定本歌词替换」（见 `audio/oped_boundaries.py`、`fix/oped_region.py`）。
 > FireRedVAD 仅诊断/预研。
 
 ## 快速上手
@@ -52,7 +53,12 @@ translated/zh/<EP>.qa.json
 ## 能力
 
 - 日语 SRT/ASS 扫描、乱码检测、时间轴修复；
-- Qwen3-ASR + ForcedAligner（60s 切块）或 legacy Whisper；
+- Qwen3-ASR + ForcedAligner（worker 自切块，默认 60s；老音源用 `--chunk-sec 20 --max-batch 8`）
+  或 legacy Whisper；整季一条命令 `video_to_zh.py`（已有 `ja/<EP>.srt` 自动 reuse，透传上面两个参数）；
+- **OP/ED 时间段定位**：`audio/oped_boundaries.py` 跨集音频指纹互相关定窗口（`--frames-dir` 抽边界帧做画面复核），
+  不依赖 ASR 唱词，也不吃固定窗口；
+- **OP/ED 唱词定稿**：`fix/oped_region.py` 按窗口把该段 cue 换成定本歌词（按时长/字数分配），
+  配合 `fix/oped_fixer.py`（跨集变体统一）与 `nouns/context_review.py --mode oped`（`_meta.fixed_lines` 优先）；
 - LLM 翻译：批处理、按批 glossary、ID 协议、QA、问题条 repair；
 - 专名提取/统一、系列词表验证、**变体归一**（分批翻译漂移用确定性替换收敛）；
 - 译后**质量闸门**：kana 残留 / 回显 / 变体 / CPS 四项计数，超阈值退出 1；
@@ -68,7 +74,9 @@ translated/zh/<EP>.qa.json
 ## 已知限制
 
 - 视频直出已接，但 ASR 是句子级、raw text 有错，输出是粗剪；
-- OP/ED 翻译未完成；
+- OP/ED **唱词**走「音频指纹定窗口 + 定本歌词替换」，译文是人工定稿，不参与 ASR/翻译质量证据；
+  定本行数与实际演唱句数要人工核对一遍；
+- 唱歌区间的 ASR 文本仍会乱写，替换前别拿它判断歌词；
 - FireRedVAD 当前只写诊断 hints，没有决策消费者；
 - 整集翻译后请先看 QA，残留/术语问题按报告修。
 

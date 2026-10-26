@@ -12,6 +12,7 @@
 | FireRedVAD + AED | VAD + speech/singing/music | README 样例、EP001–003 整集、空洞归因、OP/ED 窗口 | 能分事件；singing 在 OP/ED 是正文 ~6 倍（三集一致）；**空洞只 12/53 为 speech 主导，只支持过滤** | 🟡 已接 `--audio-hints` 写证据；决策未接 |
 | VibeVoice-ASR-BitNet | 60min Who/When/What + 热词 | 60s 日语动画片段（text/json 两种 prompt） | **没有 who/when；专名更差；用户决定删除说话人** | ⛔ 已删资产，不接 |
 | Mel-Band RoFormer | 人声分离 | 无（只有权重，运行时未接） | 未测 | ⛔ 暂不接 |
+| 音频指纹（自研，非模型） | 跨集 OP/ED 时间段 | 单元测试 11 项（已知位移 ±0.15s、缺席返回 null）+ 足球健将真实 52 集 | 104/104 区间命中，分数 0.92–1.00；OP 恒 70s、ED 恒 44s；边界帧人工复核 | ✅ 可用（`audio/oped_boundaries.py`） |
 | LLM 翻译（DeepSeek） | 日→中翻译 | 1 句短句 API 验证 | 能调用；**无成集质量证据** | 🟡 只做 20 cue pilot |
 | Review 阶梯 | L0-L3 减人工 | 单元测试（工作单/set_time） | 机制可用；**无 pilot 收益证据** | 🟡 先做 EP001 小样本 pilot |
 
