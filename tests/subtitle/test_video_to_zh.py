@@ -31,6 +31,25 @@ def test_translate_command(tmp_path):
     assert '--batch 10' in joined
 
 
+def test_transcribe_chunk_flags_passthrough(tmp_path):
+    """老音源要 20 秒块：编排层必须能把两个旋钮透传给 qwen3_transcribe。"""
+    cmd = v.build_transcribe_cmd(
+        'qwen3', 'video.mkv', str(tmp_path / 'ja' / 'EP001.srt'),
+        chunk_sec=20, max_batch=8)
+    joined = ' '.join(cmd)
+    assert '--chunk-sec 20' in joined
+    assert '--max-batch 8' in joined
+
+
+def test_transcribe_chunk_flags_omitted_by_default(tmp_path):
+    """不给就保持引擎默认，不往命令行塞 0（0 是「引擎默认」，但别冒充显式参数）。"""
+    cmd = v.build_transcribe_cmd(
+        'qwen3', 'video.mkv', str(tmp_path / 'ja' / 'EP001.srt'))
+    joined = ' '.join(cmd)
+    assert '--chunk-sec' not in joined
+    assert '--max-batch' not in joined
+
+
 def test_dry_run_selects_videos(tmp_path, capsys):
     video_dir = tmp_path / 'videos'
     video_dir.mkdir()

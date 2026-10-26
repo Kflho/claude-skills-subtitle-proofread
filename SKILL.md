@@ -26,7 +26,8 @@ description: >
 ## 何时加载（使用 vs 开发）
 
 - **使用**：任何字幕任务开始前先按本文件定位到阶段，再进子文档，不凭记忆直接改字幕。
-- **开发**：修改本仓库任何 pipeline/工具/文档前也先重读「行为分级」「错误恢复」，
+- **开发**：修改本仓库任何 pipeline/工具/文档前也先重读「行为分级」「错误恢复」
+  和下面的「硬规矩：先查现有入口」，
   **先找现有实现**（`oped_fixer`、`apply_map`、`run_all`、`references/*`），不要另写一套。
 - **开发与 harness**：本仓库是唯一开发源。本机用 **junction** 指向仓库，
   改完立即生效：`python scripts/harness/sync_skill.py --link`；换机器/打包用复制模式
@@ -38,11 +39,36 @@ description: >
   （自动从环境/`~/.claude/settings.json` 读取模型目录、Qwen venv、Whisper、ffmpeg、
   LLM 端点）。仓库里不提交这些。
 
+## 硬规矩：先查现有入口，别另写一套
+
+**执行任务时不许写新脚本**——本文件与 `scripts/` 已经覆盖全流程。动手前先在这张表里找：
+
+| 你要干的事 | 现成入口（就用它） | 常被重复实现的东西 |
+|---|---|---|
+| 视频 → 日文 SRT → 中文（整季/整目录） | `video_to_zh.py`（已有 ja 自动 reuse；`--chunk-sec/--max-batch` 透传给 ASR） | 遍历视频的 for 循环、跳过已完成集的逻辑 |
+| 转录 + 修轴 + 专名 + 翻译一条龙 | `run_all.py`（`--asr qwen3`、`--translate`、`--skip-whisper`） | 自己排阶段、自己拼调用 |
+| 单集转写 / 单集翻译 | `asr/qwen3_transcribe.py`、`translate_srt.py --input` | 再包一层 wrapper |
+| 批量翻译 + QA（单集模式才有 QA） | `translate_srt.py` 逐集跑，或直接 `video_to_zh.py` | 并发驱动、watch 轮询 |
+| OP/ED 边界、唱词聚类、固定台词统一 | `fix/oped_fixer.py` + `lib/oped_detect.py` + `nouns/context_review.py --mode oped` | 正则唱词探测、时间窗猜测、跨集去重 |
+| 专名归一 / 变体替换 / 文本闸门 / 交付 | `nouns/normalize_variants.py`、`nouns/apply_map.py`、`eval/text_gate.py`、`eval/release_gate.py` | 自己数条数、自己查残留 |
+| 参考字幕复用 | `reuse/*` | 手写配对/重打轴 |
+
+**要新建文件前的三问**（答不上就停下来问用户，不要直接写）：
+
+1. 表里有对应入口吗？有 → 用现成的，最多加参数。
+2. 是**缺参数**还是**缺功能**？缺参数 → 给现成工具加透传 + 加测试（例：`video_to_zh.py`
+   的 `--chunk-sec/--max-batch`），**不要在外面包一层循环**。
+3. 加完有测试吗？`python -m pytest tests -q` 必须绿；文档改动跑 `tests/test_pipeline_docs.py`。
+
+> 自查记录（2026-10-26，足球健将）：曾为 ASR/翻译/OP-ED/体检各写一个脚本，四个全部与
+> `video_to_zh.py`、`oped_fixer.py`、`eval/*` 重复，属违规实现，已删。留下的真实缺口只有一个：
+> `video_to_zh.py` 不透传 ASR 分块参数——补法就是加透传，不是加脚本。
+
 ## 全流程（五段）
 
 | 段 | 目的 | 输入 | 入口 | 完成判据 | 子文档 |
 |---|---|---|---|---|---|
-| **0 调研** | 先弄清「有没有现成字幕、这作品是什么」 | 片名/日文原名/链接 | 字幕站检索、外部参考、词表 | 有/没有参考字幕都写清；专名表初版就位 | [research.md](references/research.md) |
+| **0 调研** | 先弄清「有没有现成字幕、这作品是什么」 | 片名/日文原名/链接 | 字幕站检索、外部参考、词表 | 有/没有参考字幕都写清；背景与梗概落档；专名表初版就位 | [research.md](references/research.md) |
 | **1 获取** | 把视频（和可能的字幕）拿到本地 | 链接 / 种子 | `acquire/bili23.py`、`acquire/p2p.py` | 视频进媒体库，逐文件核对完成 | [acquire.md](references/acquire.md) |
 | **2 转录与打轴** | 无字幕时从音频出日文 SRT；有字幕时修轴 | 视频 / 生字幕 | `asr/qwen3_transcribe.py`、`asr/align_cues.py`、`video_to_zh.py` | 条数齐全、时间轴有序、无 0 时长堆积 | [subtitle.md](references/subtitle.md) |
 | **3 校对与统一** | 修错字、统一专名、OP/ED 定稿 | 日文 SRT + 词表 | `run_all.py`、`nouns/*`、`fix/oped_fixer.py` | `eval/text_gate.py` 通过（kana=0、变体=0） | [subtitle.md](references/subtitle.md) |
@@ -63,10 +89,16 @@ description: >
 
    清单里没实测的站点只给「人工检索」，不会拼错的检索 URL；查到什么都要把结论写回。
 2. **建外部参考档案**（第 0 步，跑 ASR 之前）：`bin/reference_docs/<作品>_外部参考.md`。
-   ASR 只回答「听到什么」，回答不了「正确写法是什么」；名字读音、招式、OP/ED 歌词、
-   集号对照、时代用语都要从外部查。查什么、去哪查、可信度阶梯见
+   ASR 只回答「听到什么」，回答不了「正确写法是什么」。这一份档案要装四样：
+   **作品元信息与故事背景/梗概**（整体背景、整体梗概、单集梗概）、**人名读音与招式**、
+   **OP/ED 歌词**、**集号对照与时代语体**。查什么、去哪查、可信度阶梯见
    [references/external-references.md](references/external-references.md)。
-3. **专名表初版**：名字/招式 → `data/glossaries/<series>.series.json`；
+   单集梗概最省的办法是抽片尾「次回予告」——旁白会把下一集讲一遍，ASR 直接能用。
+3. **定翻译调子**：由故事背景/梗概定整体语体，由人物特点定各自台词口吻，写成
+   **正面指引**（谁怎么说话、时代词怎么译），不要堆「禁用词清单」——
+   实测提示词里的风格块与禁用词表对成片没有可测收益，真正管用的是写清口吻 + 事后
+   `style_lint` 检测与定向改写（[design/style-context.md](references/design/style-context.md)）。
+4. **专名表初版**：名字/招式 → `data/glossaries/<series>.series.json`；
    读音 → 同目录 `.meta.json` 的 `readings` + `canonical_ja`。
 
 > 上游结构（页数、每页时长、**有没有字幕轨**）先用

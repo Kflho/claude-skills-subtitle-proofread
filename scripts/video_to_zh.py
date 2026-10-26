@@ -29,7 +29,9 @@ TRANSLATE_CLI = SCRIPTS / 'translate_srt.py'
 
 def build_transcribe_cmd(engine: str, video: str, ja_srt: str, *,
                          python: str = '', model: str = '',
-                         aligner: str = '', language: str = 'Japanese') -> list:
+                         aligner: str = '', language: str = 'Japanese',
+                         chunk_sec: float = 0,
+                         max_batch: int = 0) -> list:
     if engine == 'qwen3':
         asr_json = str(Path(ja_srt).with_suffix('.asr.json'))
         cmd = [sys.executable, str(QWEN_CLI),
@@ -41,6 +43,12 @@ def build_transcribe_cmd(engine: str, video: str, ja_srt: str, *,
             cmd += ['--model', model]
         if aligner:
             cmd += ['--aligner', aligner]
+        # 老片/噪声大的音源：20 秒块比引擎默认 180 秒块少一半零时长 token
+        # （见 asr/README.md、references/subtitle.md）。0 = 不传，走引擎默认。
+        if chunk_sec:
+            cmd += ['--chunk-sec', str(chunk_sec)]
+        if max_batch:
+            cmd += ['--max-batch', str(max_batch)]
         return cmd
     if engine == 'whisper':
         return [sys.executable, str(WHISPER_CLI),
@@ -77,6 +85,12 @@ def main(argv=None):
     parser.add_argument('--model', default='', help='Qwen3-ASR path/id')
     parser.add_argument('--aligner', default='',
                         help='Qwen3-ForcedAligner path/id')
+    parser.add_argument('--chunk-sec', type=float, default=0.0,
+                        help='ASR chunk seconds (0 = engine default; use 20 on '
+                             'noisy old TV audio — see asr/README.md)')
+    parser.add_argument('--max-batch', type=int, default=0,
+                        help='chunks decoded per generate() call '
+                             '(0 = qwen3_transcribe default 8)')
     parser.add_argument('--mappings', default='',
                         help='ja→zh glossary JSON (optional)')
     parser.add_argument('--batch', type=int, default=20)
@@ -115,7 +129,8 @@ def main(argv=None):
         if not os.path.exists(ja_srt):
             cmd = build_transcribe_cmd(
                 args.engine, video, ja_srt, python=args.python,
-                model=model, aligner=aligner)
+                model=model, aligner=aligner,
+                chunk_sec=args.chunk_sec, max_batch=args.max_batch)
             print('[transcribe] ' + ' '.join(cmd), file=sys.stderr)
             if not args.dry_run:
                 if subprocess.run(cmd).returncode != 0:

@@ -62,7 +62,7 @@ python scripts/lib/media_paths.py --check        # 打印本机解析结果
       "series": "赤胴铃之助",
       "media_type": "tv",
       "category": "animation",
-      "style": "江户时代剑戟动画，少年英雄口气，避免现代网络用语",
+      "style": "江户时代剑戟动画，短句喊话的少年英雄口气；口吻见项目参考档案",
       "source_lang": "ja",
       "target_lang": "zh-CN",
       "video_dir": "",

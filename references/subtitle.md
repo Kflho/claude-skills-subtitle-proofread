@@ -251,6 +251,18 @@ python scripts/run_all.py --asr qwen3 --audio-hints
 - 串行实测：对话密集集 3.5–6 分钟/集，片头唱段多的集会慢一些（幻觉块撞预算）；
 - 全套 52 集约 4 小时，中途中断直接重跑同一命令即可（已有 SRT 会跳过）。
 
+**整季的跑法只有一条命令**（别写循环，`video_to_zh.py` 已经做了「跳过已有 ja」）：
+
+```bash
+python "<scripts-dir>/video_to_zh.py" --video-dir "<视频目录>" --output-dir "<项目>/data" \
+  --engine qwen3 --python "<venv>/Scripts/python.exe" \
+  --chunk-sec 20 --max-batch 8 \
+  --mappings "<项目>/data/glossaries/<series>.series.json" --batch 20
+```
+
+`--chunk-sec` / `--max-batch` 必须显式给（默认 0 = 引擎 180 秒块，就是上面表格要避开的
+那个参数）。只想要日文转写时，把同一命令跑在已有 ja 的输出目录上也会直接 reuse。
+
 > 片头/片尾唱段：ASR 对唱词基本是乱写（`超大な鼓動へ` 这类），且 ForcedAligner 不给
 > 时间戳（0 时长 cue 集中在 OP/ED）。合成片要发之前，OP/ED 用 `_meta.fixed_lines`
 > 或 oped_fixer 统一，别指望 ASR 出对歌词。
