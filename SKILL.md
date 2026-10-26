@@ -1,11 +1,6 @@
 ---
 name: subtitle-proofread
-description: >
-  字幕任务统一入口，管全流程：前期调研（字幕站检索、故事背景、专名表）→ 资源获取
-  （B 站、种子站、迅雷派单）→ 转录打轴 → 校对与术语统一 → 翻译交付。用户提到：字幕校对 /
-  翻译字幕 / 专名、专有名词、译名、术语统一 / 时间轴修复、轴不对 / OP-ED、片头片尾、固定台词 /
-  SRT、ASS 批量处理 / 找字幕、下片源时，先加载本 skill 再动手。维护或开发本 skill
-  （改 pipeline、工具、文档）时同样先加载，现有工具优先，避免重复造轮子。
+description: 字幕任务统一入口：调研（字幕站检索、故事背景与梗概、专名表）→ 资源获取（B 站、种子站）→ 转录打轴 → 校对统一 → 翻译交付。适用于：字幕校对、翻译字幕、专名/术语/译名统一、变体归一、时间轴修复、跨语言重打轴、乱码扫描、OP-ED/片头片尾/固定台词、参考字幕复用、补条与 AI 复核、SRT/ASS 批量处理、配置与项目登记、快速上手。维护或开发本 skill 时同样先加载，现有工具优先，避免重复造轮子。
 ---
 
 # 字幕生产线
@@ -22,6 +17,26 @@ description: >
 > **资源驱动**：有什么用什么。有视频 → ASR 出轴；有参考字幕 → 复用/重打轴；
 > 什么都没有 → 先做段 0（调研），别直接开跑。缺资源也能残血运行——跳过缺失步骤，
 > 剩余步骤照常。
+
+## 阶段路由（按任务/症状找文档）
+
+先在这里定位，再进子文档；**不要凭记忆直接改字幕**。
+
+| 触发 | 读 | 什么时候用 |
+|---|---|---|
+| 快速上手 / 环境 | [references/quickstart.md](references/quickstart.md)、[references/setup.md](references/setup.md)、[references/first-run.md](references/first-run.md) | 刚装好环境、想先跑通 3 集 |
+| 打轴 / 转录 | [references/workflows.md](references/workflows.md)、[references/subtitle.md](references/subtitle.md) | 没有字幕，要 ASR 出轴再翻译 |
+| 字幕校对 / 轴不对 | [references/subtitle.md](references/subtitle.md)、[references/retime-existing-subs.md](references/retime-existing-subs.md) | 已有字幕要修文本或重打轴 |
+| 跨语言重打轴 | [references/design/crosslingual-retime.md](references/design/crosslingual-retime.md) | 外语字幕 + 另一语种音轨 |
+| 乱码扫描 / 碎片 | [references/phase1-scan.md](references/phase1-scan.md)、[references/phase2-triage.md](references/phase2-triage.md)、[references/phase3-unify.md](references/phase3-unify.md) | 三段式扫描修轴命令参考 |
+| 专名 / 术语 / 变体归一 | [references/research.md](references/research.md)、[references/design/glossary-variants.md](references/design/glossary-variants.md) | 译名不一致、同源异译 |
+| 补条 / AI 复核 | [references/design/review-ai-fill.md](references/design/review-ai-fill.md)、[references/design/asr-name-repair.md](references/design/asr-name-repair.md) | 有人声没字幕、ASR 把名字听错 |
+| OP-ED / 片头片尾 / 固定台词 | [references/workflows.md](references/workflows.md)、[references/design/oped-fixed-lines.md](references/design/oped-fixed-lines.md) | 唱词乱码、片头片尾定稿 |
+| 参考字幕复用 | [references/full-mode.md](references/full-mode.md)、[references/reuse-reference-subs.md](references/reuse-reference-subs.md) | 有参考字幕可借 |
+| 翻译字幕 / QA | [references/translation.md](references/translation.md) | 翻译参数、QA、润色、重译判定 |
+| 调研 / 梗概 / 外部资料 | [references/external-references.md](references/external-references.md) | 查读音、招式、时代用语、剧情梗概 |
+| 配置 / 项目登记 | [references/config.md](references/config.md) | local.json、projects_registry.json |
+| AI 介入点 | [references/interventions.md](references/interventions.md) | 每个 🤖 点怎么判、怎么问 |
 
 ## 何时加载（使用 vs 开发）
 
@@ -237,3 +252,8 @@ python "<scripts-dir>/lib/projects_index.py" --check                    # 全部
 | `references/phase{1,2,3}-*.md` | 三阶段命令参考（扫描 / 修轴 / 统一） |
 | [references/full-mode.md](references/full-mode.md) | 有参考字幕时的完整工作流 |
 | [references/reuse-reference-subs.md](references/reuse-reference-subs.md) | 参考字幕复用的判定与判据 |
+| [references/batch-review.md](references/batch-review.md) | **已弃用**：旧版专名审查（扫描→API 分类→黑名单），只在看存量项目时参考 |
+| [references/quickstart.md](references/quickstart.md) | 快速上手：最小命令集 |
+| [references/setup.md](references/setup.md) | 环境与模型资产安装 |
+| [references/retime-existing-subs.md](references/retime-existing-subs.md) | 已有字幕重打轴 |
+| [references/design/](references/design/) | 设计记录：ASR 命名修复、跨语言重打轴、词表变体、OP/ED 定本、复核补条 |
