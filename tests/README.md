@@ -12,7 +12,7 @@
 | `acquire/` | [references/acquire.md](../references/acquire.md) | B 站、种子站、p2p 派单确认、远程守卫 |
 | `subtitle/` | [references/subtitle.md](../references/subtitle.md) | 扫描、ASR / Whisper、打轴与对齐、修复、OP-ED、复用、`run_all` |
 | `translation/` | [references/translation.md](../references/translation.md) | 翻译、QA、润色、重译判定、worker / CLI |
-| `shared/` | [SKILL.md](../SKILL.md)、[references/config.md](../references/config.md) | 配置、项目路径、文档路由、schema、发布闸门 |
+| `shared/` | [SKILL.md](../SKILL.md)、[references/config.md](../references/config.md)、[capabilities.json](../capabilities.json) | 配置、项目路径、文档路由、能力清单、schema、发布闸门 |
 
 `conftest.py`（共享 fixture）与 `data/`（小样本）留在 `tests/` 根；
 新加测试按"它验证的那份文档"放进对应目录，不要平铺在根。
@@ -37,10 +37,14 @@ python -m pytest -q --cov --cov-report=term-missing    # 覆盖率（需 pytest-
 
 ## 覆盖现状
 
-当前 **1837 passed / 4 skipped**（无网络、无模型、无真实项目，2026-10-26）。
+当前 **1853 passed / 4 skipped**（无网络、无模型、无真实项目，2026-10-27）。
 主链（Whisper 编排 / VAD、翻译、专名、OP/ED、`run_all` 各 step、scanner、apply、
 worker / CLI、`whisper_utils`、`episode_workflow`、reuse、eval）已覆盖；
 缺口按文档分册记在各目录的用例里，补测时先补夹具再补断言。
+
+skill 自身的结构也有人守：`tests/shared/test_pipeline_docs.py` 锁主文档 ≤150 行、
+五段路由、细节已下沉；`tests/shared/test_capabilities.py` 锁 `capabilities.json` 的
+每个能力都有入口 / 文档 / 触发词（全量 `python scripts/capabilities.py --report` 看矩阵）。
 
 OP/ED 这条线现在是三件套，测试都在 `tests/subtitle/`：
 

@@ -51,11 +51,36 @@ def test_subtitle_manual_moved_out_of_the_main_doc():
 
 
 def test_main_doc_states_the_xunlei_rule():
-    """迅雷必须走 kf-service 任务脚本，且远程协作期间禁止开启。"""
+    """迅雷确认走 kf-service 任务脚本；远程协作期间不开迅雷。"""
     text = _text(SKILL)
     assert 'kf-personal-service' in text
-    assert '禁止开启迅雷' in text
+    assert 'thunder-download' in text
     assert '--allow-thunder' in text
+    assert '远程协作期间不开迅雷' in text
+
+
+def test_main_doc_is_a_router_not_a_manual():
+    """主文档只放常驻层：超过 150 行说明细节又堆回来了（kf-personal-development 的写 skill 规范）。"""
+    lines = _text(SKILL).splitlines()
+    assert len(lines) <= 150, f'SKILL.md 有 {len(lines)} 行，细节应下沉 references/'
+
+
+def test_main_doc_declares_layers_and_boundaries():
+    text = _text(SKILL)
+    assert '## 何时加载与能力分层' in text
+    assert '## 能力边界' in text
+    assert '## 阶段路由' in text
+
+
+def test_moved_sections_live_in_their_subdocs():
+    """排错、开发规矩、输出目录都下沉了，别又搬回主文档。"""
+    main = _text(SKILL)
+    for heading in ('## 错误恢复', '## 子文档索引', '## 输出目录约定'):
+        assert heading not in main, f'已经下沉的小节又回到主文档：{heading}'
+    assert '## 1 跑不起来' in _text(ROOT / 'references' / 'troubleshooting.md')
+    assert '## 3 能力清单' in _text(ROOT / 'references' / 'development.md')
+    assert '## 6 输出目录' in _text(ROOT / 'references' / 'config.md')
+
 
 
 def test_research_doc_lists_the_subtitle_sites():

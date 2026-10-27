@@ -159,3 +159,21 @@ python scripts/config/audit.py --skill <skill-dir> [--project <project-dir>]
 - 媒体库根目录是否被写进了 `SKILL.md` / `references/*.md`？写了就是从 `local.json`
   回退成硬编码，必须删；
 - 相对仓库路径（`scripts/...`、`rules/...`）可以提交；绝对本机路径不行。
+
+## 6 输出目录：项目内按二元目录分层
+
+中间产物和成品分开，别混在项目根：
+
+```text
+<project>/
+  bin/reference_docs/   输入资料（参考字幕、源字幕、外部参考）
+  bin/exports/<YYMMDD>/ 成品，一次发布一个日期目录；同名 zip 放旁边
+  data/temp/            一次性中间产物（scans/、ASR、锚点、缓存）
+  data/reports/         生成的报告（问题解决报告.md、proper-nouns.md、manual-review/）
+  data/glossaries/      词表
+  data/ja/  data/zh/    日文转写 / 中文工作副本
+```
+
+`lib/project_paths.py` 是唯一路径入口：项目下有 `data/` 就写 `data/temp`、`data/reports`；
+没有就退回旧布局 `temp/`、`reports`。新建项目先 `mkdir data` 再跑管线；成品只进
+`bin/exports/<日期>/`，发布目录只读，要改动就新建日期目录。

@@ -62,6 +62,8 @@ translated/zh/<EP>.qa.json
 - LLM 翻译：批处理、按批 glossary、ID 协议、QA、问题条 repair；
 - 专名提取/统一、系列词表验证、**变体归一**（分批翻译漂移用确定性替换收敛）；
 - 译后**质量闸门**：kana 残留 / 回显 / 变体 / CPS 四项计数，超阈值退出 1；
+- **能力清单**：`capabilities.json` 按常驻 / 阶段 / 交付前三层登记入口与触发词，
+  `python scripts/capabilities.py --report` 看矩阵、`--check` 抓失效项；
 - 输出中文 SRT + QA 报告，不覆盖源字幕。
 
 ## 环境

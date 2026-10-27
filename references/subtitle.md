@@ -121,7 +121,7 @@ python "<scripts-dir>/nouns/context_review.py" ... --mode oped \
 
 > ⚠️ **已弃用**，仅存量项目参考。新项目一律走上方「专名审查（AI 驱动）」。
 > 旧法的扫描 → API 批量分类 → 黑名单/映射表循环见
-> [references/batch-review.md](batch-review.md)。
+> [design/batch-review-legacy.md](design/batch-review-legacy.md)。
 
 关键文件：`temp/scans/candidates.json`、`temp/noun_mappings.json`、
 `temp/zh_common_blacklist.json`、`temp/scans/classified_terms.json`。
@@ -629,7 +629,7 @@ Pipeline 不会自动暂停。输出中看到以下关键字时，**停下来处
 （已知译法不一致，如「阿托姆」应为「阿童木」）按 `zh_canonical_in_mappings` 编辑 SRT；
 `unknown_suspect` 判专名 / 普通词 —— 专名补 `noun_mappings.json` + 统一 SRT，普通词补
 `temp/zh_common_blacklist.json`。候选 > 50 条时走 API 批量分类（30 条/批），完整流程见
-[references/batch-review.md](batch-review.md)。修完重跑至 candidates 归零。
+[design/batch-review-legacy.md](design/batch-review-legacy.md)。修完重跑至 candidates 归零。
 
 ### AI 碎片补全
 

@@ -1,26 +1,25 @@
 ---
 name: subtitle-proofread
-description: 字幕任务统一入口：调研（字幕站检索、故事背景与梗概、专名表）→ 资源获取（B 站、种子站）→ 转录打轴 → 校对统一 → 翻译交付。适用于：字幕校对、翻译字幕、专名/术语/译名统一、变体归一、时间轴修复、跨语言重打轴、乱码扫描、OP-ED/片头片尾/固定台词、参考字幕复用、补条与 AI 复核、SRT/ASS 批量处理、配置与项目登记、快速上手。维护或开发本 skill 时同样先加载，现有工具优先，避免重复造轮子。
+description: 字幕任务统一入口：调研 → 资源获取 → 转录打轴 → 校对统一 → 翻译交付。适用于：字幕校对、翻译字幕、专名/术语/译名统一、变体归一、时间轴修复、跨语言重打轴、乱码扫描、OP-ED/片头片尾/固定台词、参考字幕复用、补条与 AI 复核、SRT/ASS 批量处理、配置与项目登记、快速上手、排错。维护或开发本 skill 时同样先加载，现有工具优先。
 ---
 
 # 字幕生产线
 
-> **本文件是主文档，只管全流程与阶段路由。** 具体怎么做在子文档里：
->
-> | 要做什么 | 看哪里 |
-> |---|---|
-> | 前期调研：有没有现成字幕、故事背景、专名表 | [references/research.md](references/research.md) |
-> | 资源获取：B 站、种子站、迅雷派单 | [references/acquire.md](references/acquire.md) |
-> | 字幕本身：扫描、打轴、专名审查、翻译、润色、Flags | [references/subtitle.md](references/subtitle.md) |
-> | 翻译与 QA 细则 | [references/translation.md](references/translation.md) |
->
-> **资源驱动**：有什么用什么。有视频 → ASR 出轴；有参考字幕 → 复用/重打轴；
-> 什么都没有 → 先做段 0（调研），别直接开跑。缺资源也能残血运行——跳过缺失步骤，
-> 剩余步骤照常。
+从视频或外语字幕产出可交付的中文字幕。**资源驱动**：有什么用什么——有视频走 ASR，有参考字幕走复用或重打轴；缺的资源记成缺口，其余步骤照跑。
 
-## 阶段路由（按任务/症状找文档）
+## 何时加载与能力分层
 
-先在这里定位，再进子文档；**不要凭记忆直接改字幕**。
+启动只加载常驻层；选择性文档按「阶段路由」走到那一步再读一份，不预读。
+
+| 层 | 内容 | 加载方式 |
+|---|---|---|
+| **常驻** | 本文件：五段流程、阶段路由、能力边界、行为分级、常用入口 | 每次会话 |
+| **选择性** | `references/` 各文档按路由取一份；开发本 skill 前读 [references/development.md](references/development.md)，改实现前读 [references/design/](references/design/) 的设计记录 | 触发才读 |
+| **交付前** | `python -m pytest tests -q`、`python scripts/capabilities.py --check`；发布前再跑 `eval/release_gate.py`，隐私扫描与同步走 `kf-personal-service` | 闸门统一调用 |
+
+## 阶段路由
+
+先定位，再进子文档；按任务或症状找，别凭记忆改字幕。
 
 | 触发 | 读 | 什么时候用 |
 |---|---|---|
@@ -28,120 +27,70 @@ description: 字幕任务统一入口：调研（字幕站检索、故事背景�
 | 打轴 / 转录 | [references/workflows.md](references/workflows.md)、[references/subtitle.md](references/subtitle.md) | 没有字幕，要 ASR 出轴再翻译 |
 | 字幕校对 / 轴不对 | [references/subtitle.md](references/subtitle.md)、[references/retime-existing-subs.md](references/retime-existing-subs.md) | 已有字幕要修文本或重打轴 |
 | 跨语言重打轴 | [references/design/crosslingual-retime.md](references/design/crosslingual-retime.md) | 外语字幕 + 另一语种音轨 |
-| 乱码扫描 / 碎片 | [references/phase1-scan.md](references/phase1-scan.md)、[references/phase2-triage.md](references/phase2-triage.md)、[references/phase3-unify.md](references/phase3-unify.md) | 三段式扫描修轴命令参考 |
+| 乱码扫描 / 碎片 | [references/phase1-scan.md](references/phase1-scan.md)、[references/phase2-triage.md](references/phase2-triage.md)、[references/phase3-unify.md](references/phase3-unify.md) | 三段式扫描修轴 |
 | 专名 / 术语 / 变体归一 | [references/research.md](references/research.md)、[references/design/glossary-variants.md](references/design/glossary-variants.md) | 译名不一致、同源异译 |
 | 补条 / AI 复核 | [references/design/review-ai-fill.md](references/design/review-ai-fill.md)、[references/design/asr-name-repair.md](references/design/asr-name-repair.md) | 有人声没字幕、ASR 把名字听错 |
 | OP-ED / 片头片尾 / 固定台词 | [references/workflows.md](references/workflows.md)、[references/design/oped-fixed-lines.md](references/design/oped-fixed-lines.md) | 唱词乱码、片头片尾定稿 |
 | 参考字幕复用 | [references/full-mode.md](references/full-mode.md)、[references/reuse-reference-subs.md](references/reuse-reference-subs.md) | 有参考字幕可借 |
 | 翻译字幕 / QA | [references/translation.md](references/translation.md) | 翻译参数、QA、润色、重译判定 |
-| 调研 / 梗概 / 外部资料 | [references/external-references.md](references/external-references.md) | 查读音、招式、时代用语、剧情梗概 |
+| 调研 / 梗概 / 外部资料 | [references/research.md](references/research.md)、[references/external-references.md](references/external-references.md) | 查读音、招式、时代用语、剧情梗概 |
 | 配置 / 项目登记 | [references/config.md](references/config.md) | local.json、projects_registry.json |
+| 排错 | [references/troubleshooting.md](references/troubleshooting.md) | 报错、结果不对、静默失败 |
 | AI 介入点 | [references/interventions.md](references/interventions.md) | 每个 🤖 点怎么判、怎么问 |
+| 开发 / 维护本 skill | [references/development.md](references/development.md) | 改脚本、改文档、加能力、发版 |
 
-## 何时加载（使用 vs 开发）
+## 能力边界
 
-- **使用**：任何字幕任务开始前先按本文件定位到阶段，再进子文档，不凭记忆直接改字幕。
-- **开发**：修改本仓库任何 pipeline/工具/文档前也先重读「行为分级」「错误恢复」
-  和下面的「硬规矩：先查现有入口」，
-  **先找现有实现**（`oped_fixer`、`apply_map`、`run_all`、`references/*`），不要另写一套。
-- **开发与 harness**：本仓库是唯一开发源。本机用 **junction** 指向仓库，
-  改完立即生效：`python scripts/harness/sync_skill.py --link`；换机器/打包用复制模式
-  （去掉 `--link`）。描述变更仍需新会话/重新加载才生效。
-  提交/推送前先做隐私扫描（个人运维 skill `kf-personal-service` 的
-  `scripts/privacy/*`，或本仓库的路径检查测试）。
-- **本机路径与密钥只写在仓库的 `local.json`**（gitignored；junction 下 harness 直接读它）：
-  `python scripts/harness/init_local.py --force --output local.json`
-  （自动从环境/`~/.claude/settings.json` 读取模型目录、Qwen venv、Whisper、ffmpeg、
-  LLM 端点）。仓库里不提交这些。
+本 skill 只产出字幕本身：调研结论、源/译字幕、时间轴、专名表、交付文件。
 
-## 硬规矩：先查现有入口，别另写一套
+| 不做 | 去做 |
+|---|---|
+| GUI 点击（迅雷 / 浏览器）、VPN、SSH、网盘、仓库总账、笔记登记 | `kf-personal-service`：迅雷确认面板调它的 `tasks.py run thunder-download` |
+| 开发规范、发布闸门、隐私扫描、跨机协作 | `kf-personal-development` |
+| 申报书配图、PPT、MATLAB 数据图 | `kf-proposal-exports` |
+| 字幕站爬虫自研、模型训练、说话人分离 | 不做；参考字幕只用现成结果 |
 
-**执行任务时不许写新脚本**——本文件与 `scripts/` 已经覆盖全流程。动手前先在这张表里找：
+## 行为分级
 
-| 你要干的事 | 现成入口（就用它） | 常被重复实现的东西 |
+每个写盘行为在 `scripts/lib/gates.py` 登记级别。判据：这一步会不会在用户没要求时改变字幕内容？会 → 至少 L1。
+
+| 级别 | 含义 | 包含 |
 |---|---|---|
-| 视频 → 日文 SRT → 中文（整季/整目录） | `video_to_zh.py`（已有 ja 自动 reuse；`--chunk-sec/--max-batch` 透传给 ASR） | 遍历视频的 for 循环、跳过已完成集的逻辑 |
-| 转录 + 修轴 + 专名 + 翻译一条龙 | `run_all.py`（`--asr qwen3`、`--translate`、`--skip-whisper`） | 自己排阶段、自己拼调用 |
-| 单集转写 / 单集翻译 | `asr/qwen3_transcribe.py`、`translate_srt.py --input` | 再包一层 wrapper |
-| 批量翻译 + QA（单集模式才有 QA） | `translate_srt.py` 逐集跑，或直接 `video_to_zh.py` | 并发驱动、watch 轮询 |
-| OP/ED 边界、唱词聚类、固定台词统一 | `audio/oped_boundaries.py`（音频指纹定窗口 + `--frames-dir` 抽帧复核）、`fix/oped_fixer.py`、`fix/oped_region.py`（窗口内换定本歌词）、`nouns/context_review.py --mode oped` | 正则唱词探测、时间窗猜测、跨集去重 |
-| 专名归一 / 变体替换 / 文本闸门 / 交付 | `nouns/normalize_variants.py`、`nouns/apply_map.py`、`eval/text_gate.py`、`eval/release_gate.py` | 自己数条数、自己查残留 |
-| 参考字幕复用 | `reuse/*` | 手写配对/重打轴 |
+| **L0** | 默认必做，只读 | 扫描 / 编码探测、VAD 台词↔人声匹配、交付校验 |
+| **L1** | 默认只检测并标注，写盘要开关 | VAD 删「无人声」条（`--vad-clean-apply`）、missing 补条 |
+| **L2** | 只在明确要求时执行 | OP/ED 与专名预替换、TV 复用覆写、润色、繁→简、`fixes.json` 改写 |
+| **L3** | 执行前必须确认 | 覆盖已交付字幕、覆盖既有 `.bak` |
 
-**要新建文件前的三问**（答不上就停下来问用户，不要直接写）：
-
-1. 表里有对应入口吗？有 → 用现成的，最多加参数。
-2. 是**缺参数**还是**缺功能**？缺参数 → 给现成工具加透传 + 加测试（例：`video_to_zh.py`
-   的 `--chunk-sec/--max-batch`），**不要在外面包一层循环**。
-3. 加完有测试吗？`python -m pytest tests -q` 必须绿；文档改动跑 `tests/test_pipeline_docs.py`。
-
-> 自查记录（2026-10-26，足球健将）：曾为 ASR/翻译/OP-ED/体检各写一个脚本，四个全部与
-> `video_to_zh.py`、`oped_fixer.py`、`eval/*` 重复，属违规实现，已删。留下的真实缺口只有一个：
-> `video_to_zh.py` 不透传 ASR 分块参数——补法就是加透传，不是加脚本。
+默认取安全侧：VAD 删条只出清单，`missing` 只列不插。新增写盘功能先在 `gates.py` 加 `Gate(...)`，再写实现。
 
 ## 全流程（五段）
 
-| 段 | 目的 | 输入 | 入口 | 完成判据 | 子文档 |
-|---|---|---|---|---|---|
-| **0 调研** | 先弄清「有没有现成字幕、这作品是什么」 | 片名/日文原名/链接 | 字幕站检索、外部参考、词表 | 有/没有参考字幕都写清；背景与梗概落档；专名表初版就位 | [research.md](references/research.md) |
-| **1 获取** | 把视频（和可能的字幕）拿到本地 | 链接 / 种子 | `acquire/bili23.py`、`acquire/p2p.py` | 视频进媒体库，逐文件核对完成 | [acquire.md](references/acquire.md) |
-| **2 转录与打轴** | 无字幕时从音频出日文 SRT；有字幕时修轴 | 视频 / 生字幕 | `asr/qwen3_transcribe.py`、`asr/align_cues.py`、`video_to_zh.py` | 条数齐全、时间轴有序、无 0 时长堆积 | [subtitle.md](references/subtitle.md) |
-| **3 校对与统一** | 修错字、统一专名、OP/ED 定稿 | 日文 SRT + 词表 | `run_all.py`、`nouns/*`、`fix/oped_fixer.py` | `eval/text_gate.py` 通过（kana=0、变体=0） | [subtitle.md](references/subtitle.md) |
-| **4 翻译与交付** | ja→zh、QA、导出 | 日文 SRT + 映射 | `translate_srt.py`、`bin/exports/<YYMMDD>/` | 无日文残留、专名一致、条数一致 | [translation.md](references/translation.md) |
+| 段 | 目的 | 输入 | 完成判据 | 子文档 |
+|---|---|---|---|---|
+| **0 调研** | 先弄清「有没有现成字幕、这作品是什么」 | 片名 / 日文原名 / 链接 | 有 / 没有参考字幕都写清；背景与梗概落档；专名表初版就位 | [research.md](references/research.md) |
+| **1 获取** | 把视频（和可能的字幕）拿到本地 | 链接 / 种子 | 视频进媒体库，逐文件核对完成 | [acquire.md](references/acquire.md) |
+| **2 转录与打轴** | 无字幕时从音频出日文 SRT；有字幕时修轴 | 视频 / 生字幕 | 条数齐全、时间轴有序、无 0 时长堆积 | [subtitle.md](references/subtitle.md) |
+| **3 校对与统一** | 修错字、统一专名、OP/ED 定稿 | 日文 SRT + 词表 | `eval/text_gate.py` 通过（kana=0、变体=0） | [subtitle.md](references/subtitle.md) |
+| **4 翻译与交付** | ja→zh、QA、导出 | 日文 SRT + 映射 | 无日文残留、专名一致、条数一致 | [translation.md](references/translation.md) |
 
-**顺序不能跳**：段 0 的结论决定段 1 下什么、段 2 走哪条路（ASR 还是复用参考字幕）。
-没有参考字幕就是没有，别拿 B 站 AI 字幕凑数（[acquire.md](references/acquire.md) §7）。
+顺序不能跳：段 0 的结论决定段 1 下什么、段 2 走哪条路（ASR 还是复用参考字幕）。
 
-### 段 0：前期调研
+### 段 0：调研（跑 ASR 前）
 
-1. **先查有没有现成字幕**——四类站点各查一遍，结果写进项目 `bin/reference_docs/` 的调研记录：
-   日文字幕优先（可直接当源语言），中文字幕只作译名/术语对照，不当源。
+1. 四类字幕站各查一遍，结论写进项目 `bin/reference_docs/字幕调研.md`；日文字幕优先，可当源语言，中文字幕只作译名 / 术语对照。
+2. 建 `bin/reference_docs/<作品>_外部参考.md`：故事背景与整体梗概、单集梗概、人名读音与招式、OP/ED 歌词、集号与时代语体。单集梗概最省的办法是抽片尾「次回予告」。
+3. 定翻译调子：由背景定整体语体、由人物定各自台词口吻，写成正面指引；配事后 `style_lint` 检测与定向改写（[design/style-context.md](references/design/style-context.md)）。
+4. 专名表初版：`data/glossaries/<series>.series.json`；读音进同目录 `.meta.json` 的 `readings` + `canonical_ja`。
 
-   ```bash
-   python "<scripts-dir>/acquire/subs_search.py" plan -q "<日文原名>" \
-     --out "bin/reference_docs/字幕调研.md" --json "data/temp/subs_search.json"
-   ```
+### 段 1：获取
 
-   清单里没实测的站点只给「人工检索」，不会拼错的检索 URL；查到什么都要把结论写回。
-2. **建外部参考档案**（第 0 步，跑 ASR 之前）：`bin/reference_docs/<作品>_外部参考.md`。
-   ASR 只回答「听到什么」，回答不了「正确写法是什么」。这一份档案要装四样：
-   **作品元信息与故事背景/梗概**（整体背景、整体梗概、单集梗概）、**人名读音与招式**、
-   **OP/ED 歌词**、**集号对照与时代语体**。查什么、去哪查、可信度阶梯见
-   [references/external-references.md](references/external-references.md)。
-   单集梗概最省的办法是抽片尾「次回予告」——旁白会把下一集讲一遍，ASR 直接能用。
-3. **定翻译调子**：由故事背景/梗概定整体语体，由人物特点定各自台词口吻，写成
-   **正面指引**（谁怎么说话、时代词怎么译），不要堆「禁用词清单」——
-   实测提示词里的风格块与禁用词表对成片没有可测收益，真正管用的是写清口吻 + 事后
-   `style_lint` 检测与定向改写（[design/style-context.md](references/design/style-context.md)）。
-4. **专名表初版**：名字/招式 → `data/glossaries/<series>.series.json`；
-   读音 → 同目录 `.meta.json` 的 `readings` + `canonical_ja`。
+B 站还有 → `acquire/bili23.py`；老片只在公开 BT 发布里 → `acquire/p2p.py`。两条路都是「探清落点与体积 → 用户确认 → 再下」。
 
-> 上游结构（页数、每页时长、**有没有字幕轨**）先用
-> `python "<scripts-dir>/acquire/bili_meta.py" --bvid BV... --out data/reference/bili_meta.json`。
-> 拿不到的来源记成缺口，不要用搜索摘要硬凑设定。
-
-### 段 1：资源获取
-
-B 站还有的 → Bili23；老片只在公开 BT 发布里 → `p2p.py`。两边都是
-「探清落点和体积 → 用户确认 → 再下」。详细命令见 [references/acquire.md](references/acquire.md)。
-
-**迅雷派单（本机唯一的 BT 客户端）**：
-
-- 迅雷路径/下载目录自动探测，本机路径不写进仓库；`--thunder-exe` / `--download-dir` 可覆盖；
-- 迅雷 12 的「新建任务面板」要人工确认一次「立即下载」（Electron 面板拿不到控件树）。
-  自动确认统一走**调 `kf-personal-service` 的 GUI 任务脚本**
-  （`tasks.py run thunder-download`，本 skill 只调用）：`grab` 派单后默认就调，
-  `--no-confirm` 关掉，`--save-dir` 顺便改落点；脚本位置配置见
-  [references/acquire.md](references/acquire.md) §11；
-- **远程协作期间禁止开启迅雷等占用型软件**：远程同步开发时迅雷吃带宽/磁盘/CPU，
-  会把远程会话和同步挤掉。`p2p.py grab` 派单前会检查远程会话信号，检测到就拒绝；
-  确实要用时由用户明确同意后加 `--allow-thunder`；
-- 落点可能是迅雷的「上次使用目录」而不是默认目录，`status/collect` 两处都找；
-- 先在 `--dry-run` 里看体积和盘余量：BD 1080p 全集约 25 GiB。
+迅雷是本机唯一的 BT 客户端：新建任务面板的「立即下载」走 `kf-personal-service` 的任务脚本确认（`grab` 派单后默认调用 `tasks.py run thunder-download`，`--no-confirm` 关掉，`--save-dir` 改落点）。远程协作期间不开迅雷：`p2p.py grab` 检测到远程会话信号会拒绝，用户明确同意后加 `--allow-thunder`。
 
 ### 段 2–4：字幕本身
 
-细节全在 [references/subtitle.md](references/subtitle.md)，本文件只给入口：
+操作手册见 [references/subtitle.md](references/subtitle.md)；三条常用入口：
 
 ```bash
 # 只有视频 → 日文 SRT（先测吞吐再铺全量）
@@ -156,104 +105,31 @@ python "<scripts-dir>/video_to_zh.py" --video-dir "<视频目录>" --output-dir 
   --engine qwen3 --mappings "data/glossaries/<series>.series.json"
 ```
 
-## 配置与目录
+## 常用入口
 
-### 首次使用？
+| 要干的事 | 现成入口 | 判据 / 常用参数 |
+|---|---|---|
+| 视频 → 日文 SRT → 中文（整季 / 整目录） | `video_to_zh.py` | 已有 `ja/<EP>.srt` 自动 reuse；`--chunk-sec/--max-batch` 透传给 ASR |
+| 转录 + 修轴 + 专名 + 翻译一条龙 | `run_all.py` | `--asr qwen3`、`--translate`、`--skip-whisper` |
+| 单集转写 / 单集翻译 | `asr/qwen3_transcribe.py`、`translate_srt.py --input` | 单集调试，不再包 wrapper |
+| 批量翻译 + QA | `translate_srt.py` 逐集，或 `video_to_zh.py` | 单集模式才有 QA |
+| OP/ED 定窗口、唱词统一定稿 | `audio/oped_boundaries.py`、`fix/oped_fixer.py`、`fix/oped_region.py`、`nouns/context_review.py --mode oped` | 指纹定窗口 + `--frames-dir` 抽帧复核 |
+| 专名归一 / 变体替换 / 文本闸门 / 交付 | `nouns/normalize_variants.py`、`nouns/apply_map.py`、`eval/text_gate.py`、`eval/release_gate.py` | 闸门计数说了算 |
+| 参考字幕复用 | `reuse/*` | 配对与重打轴 |
 
-检查项目 `CLAUDE.md` 末尾是否有 `## SKILL INITIALIZED: true`。
+缺参数就给现有工具加透传并补测试；缺功能先看 [references/workflows.md](references/workflows.md) 的场景表，仍缺再报告用户。
 
-**没有** → 首次使用。读取 `references/first-run.md`，跟随初始化向导完成配置后再继续。
+## 配置与首次使用
 
-**有** → 已初始化。从 CLAUDE.md 获取路径，直接进入流程。
-
-> 如需重新初始化（添加参考字幕、更换模型等），删除 CLAUDE.md 中的 `SKILL INITIALIZED: true` 行即可。
-
-**项目级配置不写在项目里**：系列名、类型、风格、字幕目录写在 skill 根的
-`projects_registry.json`（键 = 项目文件夹名），机器路径写在 `local.json`，
-解析后的绝对路径看 `projects_index.json`：
+项目 `CLAUDE.md` 末尾有 `## SKILL INITIALIZED: true` 即初始化完成；没有就按 [references/first-run.md](references/first-run.md) 走一遍。本机路径与密钥只写 `local.json`（gitignored）：
 
 ```bash
-python "<scripts-dir>/lib/projects_registry.py" --project "<项目名>"   # 本项目登记了什么
-python "<scripts-dir>/lib/media_paths.py" --check                       # 视频/字幕目录解析结果
-python "<scripts-dir>/lib/projects_index.py" --check                    # 全部项目总账
+python scripts/harness/init_local.py --force --output local.json   # 从环境 / ~/.claude/settings.json 生成
+python "<scripts-dir>/lib/projects_registry.py" --project "<项目名>" # 本项目登记了什么
 ```
 
-### 输出目录约定
+系列 / 类型 / 风格 / 字幕目录写在 skill 根的 `projects_registry.json`，解析结果看 `projects_index.json`；输出目录与配置分档见 [references/config.md](references/config.md)。
 
-项目根按「二元目录」分层，别把中间产物和成品混在根上：
+## 开发与维护
 
-```text
-<project>/
-  bin/reference_docs/   输入资料（参考字幕、源字幕、外部参考）
-  bin/exports/<YYMMDD>/ 成品，一次发布一个日期目录；同名 zip 放旁边
-  data/temp/            一次性中间产物（scans/、ASR、锚点、缓存）
-  data/reports/         生成的报告（问题解决报告.md、proper-nouns.md、manual-review/）
-  data/glossaries/      词表
-  data/ja/  data/zh/    日文转写 / 中文工作副本
-```
-
-`lib/project_paths.py` 是唯一路径入口：**项目下有 `data/` 就写 `data/temp`、
-`data/reports`；没有就退回旧布局 `temp/`、`reports`**。
-
-新建项目时先 `mkdir data`，再跑管线；成品只进 `bin/exports/<日期>/`，发布目录只读，
-改动新建日期目录。
-
-### 行为分级：哪些默认做，哪些等指令
-
-每个会**写盘**的行为都在 `lib/gates.py` 登记一个级别。判据只有一条：
-**这一步会不会在用户没要求的情况下改变字幕内容？** 会 → 至少 L1。
-
-| 级别 | 含义 | 包含 |
-|---|---|---|
-| **L0** | 默认必做，只读 | 扫描/编码探测、VAD 台词↔人声匹配（含「有人声无字幕」缺口清单）、交付校验 |
-| **L1** | 默认只检测并标注，写盘要开关 | VAD 删「无人声」条（`--vad-clean-apply`）、missing 补条 |
-| **L2** | 只在明确要求时执行 | OP/ED 预替换、专名预替换、TV 复用覆写、润色、繁→简、`fixes.json` 改写 |
-| **L3** | 执行前必须确认 | 覆盖已交付字幕、覆盖既有 `.bak` |
-
-默认取安全侧：VAD 删条只出清单，`missing` 只列不插。
-新增会写盘的功能时，先在 `lib/gates.py` 加一条 `Gate(...)`，再写实现。
-
-## 错误恢复
-
-| 输出/症状 | 操作 |
-|---|---|
-| `SyntaxError` / `UnicodeEncodeError` | emoji→ASCII、括号补全，修完重跑 |
-| `Done: 0 fixed` + 无 `[whisper]` 输出 | `--video-dir` 缺失或路径错 |
-| 某步骤失败但已写中间文件 | 清空 `temp/` + `reports/`，`--force-rescan` 重跑 |
-| 参考字幕乱码 / 解析 0 cue | 编码探测失准；检查 BOM/转码；ASS 惯例 UTF-16LE+BOM |
-| `LLM_API_KEY not set`（翻译/润色） | 明确失败或保留原文；不要降级到传统机翻（已移除） |
-| `HTTP 400 invalid model` | 用 `deepseek-flash`，或更新 `lib/config.py:LLM_MODEL_DEFAULT` |
-| 翻译 exit 0 但成片仍是日文 | 推理 token 吃光预算：`LLM_REASONING_EFFORT=none`，必要时提高 `LLM_MAX_TOKENS` |
-| `--repair` 后 `echo`/术语全灭 | `--input` 给了译文而不是源文；QA 在拿中文和中文比 |
-| 整段译文错位一格 | 模型把两条并成一条或多吐一条；查 `[translate] ... returned N item(s)` 日志 |
-| 译文带编号原文（`1. 原文`） | glossary 回显；说明文字写 CLAUDE.md，不要写 JSON |
-| OP/ED 对白被歌词覆写/变少 | 检查 OP/ED 窗口与歌词判定；与日文源逐条对数量 |
-| ASS 内容/编码/字段异常 | 用 `ass_repair.py --check all`；ASS 写 UTF-16LE+BOM |
-| 迅雷派单被拒（远程会话） | 远程协作期间不开迅雷；等会话结束，或用户明确同意后 `--allow-thunder` |
-| 字幕站检索全失败 | 记缺口继续（不是所有作品都有字幕）；确认代理可用，别猜站点字段 |
-
-## AI 介入点
-
-→ [references/interventions.md](references/interventions.md) — 每个 🤖 点：触发条件、操作流程、判断规则。
-
-## 子文档索引
-
-| 子文档 | 内容 |
-|---|---|
-| [references/research.md](references/research.md) | 段 0：字幕站检索、故事背景、专名表 |
-| [references/acquire.md](references/acquire.md) | 段 1：Bili23（B 站）、P2P/BT、迅雷派单与落点 |
-| [references/subtitle.md](references/subtitle.md) | 段 2–4 操作手册：专名审查、扫描、打轴、重打轴、模块化调用、翻译、润色、Flags |
-| [references/translation.md](references/translation.md) | 翻译与 QA 细则 |
-| [references/external-references.md](references/external-references.md) | 外部参考：查什么、可信度阶梯、落地清单 |
-| [references/workflows.md](references/workflows.md) | 典型工作流场景（从视频生成、翻译、修复、完整流程）。**设计工作流前先看，避免重复造轮子** |
-| [references/first-run.md](references/first-run.md) | 首次使用向导 |
-| [references/config.md](references/config.md) | 配置分层（local.json / projects_registry.json） |
-| [references/interventions.md](references/interventions.md) | AI 介入点 |
-| `references/phase{1,2,3}-*.md` | 三阶段命令参考（扫描 / 修轴 / 统一） |
-| [references/full-mode.md](references/full-mode.md) | 有参考字幕时的完整工作流 |
-| [references/reuse-reference-subs.md](references/reuse-reference-subs.md) | 参考字幕复用的判定与判据 |
-| [references/batch-review.md](references/batch-review.md) | **已弃用**：旧版专名审查（扫描→API 分类→黑名单），只在看存量项目时参考 |
-| [references/quickstart.md](references/quickstart.md) | 快速上手：最小命令集 |
-| [references/setup.md](references/setup.md) | 环境与模型资产安装 |
-| [references/retime-existing-subs.md](references/retime-existing-subs.md) | 已有字幕重打轴 |
-| [references/design/](references/design/) | 设计记录：ASR 命名修复、跨语言重打轴、词表变体、OP/ED 定本、复核补条 |
+改脚本前先查「常用入口」，缺参数加透传、缺功能先看 workflows 场景表。测试 `python -m pytest tests -q`，能力清单 `python scripts/capabilities.py --check`；junction 模式改完立即生效：`python scripts/harness/sync_skill.py --link`。改动分段、文档结构、同步与发布见 [references/development.md](references/development.md)。

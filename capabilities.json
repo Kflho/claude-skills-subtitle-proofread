@@ -1,0 +1,159 @@
+{
+  "schema_version": 1,
+  "capabilities": [
+    {
+      "name": "能力分层",
+      "layer": "常驻",
+      "entry": "SKILL.md",
+      "doc": "SKILL.md",
+      "trigger": "能力分层"
+    },
+    {
+      "name": "阶段路由",
+      "layer": "常驻",
+      "entry": "SKILL.md",
+      "doc": "SKILL.md",
+      "trigger": "阶段路由"
+    },
+    {
+      "name": "行为分级（写盘闸门）",
+      "layer": "常驻",
+      "entry": "scripts/lib/gates.py",
+      "doc": "SKILL.md",
+      "trigger": "行为分级"
+    },
+    {
+      "name": "测试闸门",
+      "layer": "常驻",
+      "entry": "tests",
+      "doc": "references/development.md",
+      "trigger": "测试"
+    },
+    {
+      "name": "字幕站调研",
+      "layer": "阶段",
+      "entry": "scripts/acquire/subs_search.py",
+      "doc": "references/research.md",
+      "trigger": "调研"
+    },
+    {
+      "name": "外部参考档案",
+      "layer": "阶段",
+      "entry": "-",
+      "doc": "references/external-references.md",
+      "trigger": "外部资料"
+    },
+    {
+      "name": "B 站获取",
+      "layer": "阶段",
+      "entry": "scripts/acquire/bili23.py",
+      "doc": "references/acquire.md",
+      "trigger": "获取"
+    },
+    {
+      "name": "种子派单（P2P）",
+      "layer": "阶段",
+      "entry": "scripts/acquire/p2p.py",
+      "doc": "references/acquire.md",
+      "trigger": "种子"
+    },
+    {
+      "name": "ASR 转录",
+      "layer": "阶段",
+      "entry": "scripts/asr/qwen3_transcribe.py",
+      "doc": "references/subtitle.md",
+      "trigger": "转录"
+    },
+    {
+      "name": "对齐与打轴",
+      "layer": "阶段",
+      "entry": "scripts/asr/align_cues.py",
+      "doc": "references/subtitle.md",
+      "trigger": "打轴"
+    },
+    {
+      "name": "整目录一键出片",
+      "layer": "阶段",
+      "entry": "scripts/video_to_zh.py",
+      "doc": "references/workflows.md",
+      "trigger": "整目录"
+    },
+    {
+      "name": "全流程编排",
+      "layer": "阶段",
+      "entry": "scripts/run_all.py",
+      "doc": "references/workflows.md",
+      "trigger": "一条龙"
+    },
+    {
+      "name": "扫描与乱码",
+      "layer": "阶段",
+      "entry": "scripts/scan/unified_scanner.py",
+      "doc": "references/phase1-scan.md",
+      "trigger": "乱码"
+    },
+    {
+      "name": "OP/ED 定窗口",
+      "layer": "阶段",
+      "entry": "scripts/audio/oped_boundaries.py",
+      "doc": "references/design/oped-fixed-lines.md",
+      "trigger": "OP/ED 定窗口"
+    },
+    {
+      "name": "OP/ED 唱词定稿",
+      "layer": "阶段",
+      "entry": "scripts/fix/oped_region.py",
+      "doc": "references/design/oped-fixed-lines.md",
+      "trigger": "固定台词"
+    },
+    {
+      "name": "专名与变体归一",
+      "layer": "阶段",
+      "entry": "scripts/nouns/normalize_variants.py",
+      "doc": "references/design/glossary-variants.md",
+      "trigger": "变体归一"
+    },
+    {
+      "name": "翻译与 QA",
+      "layer": "阶段",
+      "entry": "scripts/translate_srt.py",
+      "doc": "references/translation.md",
+      "trigger": "翻译"
+    },
+    {
+      "name": "文本闸门",
+      "layer": "阶段",
+      "entry": "scripts/eval/text_gate.py",
+      "doc": "references/subtitle.md",
+      "trigger": "文本闸门"
+    },
+    {
+      "name": "交付闸门",
+      "layer": "阶段",
+      "entry": "scripts/eval/release_gate.py",
+      "doc": "references/translation.md",
+      "trigger": "交付"
+    },
+    {
+      "name": "参考字幕复用",
+      "layer": "阶段",
+      "entry": "scripts/reuse",
+      "doc": "references/reuse-reference-subs.md",
+      "trigger": "参考字幕复用"
+    },
+    {
+      "name": "能力清单校验",
+      "layer": "交付前",
+      "entry": "scripts/capabilities.py",
+      "doc": "references/development.md",
+      "trigger": "能力清单"
+    },
+    {
+      "name": "发布与隐私闸门",
+      "layer": "交付前",
+      "entry": "-",
+      "doc": "references/development.md",
+      "trigger": "发布"
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 # 故障排查 — 根因与实现细节
 
-> 从 `SKILL.md`「错误恢复」移出的开发者说明。用户向“看到什么 → 做什么”短表仍在 SKILL.md。
+> 从 `SKILL.md`「错误恢复」移出的开发者说明。用户向“看到什么 → 做什么”短表现在在
+> `references/troubleshooting.md`（主文档只留阶段路由）。
 > 相关代码：`lib/subtitle_io.py`、`lib/llm.py`、`lib/config.py`、
 > `fix/translate_srt.py`、`fix/oped_*.py`、`ass/ass_repair.py`。
 
