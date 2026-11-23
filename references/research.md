@@ -95,7 +95,7 @@ python "<scripts-dir>/acquire/subs_search.py" plan -q "<日文原名>" \
 调子落在 `.meta.json` 的 `style`（`rule` + `voices` + `terms`），并写进外部参考档案的
 「语体与翻译口吻」一节，供翻译与人工抽查共用。
 
-## 3. 专名表：从参考落到能用
+## 3. 专名表：从参考整理成可用清单
 
 | 内容 | 落到哪 | 后续谁用 |
 |---|---|---|

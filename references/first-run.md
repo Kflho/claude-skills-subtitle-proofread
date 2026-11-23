@@ -204,7 +204,7 @@ if not ok:
 
 ### 3.5.1 Python 版本
 
-此 skill 需要 **Python 3.12+**。验证：
+本 skill 需要 **Python 3.12+**。验证：
 
 ```bash
 python --version  # 应为 Python 3.12.x 或更高
