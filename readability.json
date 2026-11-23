@@ -1,9 +1,7 @@
 {
   "skip": [
-    "sk_01_dev/"
+    "sk_01_dev/",
+    "eval/reports/"
   ],
-  "allow": [
-    "~/.cache/whisper",
-    "~/.claude/settings.json"
-  ]
+  "allow": []
 }

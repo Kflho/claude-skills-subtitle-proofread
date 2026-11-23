@@ -79,7 +79,7 @@ python scripts/eval/episode_benchmark.py --manifest eval/manifest.digimon.whispe
 ... --global-offset
 ```
 
-> 2026-10-18 用户人工复核：视频/CC 无真实偏移；`--global-offset` 不是默认项，
+> 复核结论：视频/CC 无真实偏移；`--global-offset` 不是默认项，
 > offset-corrected 数字不能当验收。
 
 ### 3.2 一条命令判定（release gate）

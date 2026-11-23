@@ -584,7 +584,7 @@ def apply_oped_pre_replace(cues, srt_file, oped):
     首选 `op_map`/`ed_map`（逐句表，按原文匹配）：一句歌词一个译文，同一句
     在各集写法一致，不会把整段歌词压成一句。
     没有逐句表时退回 canonical 单句（只适合 Whisper 幻觉刷屏的旧数据），
-    且只覆盖 `_is_lyric` 判定为歌词的 cue——早先的实现把窗口内的 cue
+    且只覆盖 `_is_lyric` 认作歌词的 cue——旧实现会把窗口内的 cue
     无条件覆写，窗口是固定常量，会吃掉窗口里恰好出现的正片对白。
     """
     replaced = 0

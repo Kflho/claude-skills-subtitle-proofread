@@ -66,7 +66,7 @@ zh 值为空 = AI 尚未审查或判定为普通词。
 
 默认只把 `--mappings` 的 ja→zh 作为 prompt 术语表，不再默认预替换。
 如果显式加 `--noun-pre-replace`，预替换是**简单子串匹配**，不会自动处理汉字/假名转换；
-此时必须确认：日语源中实际出现的**每一种书写形式**都在 mappings 中有对应条目。
+这一步必须确认：日语源中实际出现的**每一种书写形式**都在 mappings 中有对应条目。
 
 ```bash
 # 检查日语源中未在 mappings 中覆盖的词条
@@ -167,7 +167,7 @@ export LLM_BASE_URL="https://api.deepseek.com/v1"  # 可选
 
 ### Step 4 — 翻译后验证（必须）
 
-`translate_srt.py` exit 0 **不等于翻译成功**。API 调用可能静默失败，batch 可能被跳过。
+`translate_srt.py` exit 0 **不等于翻译成功**。API 调用失败时一般不报错，batch 被跳过也不会提示。
 **翻译后必须运行以下验证**，不靠 "script completed" 判断成功：
 
 ```bash
@@ -200,7 +200,7 @@ grep -n '扉\|飞鸟\|飞跳\|飞鱼\|天满' 中文AI翻译验证/*.srt && echo
 
 ### 接手旧稿：先量再决定
 
-拿到别人的字幕（机翻稿、上一版交付、别组转让）时，先跑质量评估，不要直接润色：
+拿到别人的字幕（机翻稿、前一次交付、别组转让）时，先跑质量评估，不要直接润色：
 
 ```bash
 python "<scripts>/eval/retranslate_decision.py" \

@@ -36,7 +36,7 @@ UnicodeEncodeError: 'gbk' codec can't encode character '✅'
 
 **Trigger**: `[review] ... pack(s): N gaps, M filled, K applied`
 
-这条链路**不需要人工**，也不需要单独命令：`run_all` 在 fix / translate 之后直接跑
+修复与翻译两步**不需要人工**，也不需要单独命令：`run_all` 在 fix / translate 之后直接跑
 `step_review_fill`。包里有两类条目：
 
 | kind | 来源 | 默认动作 |

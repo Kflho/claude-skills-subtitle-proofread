@@ -56,7 +56,7 @@ python "<scripts-dir>/acquire/subs_search.py" plan -q "<日文原名>" \
 
 要查的 A–J（作品与版本、中文通行译名、人物关系、读音、招式、OP/ED、分集副标题、
 集号对照、时代用语、上游结构化元数据）与可信度阶梯，全部在
-[external-references.md](external-references.md)：**查什么、去哪查、落到哪、常见坑**。
+[external-references.md](external-references.md)：**查什么、去哪查、写进哪里、常见坑**。
 
 产出：`bin/reference_docs/<作品>_外部参考.md`。这一份是后面所有专名与 OP/ED 定稿的
 依据，缺口也要写进去（哪些没查到、用什么替代）。

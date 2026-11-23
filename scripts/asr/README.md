@@ -70,10 +70,10 @@ python scripts\asr\qwen3_transcribe.py --video ep.mkv `
 
 > **长音频分块（重要）**：worker 默认 `--chunk-sec 60`，自己按低能量边界切块，
 > 逐块转写+对齐后加 offset 合并，并把连续零时长 token 在前后的已知时间之间补齐。
-> `qwen_asr` 内部的 180s 分块在动画素材上会让 27–48% 的 token 变成零时长（实测），
+> `qwen_asr` 内部的 180s 分块在动画素材上会让 27–48% 的 token 变成零时长（实机测量），
 > 见 [`docs/adr/008-qwen3-long-audio-chunking.md`](../../docs/adr/008-qwen3-long-audio-chunking.md)。
 >
-> 莎莉 EP001（25.2 min，3080 Ti Laptop）实测：内部 180s 分块 RTF 0.829、零时长 48.2%；
+> 莎莉 EP001（25.2 min，3080 Ti Laptop）实机测量：内部 180s 分块 RTF 0.829、零时长 48.2%；
 > 自切 60s RTF **0.207–0.295**、零时长 27.1%、补零后 **8.4%**。Whisper large-v3 q5 对照 RTF 0.184。
 
 ## 4. 与 Whisper A/B

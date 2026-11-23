@@ -862,7 +862,7 @@ def main(argv=None) -> int:
     grab.add_argument('--no-confirm', dest='confirm', action='store_false',
                       help='只派单，不自动确认面板')
     grab.add_argument('--allow-thunder', action='store_true',
-                      help='远程协作进行中仍要派单（需用户明确同意）')
+                      help='远程协作期间仍要派单（需用户明确同意）')
     common(grab)
 
     status = sub.add_parser('status', help='compare manifests with the disk')

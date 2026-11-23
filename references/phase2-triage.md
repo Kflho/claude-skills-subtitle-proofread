@@ -153,7 +153,7 @@ whisper-cli -m <model> -l ja -f _test_sep/htdemucs/_test_original/vocals.wav --n
 以下情况可跳过该集 Whisper 处理：
 - 全部 issue 类型为 `ai_noise` → romaji_fixer 已处理，无需重新转录
 - issue ≤ 2 且全部为词典已覆盖的罗马字单词
-- 该集不存在于 issues/ 目录中（无 issue = 文本层已完全修复）
+- 集号不存在于 issues/ 目录中（无 issue = 文本层已完全修复）
 
 ## Whisper 置信度
 

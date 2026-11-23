@@ -93,12 +93,11 @@ python "<skill_scripts_dir>/run_all.py" \
   [--skip-whisper]
 ```
 
-常用变体：`--limit N`（前N集）、`-e EP001-EP010`（指定范围）、`--dry-run`、`--force-rescan`。
+常用变体（`--limit N` / `-e EP001-EP010` / `--dry-run` / `--force-rescan`）见 skill 的 `references/phase2-triage.md`。
 
 > `<input_sub_dir>` 是字幕文件所在子目录。默认 `AI审查后`，指向项目根目录下直接包含字幕的文件夹。
 > 无视频时加 `--skip-whisper`，生成 `reports/问题解决报告.md`（⬜ 待人工处理）。
 
-> ⚠️ `--apply-ai-review` 是后处理快速路径，不能和 full run 一起用。
-> 正确用法：先跑 full run，AI 审查完成后，再单独带 flag 跑一次。
+> ⚠️ `--apply-ai-review` 只能单独跑：先跑 full run，AI 审查完成后再带 flag 跑一次，详见 skill 的 `references/subtitle.md`。
 
 ## SKILL INITIALIZED: true

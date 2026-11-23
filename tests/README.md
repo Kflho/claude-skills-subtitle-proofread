@@ -37,7 +37,7 @@ python -m pytest -q --cov --cov-report=term-missing    # 覆盖率（需 pytest-
 
 ## 覆盖现状
 
-当前 **1853 passed / 4 skipped**（无网络、无模型、无真实项目，2026-10-27）。
+当前 **1853 passed / 4 skipped**（无网络、无模型、无真实项目）。
 主链（Whisper 编排 / VAD、翻译、专名、OP/ED、`run_all` 各 step、scanner、apply、
 worker / CLI、`whisper_utils`、`episode_workflow`、reuse、eval）已覆盖；
 缺口按文档分册记在各目录的用例里，补测时先补夹具再补断言。

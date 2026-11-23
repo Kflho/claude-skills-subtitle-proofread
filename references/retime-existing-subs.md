@@ -46,7 +46,7 @@ python "<scripts-dir>/asr/align_cues.py" \
 3. 有同语言配音（例如英语配音）时，用该音轨的 ASR 对齐英文字幕；
 4. 都做不到：只做整段平移/等间隔插值，并明确标为低置信度，不要伪装成逐句对齐。
 
-上面 1–2 步的落地工具是 `asr/retime_crosslingual.py`（下一节）。
+第 1–2 步的落地工具是 `asr/retime_crosslingual.py`（下一节）。
 
 ## 跨语言重打轴：ASR + LLM 锚点 + 分段 warp
 
@@ -101,7 +101,7 @@ python "<scripts-dir>/asr/retime_crosslingual.py" \
    `read_subtitles` 会整文件回退 cp1251 → 日文变西里尔乱码 → 锚点全错
    （实测 EP010 因此出现「+23 秒」假偏移）。`retime_crosslingual` 会检测并用
    U+FFFD 修复后继续，并打印警告；看到 `warn: ... invalid UTF-8` 就该知道
-   这份 ASR 需要重新导出。
+   当前 ASR 记录需要重新导出。
 
 ## 参数（`asr/align_cues.py`，同语言场景）
 

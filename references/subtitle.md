@@ -1,10 +1,10 @@
 # 字幕校对与翻译：操作手册
 
 > 本文件是主文档 [SKILL.md](../SKILL.md) 的子文档：主文档讲**全流程与阶段路由**，
-> 这里讲**字幕这一段怎么做**——专名审查、扫描与打轴、重打轴、模块化调用、
+> 本文讲**字幕这一段怎么做**——专名审查、扫描与打轴、重打轴、模块化调用、
 > 翻译与润色、语言限制、Flags 全表。
 >
-> 什么时候该翻到这里：已经拿到「日文（或其它源语言）字幕 + 视频」，
+> 什么时候读本文：已经拿到「日文（或其它源语言）字幕 + 视频」，
 > 要把它修对、译好、交付。
 
 ## 专名审查（AI 驱动）
@@ -66,7 +66,7 @@ python "<scripts-dir>/eval/text_gate.py" --zh-dir "<中文翻译>" \
 > 别名必须人工确认：`圣诞`（圣诞老人）这类曾被误改成「三太」，已进回归测试。
 > **多源（英→中 + 日→中）**：英文形也进 `aliases`（如 `Sabu → 佐武`），匹配按
 > 词边界 + 忽略大小写；扁平词表同时加 `Sabu → 佐武` 供 `--mappings` 预替换。
-> 闸门加 `--max-latin 0` 检查英文残留；两条线必须落到同一个 canonical
+> 闸门加 `--max-latin 0` 检查英文残留；两条线必须写进同一个 canonical 文件
 > （佐武实测：拉丁残留 178 → 0，23 个共同角色写法一致）。
 > 设计见 `references/design/glossary-variants.md`。
 
@@ -119,7 +119,7 @@ python "<scripts-dir>/nouns/context_review.py" ... --mode oped \
 
 ## 专名审查（旧版 auto_translate · legacy）
 
-> ⚠️ **已弃用**，仅存量项目参考。新项目一律走上方「专名审查（AI 驱动）」。
+> ⚠️ **已弃用**，仅存量项目参考。新项目一律走「专名审查（AI 驱动）」一节。
 > 旧法的扫描 → API 批量分类 → 黑名单/映射表循环见
 > [design/batch-review-legacy.md](design/batch-review-legacy.md)。
 
@@ -151,7 +151,7 @@ print(len(read_subtitles('out/EP001.ass', mark_garbled=False)))"
 
 ## 接手已有字幕：先量再决定
 
-拿到别人做的字幕（机翻稿、上一版交付、别组转让）时，第一步不是润色，是量。
+拿到别人做的字幕（机翻稿、前一次交付、别组转让）时，第一步不是润色，是量。
 `eval/retranslate_decision.py` 给三个数：缺陷结构、修 vs 翻的调用量、墙钟时间，
 并据此给 KEEP / PATCH / RETRANSLATE 三档结论。
 
@@ -260,8 +260,8 @@ python "<scripts-dir>/video_to_zh.py" --video-dir "<视频目录>" --output-dir 
   --mappings "<项目>/data/glossaries/<series>.series.json" --batch 20
 ```
 
-`--chunk-sec` / `--max-batch` 必须显式给（默认 0 = 引擎 180 秒块，就是上面表格要避开的
-那个参数）。只想要日文转写时，把同一命令跑在已有 ja 的输出目录上也会直接 reuse。
+`--chunk-sec` / `--max-batch` 必须显式给（默认 0 = 引擎 180 秒块，就是表格里要避开的参数）。
+只想要日文转写时，把同一命令跑在已有 ja 的输出目录上也会直接 reuse。
 
 > 片头/片尾唱段：ASR 对唱词基本是乱写（`超大な鼓動へ` 这类），且 ForcedAligner 不给
 > 时间戳（0 时长 cue 集中在 OP/ED）。合成片要发之前，OP/ED 用 `_meta.fixed_lines`
@@ -414,7 +414,7 @@ python "<scripts-dir>/whisper_spot_fix.py" EP001 --start 24:35 --end 24:44
 
 ### 用户发字幕轴 → Claude 校对流程
 
-用户发字幕时间轴（SRT 或 ASS 格式）时，表示要求对该段进行精确校对。
+用户发字幕时间轴（SRT 或 ASS 格式）时，表示要求对该段做精确校对。
 
 **立即执行的步骤：**
 
@@ -492,7 +492,7 @@ export LLM_BASE_URL='https://api.deepseek.com/v1'
 2. 搜索 `⬜` → 逐个分析每条 ⬜：
    - 同一 (EP, 时间) 在「Whisper自动修复」section 已有 ✅ → **false alarm**，忽略
    - 同一 (EP, 时间) 在 AI fragment section 有 correction 非空但仍是 ⬜ → SRT 已修，报告未同步，忽略
-   - 其余 → 回到对应[暂停点](#暂停点--action)处理
+   - 其他情况 → 回到对应[暂停点](#暂停点--action)处理
 3. 确认 Phase 3「疑似专名搜索」非空（非"暂无记录"）
 4. **与日文源逐条对数量** —— 条数对齐，且逐条时间轴对齐。文本非空、非日文的破坏
    （OP/ED 窗口吞掉对白、cue 被覆写）**不会**在 ⬜ 里露头，只有对数量才发现。
@@ -538,7 +538,7 @@ export LLM_BASE_URL='https://api.deepseek.com/v1'
 ## 名词库准备 + 翻译
 
 > **非日语源（ru/en/其他）**：跳过名词库准备（jamdict/jieba 不适用），直接翻译。
-> 翻译后对中文输出执行专名校对即可，见上方「专名审查（AI 驱动）」。
+> 翻译后对中文输出执行专名校对即可，见「专名审查（AI 驱动）」一节。
 > ```bash
 > python "<scripts>/translate_srt.py" --input-dir "<源字幕>" --output-dir "<中文输出>"
 > # 源语言自动检测，system prompt 动态适配
@@ -547,7 +547,7 @@ export LLM_BASE_URL='https://api.deepseek.com/v1'
 ### 俄语源（ru→zh）项目
 
 `translate_srt.py` 对 ru 自动换提示词：专名按「固定译名参考」音译、禁止把西里尔字母
-留在译文里、中文全角标点、保留原文的 `\N` 分行。前两条要落到 `--mappings` 才稳：
+留在译文里、中文全角标点、保留原文的 `\N` 分行。前两条要写进 `--mappings` 才稳：
 先给一份 `ru→zh` 扁平表，同一角色的每种俄语写法各写一条，否则一集里会出现两三个名字。
 
 ```bash
@@ -565,10 +565,10 @@ python "<scripts>/eval/text_gate.py" --zh-dir "data/zh" \
 
 **OP/ED 匹配**：有 ASS 样式名（`Opening*` / `Ending*` / `Lyrics`）就按样式认歌词段，
 没有才退回固定时间窗——180s 的窗口会把开篇对白当成 OP（实测 EP001 正片 1:44 就开场）。
-整部作品只翻一次，按原文逐句复用；同一时间点有罗马音和译本两轨时，只翻源语言那条，
+整部作品只翻一次，按原文逐句复用；同一时间点有罗马音和译本两轨时，只翻源语言那一轨，
 另一轨复用同一句中文。逐句表存在时，表里没命中的句子留给正常翻译，
-**不要**退回「窗口里出现最多的那句」兜底——那会把整段歌词换成一句（实测 ED 六行全变成
-同一句台词）。canonical 兜底只用于完全没有逐句表的旧数据。
+**不要**退回「窗口里出现最多的那句」保底——那会把整段歌词换成一句（实测 ED 六行全变成
+同一句台词）。canonical 保底只用于完全没有逐句表的旧数据。
 
 **旧稿要不要重翻**：先量再决定。
 
@@ -577,14 +577,14 @@ python "<scripts>/eval/retranslate_decision.py" \
   --zh-dir "<旧译文>" --source-dir "<源字幕>" --report "data/reports/decision.json"
 ```
 
-判定标准与三档结论见上方「接手已有字幕：先量再决定」，这里只换成 ru 的源目录。
+判定标准与三档结论见「接手已有字幕：先量再决定」一节；ru 项目只换源目录。
 ru 项目的残留信号看西里尔；旧稿若同时有 20% 以上的空格断句，基本可以直接判重译。
 
 翻译项目**必须先准备 `temp/noun_mappings.json`**（ja→zh 幻觉控制表），否则专名翻译不一致。
 
 生成方式（任选其一）：
 - **推荐**：新专名流程导出 —— `apply_map.py --emit-mappings <out> --merge-existing temp/noun_mappings.json`
-  （见上方「专名审查（AI 驱动）」；逐集翻译→提取→聚合→应用→导出，映射随语料自动累积）
+  （见「专名审查（AI 驱动）」一节；逐集翻译→提取→聚合→应用→导出，映射随语料自动累积）
 - 或 AI 直接编写/增补该 JSON
 
 🚨 **映射完整性检查 — 翻译前必做**：确认日语源中实际出现的书写形式都在 mappings 中有对应条目。
@@ -711,7 +711,7 @@ python "<scripts-dir>/fix/oped_region.py" "<中文目录>" \
 要点：
 
 - **同一部片子 OP/ED 的曲子通常每集一样**（换的只是画面），所以音频互相关分数会到
-  0.93–1.00；分数掉到 0.5 以下说明换曲/换剪辑/没有这一段，工具记 `null`，别硬套。
+  0.93–1.00；分数掉到 0.5 以下说明换曲/换剪辑/没有对应片段，工具记 `null`，别硬套。
 - `--frames-dir` 抽的是 start/mid/end 三帧，专门给「画面复核」用；片头落点应当是
   报幕卡或标题，片尾应当是人员名单/结尾画。
 - 定本歌词按**行字数**分配时长（不是按 ASR 的 cue 边界——那些块长能从 1 秒跳到 16 秒）。

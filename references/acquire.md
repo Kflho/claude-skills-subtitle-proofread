@@ -50,7 +50,7 @@ token 只存在 Bili23 自己的配置里，本 skill 不复制、不打印。
 ```
 
 解析结果是 `<root>/<category>/<KIND>/<系列名>`，`categories` 留空串表示种类目录
-直接挂在根下。每段都按磁盘上的真实大小写匹配，所以 `TV` / `tv` 混用不用改配置。
+直接放在根下。每段都按磁盘上的真实大小写匹配，所以 `TV` / `tv` 混用不用改配置。
 
 **根目录要先问用户，不要猜。** 换机器时用 `--discover` 扫出来再让用户确认：
 
@@ -121,7 +121,7 @@ python scripts/acquire/_patch_bili_config.py <config.json 备份路径>   # 4 �
 并发仍然值得开：单集排队时间变短、掉线重试更稳，但别指望线性提速。
 
 > ⚠️ **绝对不要用 PowerShell 的 `Set-Content -Encoding UTF8` 改 Bili23 配置**：
-> 它会写 UTF-8 BOM，而 Bili23 用 orjson 读配置，BOM 直接报
+> PowerShell 会写 UTF-8 BOM，而 Bili23 用 orjson 读配置，BOM 直接报
 > `UTF-8 byte order mark (BOM) is not supported`，然后当成旧版配置「修补」，
 > **把 Cookie、MCP token、下载目录一起重置成默认值**。
 > 要改就用 `_patch_bili_config.py`（按字节改写、保持无 BOM），并用 python 读写。
@@ -178,7 +178,7 @@ python scripts/acquire/bili_subs.py --bvid BV... --project "<项目根>"
 
 ## 8. 与 pipeline 的衔接
 
-1. `bili23.py download ... --media-type ... ` 落到库目录；
+1. `bili23.py download ... --media-type ... ` 写进库目录；
 2. 视频留在库里，`--video-dir` 指向它，**不复制进项目**；
 3. 参考字幕进 `bin/reference_docs/参考字幕/`，转写在 `data/ja/`，译文在 `data/zh/`；
 4. 正常跑 `run_all.py` / `translate_srt.py` / `video_to_zh.py`。

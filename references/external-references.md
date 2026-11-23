@@ -62,7 +62,7 @@ python scripts/acquire/bili_meta.py --bvid BV... --out bin/reference_docs/bili_m
 2. 名字与招式 → `data/glossaries/<series>.series.json`（扁平 ja→zh）；
 3. 读音 → 同目录 `.meta.json` 的 `readings` + `canonical_ja`；
 4. 歌词 → `.meta.json` 的 `op_map`（逐句原文→译文），交给 `oped_fixer` /
-   `context_review --mode oped` 统一；没有逐句表就别用「窗口里最多的一句」兜底；
+   `context_review --mode oped` 统一；没有逐句表就别用「窗口里最多的一句」保底；
 5. 集号映射 → 项目 `CLAUDE.md`（别只放在脑子里）；
 6. 跑 ASR 前做一次「映射完整性检查」：源里出现的书写形式是否都有条目。
 

@@ -94,7 +94,7 @@ python scripts/lib/projects_registry.py       # 看登记表（--project <dir> �
 ```
 
 没有任何配置的项目文件夹照样能被发现（标记是 `CLAUDE.md`），此时身份退回文件夹名，
-总账把它标成「(未登记)」——正常流程应当补登记。视频目录的兜底顺序：
+总账把它标成「(未登记)」——正常流程应当补登记。视频目录的选取顺序：
 登记表 `video_dir` → 库规则推导 → `CLAUDE.md` 里记过的真实目录 → 项目根 → 同名模糊匹配，
 `video_source` 字段写明是哪一条给出的答案。
 
@@ -118,7 +118,7 @@ Bili23 的 `download` 现在会：
 1. 读 `--download-dir`；
 2. 读登记表里该项目 `bili23.download_dir`；
 3. 用 `--media-type` + `--series` 按 `paths.media` 推出目录；
-4. 读 `local.json` 的 `paths.bili23_download_dir`（全局兜底）；
+4. 读 `local.json` 的 `paths.bili23_download_dir`（全局默认）；
 5. 都没有 → **直接报错，要求先问用户**，不会猜、不会沿用上一项目。
 
 ## 4. 先问用户，再写配置
@@ -135,9 +135,9 @@ python scripts/acquire/bili23.py set-download-path "<dir>" --project "<项目根
 
 `set-download-path` 会同时：
 
-- 改 Bili23 的 `Download.download_path`（MCP 实际使用这个）；
+- 改 Bili23 的 `Download.download_path`（MCP 实际使用这一项）；
 - 写 `projects_registry.json` 里该项目的 `bili23.download_dir`（键 = 项目文件夹名）；
-- 若用 `--scope global`，写 `local.json` 的全局兜底。
+- 若用 `--scope global`，写 `local.json` 的全局默认值。
 
 > 改 Bili23 的 `config.json` **只能用 python / `_patch_bili_config.py`**（无 BOM）。
 > PowerShell 的 `Set-Content -Encoding UTF8` 会带 BOM，orjson 读不了，

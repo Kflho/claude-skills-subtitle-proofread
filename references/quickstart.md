@@ -57,7 +57,7 @@ python scripts/video_to_zh.py \
 
 > **这不是原有完整流程的替代品。** `video_to_zh.py` 只做 A（转写）+ C（翻译）的快捷粗剪；
 > 原有的 B（专名审查）、D（`auto_translate` / `oped_fixer` / `polish_zh`）仍在
-> [workflows.md §5](workflows.md#场景-5完整流程视频--成品中文)。要交付成品，走那条 A–D。
+> [workflows.md §5](workflows.md#场景-5完整流程视频--成品中文)。要交付成品，走 A–D 那套流程。
 
 ### 视频直出选哪条？
 

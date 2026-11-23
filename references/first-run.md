@@ -132,7 +132,7 @@ print(json.dumps(report, ensure_ascii=False, indent=2))
 > **方案 3：openai-whisper（Python — pip 安装）**
 > ```bash
 > pip install openai-whisper
-> # 模型自动下载到 ~/.cache/whisper/
+> # 模型自动下载到 $HOME/.cache/whisper/
 > ```
 >
 > 安装完成后重新运行初始化。
@@ -532,7 +532,7 @@ else:
 >
 > CLAUDE.md 只写占位符（文档用途）：
 > ```bash
-> export LLM_API_KEY=''   # 实际 key 在 ~/.claude/settings.json
+> export LLM_API_KEY=''   # 实际 key 在 $HOME/.claude/settings.json
 > ```
 
 写入 settings.json 后，当前 session 立即生效，无需手动 export。验证：
@@ -632,7 +632,7 @@ else:
 
 向用户提问：
 
-> 你是这个 skill 的开发者/维护者吗？（即需要修改脚本、改进 skill 本身）
+> 你是本 skill 的开发者/维护者吗？（即需要修改脚本、改进 skill 本身）
 >
 > - **是** → 开启 Git 自动备份 + 加载维护规则
 > - **否** → 跳过（推荐）
