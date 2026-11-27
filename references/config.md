@@ -158,7 +158,7 @@ python scripts/config/audit.py --skill <skill-dir> [--project <project-dir>]
   `style`）？有就搬到 `projects_registry.json`；
 - 媒体库根目录是否被写进了 `SKILL.md` / `references/*.md`？写了就是从 `local.json`
   回退成硬编码，必须删；
-- 相对仓库路径（`scripts/...`、`rules/...`）可以提交；绝对本机路径不行。
+- 相对仓库路径（`scripts/`、`rules/` 开头的相对路径）可以提交；绝对本机路径不行。
 
 ## 6 输出目录：项目内按二元目录分层
 

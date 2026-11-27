@@ -37,6 +37,7 @@ description: 字幕任务统一入口：调研 → 资源获取 → 转录打轴
 | 配置 / 项目登记 | [references/config.md](references/config.md) | local.json、projects_registry.json |
 | 排错 | [references/troubleshooting.md](references/troubleshooting.md) | 报错、结果不对、静默失败 |
 | AI 介入点 | [references/interventions.md](references/interventions.md) | 每个 🤖 点怎么判、怎么问 |
+| 译文用词、语体、去 AI 味 | `kf-standard` 的 `<kf-standard>/references/writing.md`；词表与 AI 味检查见 `kf-proposal-exports` 的 `<kf-proposal>/references/text-quality.md` | 译文读起来不像中文、口播味重、译名两套 |
 | 开发 / 维护本 skill | [references/development.md](references/development.md) | 改脚本、改文档、加能力、发版 |
 
 ## 能力边界

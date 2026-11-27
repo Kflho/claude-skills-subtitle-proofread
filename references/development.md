@@ -44,7 +44,7 @@ python scripts/capabilities.py --check    # 入口、文档、触发词任一缺
 
 - 本机路径与密钥只写 `local.json`（gitignored）；`projects_registry.json` /
   `projects_index.json` 同样不入库；
-- 提交前跑隐私扫描（`kf-personal-service` 的 `scripts/privacy/scan.py`）与 `check_files`；
+- 提交前跑隐私扫描（`kf-personal-development` 的 `<kf-dev>/scripts/privacy/scan.py`）与 `check_files`；
 - 发布走 `kf-personal-development` 的 `scripts/repo/release.py verify`，不手推；
 - junction 模式改完立即生效：`python scripts/harness/sync_skill.py --link`；
 - 跨机同时开发先定写方，通信与锁走 `kf-personal-service` 的 relay。

@@ -1,0 +1,10 @@
+{
+  "allow": [
+    "d:/video/...",
+    "d:/video/animation",
+    "d:/software/video/whisper-cublas",
+    "d:/x/",
+    "c:/tmp/",
+    "c:/subs/"
+  ]
+}
