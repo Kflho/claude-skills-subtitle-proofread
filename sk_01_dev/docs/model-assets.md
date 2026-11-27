@@ -167,7 +167,7 @@ HF CDN 在本机很慢（~0.1–0.7 MB/s，常卡住）；ModelScope 可到 2–
 ## 8. 新会话检查清单
 
 1. 先读本页，确认 `models/` 路径存在；**不要重新下载**。
-2. FireRedVAD 用 `.venv-qwen`，跑一次 `hello_zh.wav` 验证 import/权重。
+2. FireRedVAD 用 `.venv-qwen`，执行一次 `hello_zh.wav` 验证 import/权重。
 3. 说话人/VibeVoice 已删除；不要再下载。
 4. 所有模型只通过 `docs/adr/011-technology-integration-map.md` 的接缝接入。
 5. Whisper 系不下载、不测试。

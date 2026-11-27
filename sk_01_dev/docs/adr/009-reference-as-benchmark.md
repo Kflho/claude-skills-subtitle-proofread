@@ -12,7 +12,7 @@
 1. **参考字幕只用于打分**：`eval/` 下的评测脚本只读，不写回 manifest、ASR JSON、
    `lib/config.py` 或任何参数文件。参数来源必须是音频/ASR 自身证据或明确 prior。
 2. **dev/test 冻结**：EP001 = dev（早期已看过指标，只做冒烟）；EP002/003 = test。
-   test 只在改动冻结后跑一次；单 split 的 before/after 原样记录。
+   test 只在改动冻结后执行一次；单 split 的 before/after 原样记录。
 3. **评测器分层**：
    - `diagnose_timeline.py`：无参考，检查 token/segment 时间轴健康度；
    - `episode_benchmark.py`：主故事窗口的 CER + cue 对齐 + 计划修复安全性，只读；

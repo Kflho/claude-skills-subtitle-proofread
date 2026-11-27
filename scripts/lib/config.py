@@ -202,7 +202,7 @@ FIX_REGION_MIN_GAP_S  = 3.0     # 语音超出 cue 覆盖多少才算 partial_ov
 FIX_REGION_MAX_GAP_S  = 45.0    # 超过这个时长的语音段跳过（OP/ED 歌）
 GAP_SEC               = 5.0     # 无上下文 cue 时，修复区向两侧扩多少
 
-# ⚠️ OP/ED 边界：曾经按「OP 最长 180s」写死，而本作 OP 只有 82s —— 预替换
+# ⚠️ OP/ED 边界：曾经按「OP 最长 180s」硬编码，而本作 OP 只有 82s —— 预替换
 # 的窗口一路吃进正片，单集 45 条对白被歌词覆写且不报警。**不要**再用固定
 # 时间窗判定 OP/ED；用 oped_detect 的相似度/重复度信号。
 OP_BOUNDARY_SEC       = 180

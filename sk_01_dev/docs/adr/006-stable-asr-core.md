@@ -15,7 +15,7 @@
 | 路由 | `scripts/lib/asr/router.py` | 极低 | 只依赖 registry + 契约；不 import 任何模型 |
 | 适配器 | `scripts/lib/asr/adapters/<name>.py` | 高 | 每个模型一个文件；暴露 `NAME/KIND/INFO/build(config)`；实现 `ASRBackend` |
 | Worker | `scripts/asr/qwen3_worker.py` | 中 | 引擎自己的进程；协议固定 `ping/load/transcribe/align/shutdown` |
-| CLI/评测 | `scripts/asr/qwen3_transcribe.py`、`scripts/eval/asr_eval.py` | 低 | `--engine` 从 registry 动态取值，不写死模型名 |
+| CLI/评测 | `scripts/asr/qwen3_transcribe.py`、`scripts/eval/asr_eval.py` | 低 | `--engine` 从 registry 动态取值，不硬编码模型名 |
 
 **新增模型的步骤**（不改 core）：
 
@@ -39,7 +39,7 @@
 - ✅ 评测脚本对引擎无感，同一 manifest 可跑任意 adapter
 - ⚠️ 需要维护 `ASRConfig` 的通用字段；模型特有参数放 `options`
 - ⚠️ 自动发现会 import 所有 adapter 模块；adapter 顶层不得 import torch/大依赖
-- ⚠️ `--engine` 从写死 choices 改为 registry 校验；错误信息需列可用引擎
+- ⚠️ `--engine` 从硬编码 choices 改为 registry 校验；错误信息需列可用引擎
 
 ## Alternatives rejected
 

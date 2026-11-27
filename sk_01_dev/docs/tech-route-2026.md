@@ -109,7 +109,7 @@ cue 文本替换 ──► 翻译 ──► 人工审查
 
 - `whisper_pipeline.py:match_whisper_to_cues()` 的 ±3s 宽窗、`align_and_fix()` 的 0.3/0.5 覆盖率，都是没有 FA 时的补丁。它们能工作，但无法给出字符级边界，也无法区分「同时间段有两句」。
 - `dev/technical-details.md` 把 `avg_logprob` / `no_speech_prob` / `compression_ratio` 当作置信度核心。这套指标在 Qwen3-ASR 上不存在；迁移时必须重建置信度体系，不能把阈值照搬。
-- `whisper_spot_fix.py` 的「短窗口让 VAD 更准」是绕路：真正需要的是**全局对齐**，而不是对每个可疑片段再跑一次 ASR。
+- `whisper_spot_fix.py` 的「短窗口让 VAD 更准」是绕路：真正需要的是**全局对齐**，而不是对每个可疑片段再执行一次 ASR。
 
 ### 1.4 「过时」的准确定义
 
@@ -757,7 +757,7 @@ Qwen3-ASR 不暴露 logprob，所以用「多信号投票」：
 | 路由 | `lib/asr/router.py` | 极低 | 只依赖 registry + 契约，不 import 模型 |
 | 适配器 | `lib/asr/adapters/<name>.py` | 高 | 每个模型一个文件；`build(config, **kwargs)` 返回 backend |
 | Worker | `scripts/asr/qwen3_worker.py` | 中 | 引擎自己的进程；协议固定 `ping/load/transcribe/align/shutdown` |
-| CLI/评测 | `scripts/asr/qwen3_transcribe.py`、`scripts/eval/asr_eval.py` | 低 | `--engine` 从 registry 动态取值，不写死模型名 |
+| CLI/评测 | `scripts/asr/qwen3_transcribe.py`、`scripts/eval/asr_eval.py` | 低 | `--engine` 从 registry 动态取值，不硬编码模型名 |
 
 新增模型 5 步：
 

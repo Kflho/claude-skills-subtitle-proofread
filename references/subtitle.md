@@ -243,7 +243,7 @@ python scripts/run_all.py --asr qwen3 --audio-hints
 | 旋钮 | 建议 | 原因 |
 |---|---|---|
 | `--chunk-sec` | **20** | 60 秒块在旧片源上会出现 50 秒长 cue、对齐塌到块尾；20 秒 ≈ 16 条/集 0 时长，最长 cue 16 秒 |
-| `--max-batch` | **8** | worker 旧版把 `max_inference_batch_size` 写死成 1，GPU 只有 24% 利用率 |
+| `--max-batch` | **8** | worker 旧版把 `max_inference_batch_size` 硬编码成 1，GPU 只有 24% 利用率 |
 | token 预算（自动） | 块长×14 | 一块 20 秒给 ~280 token；不设上限时脏块会一直生成到 1024，EP002 单集从 4 分钟变 30+ 分钟 |
 
 - `--max-batch` 是每次 `generate()` 的块数，8 块 × 20 秒 ≈ 160 秒音频一批；显存 16 GB 上占 ~13 GB，想更稳降到 4；

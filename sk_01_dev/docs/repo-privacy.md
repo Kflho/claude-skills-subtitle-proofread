@@ -24,7 +24,7 @@
 
 ## 2. 本仓库实际踩到的两类泄露
 
-1. **机器路径**：`sk_01_dev/README.md`、`docs/fireredvad-status.md` 里写死了
+1. **机器路径**：`sk_01_dev/README.md`、`docs/fireredvad-status.md` 里硬编码了
    本机绝对路径（`%USERPROFILE%` / 仓库盘符；已改为占位符与同步副本说明）。
 2. **本机配置**：harness 副本的 `local.json` 含 API key。仓库 `.gitignore`
    忽略它，`sync_skill.py` 不复制它，`init_local.py --check` 输出脱敏。
@@ -38,7 +38,7 @@
 | 同步 | `sync_skill.py` 只复制运行时白名单，排除 `local.json`、`models/`、`.venv-qwen` |
 | 初始化 | `init_local.py` 写 `local.json`，`--check` 脱敏打印 |
 
-历史泄露没扫描（`gitleaks detect --source . --log-opts="--all"` 可在发布前跑一次）。
+历史泄露没扫描（`gitleaks detect --source . --log-opts="--all"` 可在发布前执行一次）。
 
 ## 3. skills-manager 评估
 

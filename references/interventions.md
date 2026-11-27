@@ -158,7 +158,7 @@ AI **可以修改任意一句**（或两者）以使整体通顺：
 # 每条 fragment 单独提取+转录（~1.5s/条，模型加载 1.1s + 推理 0.4s）
 ffmpeg -y -i "视频.mkv" -ss {start} -to {end} -vn -ac 1 -ar 16000 temp/frag_{N}.wav
 "$WHISPER_CLI" -m "$WHISPER_MODEL" -l ja -f temp/frag_{N}.wav --no-timestamps
-# 不确定时换备用模型再跑一次
+# 不确定时换备用模型再执行一次
 "$WHISPER_CLI" -m "$WHISPER_RETRY_MODEL" -l ja -f temp/frag_{N}.wav --no-timestamps
 ```
 

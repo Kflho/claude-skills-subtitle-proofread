@@ -14,7 +14,7 @@ POSITIVE = [
     ('俺也不知道', 'dialect'),
     ('老铁，没毛病', 'modern'),
     ('我们学校明天放假', 'anachronism'),
-    ('搞定这单生意', 'modern'),
+    ('完成这单生意', 'modern'),
     ('你真得瑟', 'dialect'),
 ]
 NEGATIVE = [

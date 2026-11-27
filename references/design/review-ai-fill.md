@@ -91,7 +91,7 @@ translation 条目一律 `route=text`（`glossary_miss`/`too_long` 等同理）�
 | `MIN/MAX_DURATION_S=0.3/12.0` | 时长下限/上限 | 字幕可读性下限 0.3 s；12 s 已超过两行字幕的生理上限 | `test_review_apply` |
 | 长度 `2.2×+8` / `0.35×`（translation 下限 1 字） | 替换长度护栏 | 旧包碎片灾难；translation 允许单字（`ウン`→`嗯`） | `test_short_translation_may_be_one_character` |
 | kana 检查（translation） | 替换不得含假名 | 这一类失败就是残留假名 | `test_translation_rewrite_with_kana_is_rejected` |
-| `_has_japanese`（asr_repair） | 替换不得丢日文 | 防止模型顺手翻译 | `test_fill_rejects_unsafe_decisions_and_falls_back_to_keep` |
+| `_has_japanese`（asr_repair） | 替换不得丢日文 | 防止模型一并翻译 | `test_fill_rejects_unsafe_decisions_and_falls_back_to_keep` |
 | `ROUTE_ACTIONS` | route×动作白名单 | 动作越界=证据不支持 | `test_action_outside_the_route_is_rejected` |
 | `MAX_BATCH_ITEMS=40` / `MAX_BATCH_CHARS=4000` | 批量上限 | 外部协议同量级（40 条/4000 字）；防单批 token 失控 | `test_batches_respect_the_character_budget` |
 | `MAX_RETRIES=1` + 缺 ID 补问 | ID 完整性 | 模型漏条会让其它条静默不动；补问一次比整批重跑便宜 | `test_missing_ids_are_retried_once` |
@@ -174,7 +174,7 @@ python scripts\eval\review_translation_eval.py `
 
 `review_fill_eval.py`，干净 CC 做金标，只跑自动修 vs 自动修+复核（数字见 §5 表）。
 
-### 6.3 test split（冻结配置，只跑一次）
+### 6.3 test split（冻结配置，只执行一次）
 
 | 集 | 缺口 | 自动 | 送模型 | 填充 | 拒绝 | 应用 |
 |---|---:|---:|---:|---:|---:|---:|

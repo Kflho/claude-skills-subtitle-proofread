@@ -188,7 +188,7 @@ python scripts\eval\diagnose_timeline.py --asr-json temp\asr\digimon_ep002_main.
 - **主 1｜新技术落地**：`run_all --asr qwen3` 在真实字幕目录跑通一集（含失败回退、报告/备份、
   ASS 策略），验证默认切换所需的开关和回滚；先保证“换上去能用”。
 - **主 2｜测试标准闭环**：把三集基准收成一条 gate 命令：`CC 边界标准 → P50/P90/±100ms/
-  CER/覆盖率`，读基线、给通过/回退判定；test 只在 release candidate 跑一次。
+  CER/覆盖率`，读基线、给通过/回退判定；test 只在 release candidate 执行一次。
 - **次｜精度迭代**：起点偏差（0.37–0.40 s）、FA 空洞/塌缩、覆盖率、chunk 45/60/90、
   Whisper 文本 + Qwen3-FA 混合——主 1/2 稳定后按证据逐个做，一次只动一个变量。
 - 细则与负结果保留在 `eval/protocol.md` §2.1/§3.1，不再在会话里反复取证。
@@ -763,7 +763,7 @@ P2 align：match 55/286，garbled 115，missing_asr 74，no_speech 40
 
 ### 三集参考基准（2026-10-18 第六/七轮；EP01=dev，EP02/03=test）
 
-**协议**：`eval/protocol.md`、ADR-009。参考字幕只打分，不回流参数；test 冻结后只跑一次。
+**协议**：`eval/protocol.md`、ADR-009。参考字幕只打分，不回流参数；test 冻结后只执行一次。
 **素材**：EP00X 视频（1386 s）；主故事窗口 `[95,1240]`；清洁 CC `temp/references/digimon/EP00X.main.srt`。
 **ASR**：Qwen3-ASR-1.7B + FA-0.6B，60 s 自切，缓存 `temp/asr/digimon_ep00X_main.qwen3.json`。
 **用户人工复核（第七轮）**：视频/CC **没有真实偏移**；此前 -0.37/-0.40 s 是 ASR 起点 vs CC
@@ -1233,7 +1233,7 @@ python scripts\run_all.py --lang ja --target-dir temp\proj_asr --input-dir subs 
 - **ASS 行重建不要复用 `_raw_parts`**：`build_dialogue_line` 只在 `_raw_parts` 上刷新 text；改 Name/Style 等字段前必须 `pop('_raw_parts')`，否则修改被静默丢弃（`replace_name` 就是这样失效的）。
 - **单句 segments 用 ASR 原文**：Qwen3-ASR 的句内标点/空格不在 aligner token 里，单段时直接沿用原文；多段才按 token 分配。
 - **`dirname()` 可能为空**：`separate_vocals` 等“默认同输入目录”的函数要写 `dirname(...) or '.'`；否则裸相对文件名会触发 `os.makedirs('')`。
-- **旧入口/死代码先标记不删**：`auto_classify`、`auto_clean_glossary`、`_write_ai_review_json`、`--mode` 已确认不在主链，删除属产品决策；本轮只在 test-plan 记录，不顺手改行为。
+- **旧入口/死代码先标记不删**：`auto_classify`、`auto_clean_glossary`、`_write_ai_review_json`、`--mode` 已确认不在主链，删除属产品决策；本轮只在 test-plan 记录，不一并改行为。
 - **金标来源规则**：机翻 / ASR / LLM 润色后的字幕都不能当参考。**验收作品：数码宝贝**（`<video-root>\数码宝贝`，见 `eval/materials.md`）；日文 CC 54 集已到位（配信闭合字幕，需清洁标签/振假名/♪），视频仅 EP01，**还缺至少 2 集视频**。中文字幕只能做非金标冒烟；莎莉/阿童木只保留机制回放。
 - **进程隔离**：主环境不 import torch/qwen-asr；worker JSON lines。
 - **Windows**：vLLM 不支持；走 Transformers 后端 + SDPA。

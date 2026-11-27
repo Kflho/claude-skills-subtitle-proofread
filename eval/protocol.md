@@ -2,7 +2,7 @@
 
 > 目的：真实工作时不一定有日语参考字幕；因此参考字幕只能用来**打分**，
 > 不能用来反推阈值、规则或 prompt。任何改动必须先在 dev 上完成，
-> test 集冻结，按 release candidate 跑一次。
+> test 集冻结，按 release candidate 执行一次。
 >
 > **2026-10-18 用户决定**：日语 CC 的边界很准，**直接作为边界测试标准**，
 > 不再另建人工金标。P50/P90 按 raw（不做偏移修正）直接判定。
@@ -91,7 +91,7 @@
 1. 写清“这条启发式原来凭什么、现在换成什么证据”；
 2. 在 dev 上跑 `episode_benchmark.py`，记录 before/after；
 3. 补测试：锁机制/行为，不锁 dev 分数；
-4. 冻结代码和 ASR 缓存，跑一次 test；
+4. 冻结代码和 ASR 缓存，执行一次 test；
 5. 把 before/after 原样写进 `docs/tech-route-progress.md`，注明 split；
 6. 若 test 退化，回退并在文档里保留失败记录。
 

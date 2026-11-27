@@ -94,7 +94,7 @@ python scripts\eval\release_gate.py `
 - 与冻结基线比：P50 +20 ms、可靠 P90 +50 ms、CER +0.01、字符覆盖 −0.02 以内算正常；
 - 退出码 0/1 可直接接 CI；`--update-baseline` 是显式的基线冻结动作。
 
-对比时只看同一 split、同一 ASR 缓存；dev 看方向，test 冻结后跑一次。
+对比时只看同一 split、同一 ASR 缓存；dev 看方向，test 冻结后执行一次。
 
 报告第八轮起还带三块测量有效性信息（读法见 `eval/protocol.md` §2.1）：
 
